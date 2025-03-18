@@ -1,6 +1,47 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+<div align="center">
 
-## Getting Started
+# 🏗️ IFC Flow Map
+
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
+[![Next.js](https://img.shields.io/badge/Next.js-14.2.0-black?logo=next.js)](https://nextjs.org/)
+[![React](https://img.shields.io/badge/React-19.0.0-61DAFB?logo=react)](https://reactjs.org/)
+[![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-3.3.0-38B2AC?logo=tailwind-css)](https://tailwindcss.com/)
+[![React Flow](https://img.shields.io/badge/React_Flow-11.10.4-ff0072)](https://reactflow.dev/)
+
+<p>A visual node-based tool for working with Industry Foundation Classes (IFC) files</p>
+
+</div>
+
+---
+
+## 📋 Overview
+
+IFC Flow Map provides a graphical interface for viewing, filtering, transforming, and analyzing Building Information Modeling (BIM) data through an intuitive workflow system. Create complex data manipulation pipelines with a simple drag-and-drop interface.
+
+## ✨ Features
+
+- 🔄 **Visual Node-Based Interface** - Create workflows by connecting nodes in a flow diagram
+- 🏢 **IFC File Support** - Load and analyze IFC files for BIM data
+- 🧩 **Multiple Node Types**:
+  - 📁 **IFC Node** - Import IFC files
+  - 📐 **Geometry Node** - Extract geometric information
+  - 🔍 **Filter Node** - Filter elements based on properties
+  - 🔄 **Transform Node** - Apply transformations to elements
+  - 👁️ **Viewer Node** - Visualize 3D models
+  - 📏 **Quantity Node** - Extract quantity information
+  - 🏷️ **Property Node** - Work with element properties
+  - 🔖 **Classification Node** - Manage element classifications
+  - 📍 **Spatial Node** - Perform spatial queries
+  - 💾 **Export Node** - Export data in various formats
+  - 🔗 **Relationship Node** - Query element relationships
+  - 📊 **Analysis Node** - Perform analyses like clash detection
+  - 👀 **Watch Node** - Monitor element values
+  - ⚙️ **Parameter Node** - Define workflow parameters
+- 💾 **Workflow Storage** - Save and load workflows
+- ⚡ **Real-time Execution** - Execute workflows and see results immediately
+- ⌨️ **Keyboard Shortcuts** - Efficient workflow creation with keyboard shortcuts
+
+## 🚀 Getting Started
 
 First, run the development server:
 
@@ -14,23 +55,43 @@ pnpm dev
 bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000) with your browser to see the application.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## 📖 How to Use
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+1. **Create a New Workflow** - Start with a blank canvas
+2. **Add Nodes** - Drag and drop nodes from the sidebar
+3. **Connect Nodes** - Create connections between node inputs and outputs
+4. **Load IFC Files** - Use an IFC node to import your BIM data
+5. **Configure Node Properties** - Set properties in the properties panel
+6. **Execute Workflow** - Run the workflow to see results
+7. **Save Your Workflow** - Save workflows for later use
 
-## Learn More
 
-To learn more about Next.js, take a look at the following resources:
+## 📜 License
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+This project is licensed under the GNU Affero General Public License v3.0 (AGPL-3.0). This means:
 
-## Deploy on Vercel
+- You are free to use, modify, and distribute this software
+- If you modify the software, you must distribute your modifications under the same license
+- If you run a modified version of this software on a server that others can interact with, you must make the source code available to them
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+See the [GNU AGPL-3.0 License](https://www.gnu.org/licenses/agpl-3.0.en.html) for more details.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## 📚 Learn More
+
+To learn more about the technologies used:
+
+- [Next.js Documentation](https://nextjs.org/docs)
+- [React Flow Documentation](https://reactflow.dev/docs/introduction/)
+- [Radix UI Documentation](https://www.radix-ui.com/docs/primitives/overview/introduction)
+
+## 🚀 Deployment
+
+Deployed on [Vercel](https://vercel.com/), the platform from the creators of Next.js.
+
+[![Deployed on Vercel](https://img.shields.io/badge/Deployed_on-Vercel-black?logo=vercel)](https://vercel.com/)
+
+Check out the [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
