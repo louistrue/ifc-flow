@@ -1,3 +1,5 @@
+// Export all IFC utilities from a single file
+// Using absolute imports to avoid path resolution issues
 export * from "@/lib/ifc/ifc-loader"
 export * from "@/lib/ifc/geometry-utils"
 export * from "@/lib/ifc/filter-utils"

@@ -1,3 +1,6 @@
+// This is a placeholder for the actual IfcOpenShell integration
+// In a real implementation, this would use web-ifc or a similar library
+
 export interface IfcElement {
   id: string
   type: string

@@ -21,7 +21,7 @@ import { SaveWorkflowDialog } from "@/components/dialogs/save-workflow-dialog"
 import { SettingsDialog } from "@/components/dialogs/settings-dialog"
 import { HelpDialog } from "@/components/dialogs/help-dialog"
 import { WorkflowLibrary } from "@/components/workflow-library"
-import { toast } from "sonner"
+import { useToast } from "@/hooks/use-toast"
 import type { Workflow } from "@/lib/workflow-storage"
 import { formatKeyCombination, useKeyboardShortcuts } from "@/lib/keyboard-shortcuts"
 
@@ -54,6 +54,7 @@ export function AppMenubar({
   const [workflowLibraryOpen, setWorkflowLibraryOpen] = useState(false)
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false)
   const [helpDialogOpen, setHelpDialogOpen] = useState(false)
+  const { toast } = useToast()
   const { shortcuts } = useKeyboardShortcuts()
 
   // Find shortcut by ID
@@ -70,13 +71,15 @@ export function AppMenubar({
   const handleOpenFile = (file) => {
     onOpenFile(file)
     setOpenFileDialogOpen(false)
-    toast.success("File opened", {
+    toast({
+      title: "File opened",
       description: `Successfully opened ${file.name}`,
     })
   }
 
   const handleSaveToLibrary = (workflow: Workflow) => {
-    toast.success("Workflow saved to library", {
+    toast({
+      title: "Workflow saved to library",
       description: `${workflow.name} has been saved to your workflow library`,
     })
   }
@@ -95,14 +98,16 @@ export function AppMenubar({
     document.body.removeChild(a)
     URL.revokeObjectURL(url)
 
-    toast.success("Workflow saved locally", {
+    toast({
+      title: "Workflow saved locally",
       description: `${workflow.name} has been saved to your device`,
     })
   }
 
   const handleLoadWorkflow = (workflow: Workflow) => {
     onLoadWorkflow(workflow)
-    toast.success("Workflow loaded", {
+    toast({
+      title: "Workflow loaded",
       description: `${workflow.name} has been loaded successfully`,
     })
   }
@@ -110,13 +115,15 @@ export function AppMenubar({
   const handleRunWorkflow = () => {
     if (isRunning) {
       setIsRunning(false)
-      toast.info("Execution paused", {
+      toast({
+        title: "Execution paused",
         description: "Workflow execution has been paused",
       })
     } else {
       setIsRunning(true)
       onRunWorkflow()
-      toast.success("Execution started", {
+      toast({
+        title: "Execution started",
         description: "Workflow execution has started",
       })
     }
@@ -125,8 +132,10 @@ export function AppMenubar({
   const handleUndo = () => {
     if (canUndo) {
       onUndo()
-      toast.info("Undo", {
+      toast({
+        title: "Undo",
         description: "Last action undone",
+        variant: "default",
       })
     }
   }
@@ -134,8 +143,10 @@ export function AppMenubar({
   const handleRedo = () => {
     if (canRedo) {
       onRedo()
-      toast.info("Redo", {
+      toast({
+        title: "Redo",
         description: "Action redone",
+        variant: "default",
       })
     }
   }
@@ -145,7 +156,8 @@ export function AppMenubar({
     if (reactFlowInstance) {
       const zoom = reactFlowInstance.getZoom()
       reactFlowInstance.zoomTo(Math.min(zoom + 0.2, 2))
-      toast.info("Zoom In", {
+      toast({
+        title: "Zoom In",
         description: "Canvas zoomed in",
       })
     }
@@ -155,7 +167,8 @@ export function AppMenubar({
     if (reactFlowInstance) {
       const zoom = reactFlowInstance.getZoom()
       reactFlowInstance.zoomTo(Math.max(zoom - 0.2, 0.2))
-      toast.info("Zoom Out", {
+      toast({
+        title: "Zoom Out",
         description: "Canvas zoomed out",
       })
     }
@@ -164,7 +177,8 @@ export function AppMenubar({
   const handleFitView = () => {
     if (reactFlowInstance) {
       reactFlowInstance.fitView({ padding: 0.2 })
-      toast.info("Fit View", {
+      toast({
+        title: "Fit View",
         description: "Canvas adjusted to fit all nodes",
       })
     }

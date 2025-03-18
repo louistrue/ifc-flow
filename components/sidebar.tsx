@@ -30,7 +30,7 @@ import {
 } from "lucide-react"
 import { type Workflow as WorkflowType, workflowStorage } from "@/lib/workflow-storage"
 import { SaveWorkflowDialog } from "@/components/dialogs/save-workflow-dialog"
-import { toast } from "sonner"
+import { useToast } from "@/hooks/use-toast"
 
 const nodeCategories = [
   {
@@ -74,6 +74,7 @@ export function Sidebar({ onLoadWorkflow, getFlowObject }) {
   const [presets, setPresets] = useState<WorkflowType[]>([])
   const [searchQuery, setSearchQuery] = useState("")
   const [savePresetDialogOpen, setSavePresetDialogOpen] = useState(false)
+  const { toast } = useToast()
 
   // Load presets from storage
   useEffect(() => {
@@ -114,7 +115,8 @@ export function Sidebar({ onLoadWorkflow, getFlowObject }) {
       }
     })
 
-    toast.success("Preset saved", {
+    toast({
+      title: "Preset saved",
       description: `${workflow.name} has been saved to your presets`,
     })
   }
@@ -134,7 +136,8 @@ export function Sidebar({ onLoadWorkflow, getFlowObject }) {
     document.body.removeChild(a)
     URL.revokeObjectURL(url)
 
-    toast.success("Preset saved locally", {
+    toast({
+      title: "Preset saved locally",
       description: `${workflow.name} has been saved to your device`,
     })
   }

@@ -11,7 +11,7 @@ import { SettingsDialog } from "@/components/dialogs/settings-dialog"
 import { HelpDialog } from "@/components/dialogs/help-dialog"
 import { ExportDialog } from "@/components/dialogs/export-dialog"
 import { WorkflowLibrary } from "@/components/workflow-library"
-import { toast } from "sonner"
+import { useToast } from "@/hooks/use-toast"
 import type { Workflow } from "@/lib/workflow-storage"
 
 export function Toolbar({
@@ -36,11 +36,13 @@ export function Toolbar({
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false)
   const [helpDialogOpen, setHelpDialogOpen] = useState(false)
   const [exportDialogOpen, setExportDialogOpen] = useState(false)
+  const { toast } = useToast()
 
   const handleOpenFile = (file) => {
     onOpenFile(file)
     setOpenFileDialogOpen(false)
-    toast.success("File opened", {
+    toast({
+      title: "File opened",
       description: `Successfully opened ${file.name}`,
     })
   }
@@ -50,20 +52,23 @@ export function Toolbar({
     const flowData = getFlowObject()
     onSaveWorkflow(filename, flowData)
     setSaveFileDialogOpen(false)
-    toast.success("Workflow saved", {
+    toast({
+      title: "Workflow saved",
       description: `Successfully saved as ${filename}`,
     })
   }
 
   const handleSaveToLibrary = (workflow: Workflow) => {
-    toast.success("Workflow saved to library", {
+    toast({
+      title: "Workflow saved to library",
       description: `${workflow.name} has been saved to your workflow library`,
     })
   }
 
   const handleLoadWorkflow = (workflow: Workflow) => {
     onLoadWorkflow(workflow)
-    toast.success("Workflow loaded", {
+    toast({
+      title: "Workflow loaded",
       description: `${workflow.name} has been loaded successfully`,
     })
   }
@@ -71,13 +76,15 @@ export function Toolbar({
   const handleRunWorkflow = () => {
     if (isRunning) {
       setIsRunning(false)
-      toast.info("Execution paused", {
+      toast({
+        title: "Execution paused",
         description: "Workflow execution has been paused",
       })
     } else {
       setIsRunning(true)
       onRunWorkflow()
-      toast.success("Execution started", {
+      toast({
+        title: "Execution started",
         description: "Workflow execution has started",
       })
     }
@@ -86,22 +93,27 @@ export function Toolbar({
   const handleExport = (format, filename) => {
     onExportResults(format, filename)
     setExportDialogOpen(false)
-    toast.success("Export complete", {
+    toast({
+      title: "Export complete",
       description: `Results exported as ${filename}`,
     })
   }
 
   const handleUndo = () => {
     onUndo()
-    toast.info("Undo", {
+    toast({
+      title: "Undo",
       description: "Last action undone",
+      variant: "default",
     })
   }
 
   const handleRedo = () => {
     onRedo()
-    toast.info("Redo", {
+    toast({
+      title: "Redo",
       description: "Action redone",
+      variant: "default",
     })
   }
 

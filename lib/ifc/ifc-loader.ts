@@ -1,3 +1,4 @@
+// Core IFC loading functionality
 export interface IfcElement {
   id: string
   type: string
