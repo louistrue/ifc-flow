@@ -1,8 +1,8 @@
-"use client"
+"use client";
 
-import { memo } from "react"
-import { Handle, Position } from "reactflow"
-import { Download } from "lucide-react"
+import { memo } from "react";
+import { Handle, Position } from "reactflow";
+import { Download } from "lucide-react";
 
 export const ExportNode = memo(({ data, isConnectable }) => {
   return (
@@ -15,11 +15,15 @@ export const ExportNode = memo(({ data, isConnectable }) => {
         <div className="space-y-1">
           <div className="flex justify-between">
             <span>Format:</span>
-            <span className="font-medium">{data.properties?.format || "CSV"}</span>
+            <span className="font-medium">
+              {data.properties?.format || "CSV"}
+            </span>
           </div>
           <div className="flex justify-between">
             <span>File Name:</span>
-            <span className="font-medium truncate">{data.properties?.fileName || "export"}</span>
+            <span className="font-medium truncate">
+              {data.properties?.fileName || "export"}
+            </span>
           </div>
           {(data.properties?.format === "csv" ||
             data.properties?.format === "excel" ||
@@ -27,7 +31,9 @@ export const ExportNode = memo(({ data, isConnectable }) => {
           data.properties?.properties ? (
             <div className="flex justify-between">
               <span>Properties:</span>
-              <span className="font-medium truncate">{data.properties.properties}</span>
+              <span className="font-medium truncate">
+                {data.properties.properties}
+              </span>
             </div>
           ) : null}
         </div>
@@ -40,8 +46,7 @@ export const ExportNode = memo(({ data, isConnectable }) => {
         isConnectable={isConnectable}
       />
     </div>
-  )
-})
+  );
+});
 
-ExportNode.displayName = "ExportNode"
-
+ExportNode.displayName = "ExportNode";

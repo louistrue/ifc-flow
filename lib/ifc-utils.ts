@@ -1,139 +1,562 @@
-// This is a placeholder for the actual IfcOpenShell integration
-// In a real implementation, this would use web-ifc or a similar library
+// IfcOpenShell integration for IFC data processing via Pyodide web worker
+// Remove web-ifc imports as we're using pure IfcOpenShell now
 
+// Define interfaces based on IfcOpenShell structure
 export interface IfcElement {
-  id: string
-  type: string
-  properties: Record<string, any>
-  geometry?: any
+  id: string;
+  expressId: number;
+  type: string;
+  properties: Record<string, any>;
+  geometry?: any;
+  psets?: Record<string, any>;
+  qtos?: Record<string, any>;
+  propertyInfo?: {
+    name: string;
+    exists: boolean;
+    value: any;
+    psetName: string;
+  };
+  classifications?: Array<{
+    system: string;
+    code: string;
+    description: string;
+  }>;
+  transformedGeometry?: {
+    translation: [number, number, number];
+    rotation: [number, number, number];
+    scale: [number, number, number];
+  };
 }
 
 export interface IfcModel {
-  id: string
-  name: string
-  elements: IfcElement[]
+  id: string;
+  name: string;
+  file?: any;
+  schema?: string;
+  project?: {
+    GlobalId: string;
+    Name: string;
+    Description: string;
+  };
+  elementCounts?: Record<string, number>;
+  totalElements?: number;
+  elements: IfcElement[];
 }
 
-// Mock function to load an IFC file
-export async function loadIfcFile(file: File): Promise<IfcModel> {
-  // In a real implementation, this would use web-ifc to parse the IFC file
-  console.log("Loading IFC file:", file.name)
+// Global reference to the last loaded model
+let _lastLoadedModel: IfcModel | null = null;
 
-  // Return a mock model
-  return {
-    id: "mock-model",
-    name: file.name,
-    elements: [
-      {
-        id: "wall-1",
-        type: "IfcWall",
-        properties: {
-          Name: "Wall 1",
-          Material: "Concrete",
-          Level: "Level 1",
-        },
-      },
-      {
-        id: "slab-1",
-        type: "IfcSlab",
-        properties: {
-          Name: "Slab 1",
-          Material: "Concrete",
-          Level: "Level 1",
-        },
-      },
-      {
-        id: "column-1",
-        type: "IfcColumn",
-        properties: {
-          Name: "Column 1",
-          Material: "Steel",
-          Level: "Level 1",
-        },
-      },
-    ],
-  }
+// Function to get the last loaded model
+export function getLastLoadedModel(): IfcModel | null {
+  return _lastLoadedModel;
 }
 
-// Mock function to extract geometry from IFC elements
-export function extractGeometry(model: IfcModel, elementType = "all", includeOpenings = true): IfcElement[] {
-  console.log("Extracting geometry:", elementType, includeOpenings)
+// Worker management
+let ifcWorker: Worker | null = null;
+let isWorkerInitialized = false;
+let workerPromiseResolvers: Map<
+  string,
+  { resolve: Function; reject: Function }
+> = new Map();
+let workerMessageId = 0;
 
-  if (elementType === "all") {
-    return model.elements
+// Initialize the IfcOpenShell worker
+async function initIfcWorker(): Promise<Worker> {
+  if (ifcWorker !== null && isWorkerInitialized) {
+    console.log("Worker already initialized, reusing");
+    return ifcWorker;
   }
 
-  return model.elements.filter((element) => {
-    const typeMap: Record<string, string[]> = {
-      walls: ["IfcWall"],
-      slabs: ["IfcSlab", "IfcRoof"],
-      columns: ["IfcColumn"],
-      beams: ["IfcBeam"],
+  console.log("Initializing worker");
+  return new Promise((resolve, reject) => {
+    try {
+      // Create worker if it doesn't exist
+      if (!ifcWorker) {
+        console.log("Creating new worker");
+        ifcWorker = new Worker("/ifcWorker.js");
+
+        // Set up message handler
+        ifcWorker.onmessage = (e) => handleWorkerMessage(e);
+        ifcWorker.onerror = (e) => {
+          console.error("Worker error during creation:", e);
+          handleWorkerError(e);
+          reject(new Error(`Worker creation error: ${e.message}`));
+        };
+      }
+
+      // Initialize worker with a unique ID
+      const messageId = `init_${Date.now()}`;
+      console.log("Initializing worker with ID:", messageId);
+
+      // Store the resolver
+      workerPromiseResolvers.set(messageId, {
+        resolve: (worker) => {
+          console.log("Worker initialization complete");
+          resolve(worker);
+        },
+        reject: (error) => {
+          console.error("Worker initialization failed:", error);
+          reject(error);
+        },
+      });
+
+      // Send init message
+      ifcWorker.postMessage({
+        action: "init",
+        messageId,
+      });
+
+      // Add timeout for initialization
+      setTimeout(() => {
+        if (workerPromiseResolvers.has(messageId)) {
+          const error = new Error("Worker initialization timed out");
+          console.error(error);
+          workerPromiseResolvers.get(messageId)?.reject(error);
+          workerPromiseResolvers.delete(messageId);
+        }
+      }, 30000); // 30 second timeout
+    } catch (error) {
+      console.error("Error initializing worker:", error);
+      reject(error);
+    }
+  });
+}
+
+// Handle messages from the worker
+function handleWorkerMessage(event: MessageEvent) {
+  const { type, messageId, ...data } = event.data;
+
+  console.log(`Worker message received: ${type}`, { messageId });
+
+  // Handle progress updates
+  if (type === "progress") {
+    // Let these propagate through - they'll be handled by individual callbacks
+    console.log(`Progress: ${data.message} (${data.percentage}%)`);
+    return;
+  }
+
+  // Handle initialized message
+  if (type === "initialized") {
+    isWorkerInitialized = true;
+    console.log("Worker initialized successfully");
+
+    // Resolve any pending init promises
+    for (const [key, resolver] of workerPromiseResolvers.entries()) {
+      if (key.startsWith("init_")) {
+        resolver.resolve(ifcWorker);
+        workerPromiseResolvers.delete(key);
+        console.log(`Resolved init promise: ${key}`);
+        break;
+      }
+    }
+    return;
+  }
+
+  // Handle load complete
+  if (type === "loadComplete" || type === "dataExtracted") {
+    console.log(`Received ${type} message for ID ${messageId}`);
+
+    // Find and resolve the corresponding promise
+    const resolver = workerPromiseResolvers.get(messageId);
+    if (resolver) {
+      resolver.resolve(data);
+      workerPromiseResolvers.delete(messageId);
+      console.log(`Resolved promise for messageId: ${messageId}`);
+    } else {
+      console.warn(
+        `Received ${type} message but no resolver found for messageId ${messageId}`
+      );
+      console.log(
+        "Current resolvers:",
+        Array.from(workerPromiseResolvers.keys())
+      );
+    }
+    return;
+  }
+
+  // Handle errors
+  if (type === "error") {
+    console.error("Worker error:", data.message, data.stack);
+
+    // Find and reject the corresponding promise
+    if (messageId) {
+      const resolver = workerPromiseResolvers.get(messageId);
+      if (resolver) {
+        resolver.reject(new Error(data.message));
+        workerPromiseResolvers.delete(messageId);
+        console.log(`Rejected promise for messageId: ${messageId}`);
+      } else {
+        console.warn(
+          `Received error message but no resolver found for messageId ${messageId}`
+        );
+        console.log(
+          "Current resolvers:",
+          Array.from(workerPromiseResolvers.keys())
+        );
+      }
+    } else {
+      // No messageId, reject all pending promises
+      console.warn(
+        "Error message received without messageId, rejecting all promises"
+      );
+      workerPromiseResolvers.forEach((resolver, id) => {
+        resolver.reject(new Error(data.message));
+        workerPromiseResolvers.delete(id);
+        console.log(`Rejected promise for messageId: ${id}`);
+      });
+    }
+    return;
+  }
+
+  // Unhandled message type
+  console.warn(`Unhandled worker message type: ${type}`, data);
+}
+
+// Handle worker errors
+function handleWorkerError(error: ErrorEvent) {
+  console.error("Worker error event:", error);
+
+  // Reject all pending promises
+  workerPromiseResolvers.forEach((resolver) => {
+    resolver.reject(new Error(`Worker error: ${error.message}`));
+  });
+  workerPromiseResolvers.clear();
+}
+
+// Load an IFC file using IfcOpenShell via the worker
+export async function loadIfcFile(
+  file: File,
+  onProgress?: (progress: number, message?: string) => void
+): Promise<IfcModel> {
+  console.log("Loading IFC file:", file.name);
+
+  try {
+    // Initialize the worker if needed
+    const worker = await initIfcWorker();
+    console.log("Worker initialized for file load:", file.name);
+
+    if (!ifcWorker) {
+      throw new Error("IFC worker initialization failed");
     }
 
-    return typeMap[elementType]?.includes(element.type)
-  })
+    // Set up a progress handler for this operation
+    const progressHandler = (event: MessageEvent) => {
+      if (event.data && event.data.type === "progress" && onProgress) {
+        onProgress(event.data.percentage, event.data.message);
+      }
+    };
+
+    // Add the progress event listener
+    ifcWorker.addEventListener("message", progressHandler);
+    console.log("Added progress listener for file:", file.name);
+
+    // Read the file as ArrayBuffer
+    const arrayBuffer = await file.arrayBuffer();
+    console.log(
+      `File read as ArrayBuffer: ${file.name}, size: ${arrayBuffer.byteLength} bytes`
+    );
+
+    // Generate a unique message ID
+    const messageId = `load_${Date.now()}_${Math.random()
+      .toString(36)
+      .substr(2, 9)}`;
+    console.log("Generated message ID for file load:", messageId);
+
+    // Create a promise for this operation
+    console.log("Sending loadIfc message to worker");
+    const result = await new Promise((resolve, reject) => {
+      workerPromiseResolvers.set(messageId, { resolve, reject });
+
+      // Send the message to the worker
+      ifcWorker!.postMessage(
+        {
+          action: "loadIfc",
+          messageId,
+          data: {
+            arrayBuffer,
+            filename: file.name,
+          },
+        },
+        [arrayBuffer]
+      ); // Transfer the arrayBuffer to avoid copying
+
+      console.log("Message sent to worker with ID:", messageId);
+
+      // Set a timeout to detect if the worker doesn't respond at all
+      setTimeout(() => {
+        if (workerPromiseResolvers.has(messageId)) {
+          console.error("Worker did not respond within timeout period");
+          reject(new Error("Worker did not respond within the timeout period"));
+          workerPromiseResolvers.delete(messageId);
+        }
+      }, 30000); // 30 second timeout for initial response
+    });
+
+    console.log("Received loadIfc result:", result);
+
+    // Set up a timeout to detect stalled processing
+    const timeout = setTimeout(() => {
+      const resolver = workerPromiseResolvers.get(messageId);
+      if (resolver) {
+        console.warn("IFC processing taking longer than expected.");
+        // We don't reject, just warn
+      }
+    }, 60000); // 60 second timeout
+
+    // The result contains basic model info
+    const { modelInfo } = result as any;
+
+    // Clear the timeout
+    clearTimeout(timeout);
+    console.log("Received model info:", modelInfo);
+
+    // Now request the detailed element data
+    const messageId2 = `extract_${Date.now()}_${Math.random()
+      .toString(36)
+      .substr(2, 9)}`;
+    console.log("Starting element extraction with ID:", messageId2);
+
+    const elementResult = await new Promise((resolve, reject) => {
+      workerPromiseResolvers.set(messageId2, { resolve, reject });
+
+      // Request all types that have at least one element
+      const types = Object.entries(modelInfo.element_counts)
+        .filter(([_, count]) => (count as number) > 0)
+        .map(([type]) => type);
+
+      console.log("Extracting element types:", types);
+
+      // Send the request
+      ifcWorker!.postMessage({
+        action: "extractData",
+        messageId: messageId2,
+        data: { types },
+      });
+
+      // Set a timeout to detect if the worker doesn't respond
+      setTimeout(() => {
+        if (workerPromiseResolvers.has(messageId2)) {
+          console.error(
+            "Worker did not respond to extractData within timeout period"
+          );
+          reject(
+            new Error(
+              "Worker did not respond to extractData within the timeout period"
+            )
+          );
+          workerPromiseResolvers.delete(messageId2);
+        }
+      }, 30000); // 30 second timeout for element extraction
+    });
+
+    // Remove the progress event listener
+    ifcWorker.removeEventListener("message", progressHandler);
+    console.log("Progress listener removed");
+
+    // Combine the information into our model structure
+    const { elements } = elementResult as any;
+    console.log(`Extracted ${elements.length} elements from IFC file`);
+
+    const model: IfcModel = {
+      id: `model-${Date.now()}`,
+      name: file.name,
+      schema: modelInfo.schema,
+      project: modelInfo.project,
+      elementCounts: modelInfo.element_counts,
+      totalElements: modelInfo.total_elements,
+      elements: elements,
+    };
+
+    console.log("Model created successfully:", {
+      id: model.id,
+      name: model.name,
+      schema: model.schema,
+      totalElements: model.totalElements,
+    });
+
+    // Store as the last loaded model
+    _lastLoadedModel = model;
+    console.log(
+      "Stored as last loaded model with",
+      model.elements.length,
+      "elements"
+    );
+
+    return model;
+  } catch (err) {
+    console.error("Error loading IFC file:", err);
+    throw new Error(
+      `Failed to load IFC file: ${
+        err instanceof Error ? err.message : String(err)
+      }`
+    );
+  }
 }
 
-// Mock function to filter elements by property
+// Extract geometry from IFC elements
+export function extractGeometry(
+  model: IfcModel,
+  elementType = "all",
+  includeOpenings = true
+): IfcElement[] {
+  console.log("Extracting geometry:", elementType, includeOpenings);
+
+  if (!model || !model.elements || model.elements.length === 0) {
+    return [];
+  }
+
+  // Filter elements by type
+  if (elementType === "all") {
+    return includeOpenings
+      ? model.elements
+      : model.elements.filter(
+          (element) => !element.type.includes("IFCOPENING")
+        );
+  }
+
+  // Map user-friendly types to IFC types
+  const typeMap: Record<string, string[]> = {
+    walls: ["IFCWALL", "IFCWALLSTANDARDCASE"],
+    slabs: ["IFCSLAB", "IFCROOF"],
+    columns: ["IFCCOLUMN"],
+    beams: ["IFCBEAM"],
+    doors: ["IFCDOOR"],
+    windows: ["IFCWINDOW"],
+    stairs: ["IFCSTAIR", "IFCSTAIRFLIGHT"],
+    furniture: ["IFCFURNISHINGELEMENT"],
+    spaces: ["IFCSPACE"],
+    openings: ["IFCOPENINGELEMENT"],
+  };
+
+  // Filter elements by specified type
+  return model.elements.filter((element) => {
+    const matchesType = typeMap[elementType]?.some((type) =>
+      element.type.toUpperCase().includes(type)
+    );
+
+    // If not including openings, filter them out
+    if (!includeOpenings && element.type.includes("IFCOPENING")) {
+      return false;
+    }
+
+    return matchesType;
+  });
+}
+
+// Filter elements by property
 export function filterElements(
   elements: IfcElement[],
   property: string,
   operator: string,
-  value: string,
+  value: string
 ): IfcElement[] {
-  console.log("Filtering elements:", property, operator, value)
+  console.log("Filtering elements:", property, operator, value);
+
+  // Add a check for undefined or empty elements
+  if (!elements || elements.length === 0) {
+    console.warn("No elements to filter");
+    return [];
+  }
 
   return elements.filter((element) => {
-    const propParts = property.split(".")
-    let propValue = element.properties
+    // Split property path (e.g., "Pset_WallCommon.FireRating")
+    const propParts = property.split(".");
 
-    for (const part of propParts) {
-      if (!propValue[part]) return false
-      propValue = propValue[part]
+    if (propParts.length === 1) {
+      // Direct property lookup
+      let propValue = element.properties[property];
+      if (propValue === undefined) return false;
+
+      // Convert to string for comparison
+      propValue = String(propValue);
+
+      switch (operator) {
+        case "equals":
+          return propValue === value;
+        case "contains":
+          return propValue.includes(value);
+        case "startsWith":
+          return propValue.startsWith(value);
+        case "endsWith":
+          return propValue.endsWith(value);
+        default:
+          return false;
+      }
+    } else if (propParts.length === 2) {
+      // Property set lookup (e.g., "Pset_WallCommon.FireRating")
+      const [psetName, propName] = propParts;
+
+      // Check in property sets
+      if (element.psets && element.psets[psetName]) {
+        let propValue = element.psets[psetName][propName];
+        if (propValue === undefined) return false;
+
+        // Convert to string for comparison
+        propValue = String(propValue);
+
+        switch (operator) {
+          case "equals":
+            return propValue === value;
+          case "contains":
+            return propValue.includes(value);
+          case "startsWith":
+            return propValue.startsWith(value);
+          case "endsWith":
+            return propValue.endsWith(value);
+          default:
+            return false;
+        }
+      }
+      return false;
     }
 
-    switch (operator) {
-      case "equals":
-        return propValue === value
-      case "contains":
-        return propValue.includes(value)
-      case "startsWith":
-        return propValue.startsWith(value)
-      case "endsWith":
-        return propValue.endsWith(value)
-      default:
-        return false
-    }
-  })
+    return false;
+  });
 }
 
-// Mock function to transform elements
+// Transform elements (using geometric transformations)
 export function transformElements(
   elements: IfcElement[],
   translation: [number, number, number] = [0, 0, 0],
   rotation: [number, number, number] = [0, 0, 0],
-  scale: [number, number, number] = [1, 1, 1],
+  scale: [number, number, number] = [1, 1, 1]
 ): IfcElement[] {
-  console.log("Transforming elements:", translation, rotation, scale)
+  console.log("Transforming elements:", translation, rotation, scale);
 
-  // In a real implementation, this would apply the transformation to the geometry
+  // Add a check for undefined or empty elements
+  if (!elements || elements.length === 0) {
+    console.warn("No elements to transform");
+    return [];
+  }
+
+  // In a real implementation, we'd use IfcOpenShell to apply transformations
+  // This would require creating a new IfcLocalPlacement with a transformation matrix
+
+  // For now, just return a copy of the elements with transformation info
   return elements.map((element) => ({
     ...element,
-    // Apply transformation to geometry
-  }))
+    transformedGeometry: {
+      translation,
+      rotation,
+      scale,
+    },
+  }));
 }
-
-// Add these utility functions after the existing functions
 
 // Quantity extraction functions
 export function extractQuantities(
   elements: IfcElement[],
   quantityType = "area",
   groupBy = "none",
-  unit = "",
+  unit = ""
 ): Record<string, number> {
-  console.log("Extracting quantities:", quantityType, groupBy)
+  console.log("Extracting quantities:", quantityType, groupBy);
+
+  // Add a check for undefined or empty elements
+  if (!elements || elements.length === 0) {
+    console.warn("No elements for quantity extraction");
+    return { Total: 0 };
+  }
 
   // Default units by quantity type
   const defaultUnits: Record<string, string> = {
@@ -142,108 +565,470 @@ export function extractQuantities(
     volume: "m³",
     count: "",
     weight: "kg",
-  }
+  };
 
-  const finalUnit = unit || defaultUnits[quantityType] || ""
+  const finalUnit =
+    unit || defaultUnits[quantityType as keyof typeof defaultUnits] || "";
 
-  // Mock quantity data
+  // Create groups for the results
+  const groups: Record<string, number> = {};
+
+  // If not grouping, just calculate total
   if (groupBy === "none") {
-    return { Total: getMockQuantity(elements.length, quantityType) }
+    let total = 0;
+
+    elements.forEach((element) => {
+      // Look for this quantity in the element's quantity sets
+      if (element.qtos) {
+        for (const qtoSet in element.qtos) {
+          const qto = element.qtos[qtoSet];
+
+          // Look for quantity properties based on quantityType
+          let quantityValue = 0;
+
+          switch (quantityType) {
+            case "length":
+              quantityValue =
+                qto.Length || qto.Height || qto.Width || qto.Depth || 0;
+              break;
+            case "area":
+              quantityValue =
+                qto.Area ||
+                qto.NetArea ||
+                qto.GrossArea ||
+                qto.NetFloorArea ||
+                qto.GrossFloorArea ||
+                0;
+              break;
+            case "volume":
+              quantityValue =
+                qto.Volume || qto.NetVolume || qto.GrossVolume || 0;
+              break;
+            case "weight":
+              quantityValue =
+                qto.Weight || qto.NetWeight || qto.GrossWeight || 0;
+              break;
+            case "count":
+              quantityValue = 1; // Just count the elements
+              break;
+          }
+
+          if (quantityValue) {
+            total += Number(quantityValue);
+            break; // Found a value, no need to check other qto sets
+          }
+        }
+      } else {
+        // If no quantity sets found, use default values
+        const defaultValues: Record<string, number> = {
+          length: 3.0,
+          area: 10.0,
+          volume: 8.0,
+          weight: 500,
+          count: 1,
+        };
+
+        total += defaultValues[quantityType as keyof typeof defaultValues] || 0;
+      }
+    });
+
+    return { Total: parseFloat(total.toFixed(2)) };
   }
 
-  const groups: Record<string, number> = {}
-
+  // If grouping, calculate per group
   elements.forEach((element) => {
-    let groupKey = ""
+    let groupKey = "";
 
+    // Determine group key based on groupBy parameter
     switch (groupBy) {
       case "type":
-        groupKey = element.type
-        break
+        groupKey = element.type.replace("IFC", "");
+        break;
       case "material":
-        groupKey = element.properties.Material || "Unknown"
-        break
+        // Look for material information in properties or psets
+        if (element.properties.Material) {
+          groupKey = element.properties.Material;
+        } else if (element.psets && element.psets["Pset_MaterialCommon"]) {
+          groupKey = element.psets["Pset_MaterialCommon"].Name || "Unknown";
+        } else {
+          groupKey = "Unknown Material";
+        }
+        break;
       case "level":
-        groupKey = element.properties.Level || "Unknown"
-        break
+        // Look for level information
+        if (element.properties.Level) {
+          groupKey = element.properties.Level;
+        } else if (element.properties.BuildingStorey) {
+          groupKey = element.properties.BuildingStorey;
+        } else {
+          groupKey = "Unknown Level";
+        }
+        break;
       default:
-        groupKey = "Unknown"
+        groupKey = "Unknown";
     }
 
+    // Initialize group if not exists
     if (!groups[groupKey]) {
-      groups[groupKey] = 0
+      groups[groupKey] = 0;
     }
 
-    groups[groupKey] += getMockQuantity(1, quantityType)
-  })
+    // Add to group total
+    let quantityValue = 0;
 
-  return groups
+    // Look for this quantity in the element's quantity sets
+    if (element.qtos) {
+      for (const qtoSet in element.qtos) {
+        const qto = element.qtos[qtoSet];
+
+        // Look for quantity properties based on quantityType
+        switch (quantityType) {
+          case "length":
+            quantityValue =
+              qto.Length || qto.Height || qto.Width || qto.Depth || 0;
+            break;
+          case "area":
+            quantityValue = qto.Area || qto.NetArea || qto.GrossArea || 0;
+            break;
+          case "volume":
+            quantityValue = qto.Volume || qto.NetVolume || qto.GrossVolume || 0;
+            break;
+          case "weight":
+            quantityValue = qto.Weight || qto.NetWeight || qto.GrossWeight || 0;
+            break;
+          case "count":
+            quantityValue = 1; // Just count the elements
+            break;
+        }
+
+        if (quantityValue) {
+          break; // Found a value, no need to check other qto sets
+        }
+      }
+    }
+
+    // If no quantity found, use defaults
+    if (!quantityValue) {
+      const defaultValues: Record<string, number> = {
+        length: 3.0,
+        area: 10.0,
+        volume: 8.0,
+        weight: 500,
+        count: 1,
+      };
+
+      quantityValue =
+        defaultValues[quantityType as keyof typeof defaultValues] || 0;
+    }
+
+    groups[groupKey] += Number(quantityValue);
+  });
+
+  // Round all values
+  Object.keys(groups).forEach((key) => {
+    groups[key] = parseFloat(groups[key].toFixed(2));
+  });
+
+  return groups;
 }
 
-// Helper function to generate mock quantities
-function getMockQuantity(factor: number, type: string): number {
-  const base = {
-    length: 3.5,
-    area: 12.5,
-    volume: 8.2,
-    count: 1,
-    weight: 750,
-  }
-
-  const randomFactor = 0.8 + Math.random() * 0.4 // 0.8 to 1.2
-  return Number((base[type] * factor * randomFactor).toFixed(2))
+// Function to manage properties on elements
+export interface PropertyActions {
+  action: string;
+  propertyName: string;
+  propertyValue?: any;
+  targetPset?: string;
 }
 
-// Property management functions
+// More flexible properties management function that accepts an options object
 export function manageProperties(
   elements: IfcElement[],
-  action = "get",
-  propertyName = "",
-  propertyValue = "",
+  options: PropertyActions
 ): IfcElement[] {
-  console.log("Managing properties:", action, propertyName, propertyValue)
+  const { action, propertyName, propertyValue, targetPset = "any" } = options;
 
-  const result = [...elements]
+  console.log(`Managing properties:`, {
+    action,
+    propertyName,
+    propertyValue,
+    targetPset,
+  });
 
-  switch (action) {
-    case "get":
-      // Return original elements, with enhanced data for the specified property
-      return result
-
-    case "set":
-      // Set the property on all elements
-      return result.map((element) => ({
-        ...element,
-        properties: {
-          ...element.properties,
-          [propertyName]: propertyValue,
-        },
-      }))
-
-    case "add":
-      // Same as set for our simplified implementation
-      return result.map((element) => ({
-        ...element,
-        properties: {
-          ...element.properties,
-          [propertyName]: propertyValue,
-        },
-      }))
-
-    case "remove":
-      // Remove the property from all elements
-      return result.map((element) => {
-        const newProps = { ...element.properties }
-        delete newProps[propertyName]
-        return {
-          ...element,
-          properties: newProps,
-        }
-      })
-
-    default:
-      return result
+  // Debug the first element to understand structure
+  if (elements && elements.length > 0) {
+    console.log("First element structure:", {
+      id: elements[0].id,
+      type: elements[0].type,
+      hasProperties: !!elements[0].properties,
+      hasPsets: !!elements[0].psets,
+      hasQtos: !!elements[0].qtos,
+    });
   }
+
+  // Check for undefined or empty elements
+  if (!elements || elements.length === 0) {
+    console.warn("No elements provided to manageProperties");
+    return [];
+  }
+
+  // Make sure elements is an array
+  if (!Array.isArray(elements)) {
+    console.warn("Elements is not an array");
+    return [];
+  }
+
+  // Handle empty property name
+  if (!propertyName) {
+    console.warn("No property name provided");
+    return elements;
+  }
+
+  // Parse the property name to extract Pset if provided in format "Pset:Property"
+  let actualPropertyName = propertyName;
+  let explicitPset = "";
+
+  if (propertyName.includes(":")) {
+    const parts = propertyName.split(":");
+    explicitPset = parts[0];
+    actualPropertyName = parts[1];
+  }
+
+  // Determine the effective target Pset (explicit from propertyName overrides options.targetPset)
+  const effectiveTargetPset = explicitPset || targetPset;
+
+  // Create a new array to return
+  return elements.map((element) => {
+    // Clone the element to avoid modifying the original
+    const updatedElement = { ...element };
+
+    // Function to check if property exists and get its location and value
+    const findProperty = (
+      element: IfcElement,
+      propName: string,
+      psetName: string
+    ): {
+      exists: boolean;
+      value: any;
+      location: string;
+      psetName: string;
+    } => {
+      // Initialize result
+      const result = {
+        exists: false,
+        value: null,
+        location: "",
+        psetName: psetName !== "any" ? psetName : "",
+      };
+
+      // Special case for IsExternal property which might have different capitalizations
+      const isExternalVariants = [
+        "IsExternal",
+        "isExternal",
+        "ISEXTERNAL",
+        "isexternal",
+      ];
+      const isCheckingIsExternal = isExternalVariants.includes(propName);
+
+      // 1. First check in the specified property set if provided
+      if (psetName !== "any" && element.psets && element.psets[psetName]) {
+        // Direct check
+        if (propName in element.psets[psetName]) {
+          result.exists = true;
+          result.value = element.psets[psetName][propName];
+          result.location = "psets";
+          return result;
+        }
+
+        // For IsExternal, check all variants
+        if (isCheckingIsExternal) {
+          for (const variant of isExternalVariants) {
+            if (variant in element.psets[psetName]) {
+              result.exists = true;
+              result.value = element.psets[psetName][variant];
+              result.location = "psets";
+              result.psetName = psetName;
+              return result;
+            }
+          }
+        }
+      }
+
+      // 2. Check in direct properties at root level - often duplicate data
+      if (element.properties) {
+        // Direct check
+        if (propName in element.properties) {
+          result.exists = true;
+          result.value = element.properties[propName];
+          result.location = "properties";
+          return result;
+        }
+
+        // For IsExternal, check all variants
+        if (isCheckingIsExternal) {
+          for (const variant of isExternalVariants) {
+            if (variant in element.properties) {
+              result.exists = true;
+              result.value = element.properties[variant];
+              result.location = "properties";
+              return result;
+            }
+          }
+        }
+      }
+
+      // 3. If target is "any", check all property sets
+      if (psetName === "any" && element.psets) {
+        for (const [setName, props] of Object.entries(element.psets)) {
+          // Direct check in this pset
+          if (propName in props) {
+            result.exists = true;
+            result.value = props[propName];
+            result.location = "psets";
+            result.psetName = setName;
+            return result;
+          }
+
+          // For IsExternal, check all variants
+          if (isCheckingIsExternal) {
+            for (const variant of isExternalVariants) {
+              if (variant in props) {
+                result.exists = true;
+                result.value = props[variant];
+                result.location = "psets";
+                result.psetName = setName;
+                return result;
+              }
+            }
+          }
+        }
+      }
+
+      // 4. Check quantity sets too if targetPset is "any"
+      if (psetName === "any" && element.qtos) {
+        for (const [qtoName, quantities] of Object.entries(element.qtos)) {
+          if (propName in quantities) {
+            result.exists = true;
+            result.value = quantities[propName];
+            result.location = "qtos";
+            result.psetName = qtoName;
+            return result;
+          }
+        }
+      }
+
+      return result;
+    };
+
+    // Find the property
+    const propertyResult = findProperty(
+      element,
+      actualPropertyName,
+      effectiveTargetPset
+    );
+
+    // Handle the property based on the action
+    switch (action.toLowerCase()) {
+      case "get":
+        // Store property information in the element
+        updatedElement.propertyInfo = {
+          name: actualPropertyName,
+          exists: propertyResult.exists,
+          value: propertyResult.value,
+          psetName: propertyResult.psetName,
+        };
+        break;
+
+      case "set":
+      case "add":
+        // Set or add the property
+        if (element.properties) {
+          // Always update the direct properties for convenient access
+          element.properties[actualPropertyName] = propertyValue;
+        }
+
+        // Determine where to store the property
+        if (effectiveTargetPset !== "any") {
+          // Make sure psets exists
+          if (!element.psets) {
+            element.psets = {};
+          }
+
+          // Make sure the target pset exists
+          if (!element.psets[effectiveTargetPset]) {
+            element.psets[effectiveTargetPset] = {};
+          }
+
+          // Add the property to the target pset
+          element.psets[effectiveTargetPset][actualPropertyName] =
+            propertyValue;
+        }
+
+        // Store property info for UI feedback
+        updatedElement.propertyInfo = {
+          name: actualPropertyName,
+          exists: true,
+          value: propertyValue,
+          psetName:
+            effectiveTargetPset !== "any" ? effectiveTargetPset : "properties",
+        };
+        break;
+
+      case "remove":
+        // Remove the property
+        let removed = false;
+
+        // Remove from direct properties
+        if (element.properties && actualPropertyName in element.properties) {
+          delete element.properties[actualPropertyName];
+          removed = true;
+        }
+
+        // If a specific pset is targeted, only remove from there
+        if (effectiveTargetPset !== "any") {
+          if (
+            element.psets?.[effectiveTargetPset]?.[actualPropertyName] !==
+            undefined
+          ) {
+            delete element.psets[effectiveTargetPset][actualPropertyName];
+            removed = true;
+          }
+        } else {
+          // Otherwise remove from all psets
+          if (element.psets) {
+            for (const psetName in element.psets) {
+              if (actualPropertyName in element.psets[psetName]) {
+                delete element.psets[psetName][actualPropertyName];
+                removed = true;
+              }
+            }
+          }
+        }
+
+        // Also clean up qtos
+        if (effectiveTargetPset === "any" && element.qtos) {
+          for (const qtoName in element.qtos) {
+            if (actualPropertyName in element.qtos[qtoName]) {
+              delete element.qtos[qtoName][actualPropertyName];
+              removed = true;
+            }
+          }
+        }
+
+        // Store property info for UI feedback
+        updatedElement.propertyInfo = {
+          name: actualPropertyName,
+          exists: false,
+          value: null,
+          psetName: propertyResult.psetName,
+        };
+        break;
+
+      default:
+        console.warn(`Unknown action: ${action}`);
+    }
+
+    return updatedElement;
+  });
 }
 
 // Classification functions
@@ -251,27 +1036,101 @@ export function manageClassifications(
   elements: IfcElement[],
   system = "uniclass",
   action = "get",
-  code = "",
+  code = ""
 ): IfcElement[] {
-  console.log("Managing classifications:", system, action, code)
+  console.log("Managing classifications:", system, action, code);
+
+  if (!elements || elements.length === 0) {
+    console.warn("No elements for classification management");
+    return [];
+  }
+
+  // Define standard classification systems
+  const systemNames: Record<string, string> = {
+    uniclass: "Uniclass 2015",
+    uniformat: "Uniformat II",
+    masterformat: "MasterFormat 2016",
+    omniclass: "OmniClass",
+    cobie: "COBie",
+    custom: "Custom Classification",
+  };
+
+  const systemName = systemNames[system as keyof typeof systemNames] || system;
 
   if (action === "get") {
-    // Just return the elements, in a real implementation we'd enhance with classification data
-    return elements
+    // Return elements with classification information if present
+    return elements.map((element) => {
+      const enhancedElement = { ...element };
+
+      // Look for classifications in properties or psets
+      let classifications = [];
+
+      // Check in direct properties
+      if (element.properties.Classification) {
+        classifications.push(element.properties.Classification);
+      }
+
+      // Check in property sets
+      if (element.psets) {
+        // Check for Pset_ClassificationReference or similar
+        const classificationPsets = Object.keys(element.psets).filter(
+          (pset) =>
+            pset.includes("Classification") ||
+            pset.includes("IfcClassification")
+        );
+
+        for (const pset of classificationPsets) {
+          classifications.push({
+            system:
+              element.psets[pset].System ||
+              element.psets[pset].Name ||
+              "Unknown",
+            code:
+              element.psets[pset].Code ||
+              element.psets[pset].ItemReference ||
+              "",
+            description: element.psets[pset].Description || "",
+          });
+        }
+      }
+
+      enhancedElement.classifications = classifications;
+      return enhancedElement;
+    });
   }
 
   // Set classification
-  return elements.map((element) => ({
-    ...element,
-    properties: {
-      ...element.properties,
+  return elements.map((element) => {
+    const newElement = { ...element };
+
+    // First, check if we have psets
+    if (!newElement.psets) {
+      newElement.psets = {};
+    }
+
+    // Create or update the classification property set
+    const psetName = "Pset_ClassificationReference";
+
+    newElement.psets[psetName] = {
+      ...newElement.psets[psetName],
+      System: systemName,
+      Code: code,
+      Name: systemName,
+      ItemReference: code,
+      Description: `${systemName} classification ${code}`,
+    };
+
+    // Also update direct properties for easier access
+    newElement.properties = {
+      ...newElement.properties,
       Classification: {
-        System: system,
+        System: systemName,
         Code: code,
-        Description: `Mock ${system} description for ${code}`,
       },
-    },
-  }))
+    };
+
+    return newElement;
+  });
 }
 
 // Spatial query functions
@@ -279,35 +1138,74 @@ export function spatialQuery(
   elements: IfcElement[],
   referenceElements: IfcElement[],
   queryType = "contained",
-  distance = 1.0,
+  distance = 1.0
 ): IfcElement[] {
-  console.log("Spatial query:", queryType, distance)
+  console.log("Spatial query:", queryType, distance);
 
-  // Mock implementation - in reality would use geometry calculations
+  if (!elements || elements.length === 0) {
+    console.warn("No elements for spatial query");
+    return [];
+  }
+
+  if (!referenceElements || referenceElements.length === 0) {
+    console.warn("No reference elements for spatial query");
+    return [];
+  }
+
+  // NOTE: In a real implementation, we would use IfcOpenShell to perform spatial calculations
+  // This would involve extracting geometry and using computational geometry algorithms
+
+  // For demonstration, we'll simulate spatial relationships
   switch (queryType) {
     case "contained":
-      // Mock: return 70% of elements
-      return elements.slice(0, Math.floor(elements.length * 0.7))
+      // Find elements contained within reference elements
+      // This would require bounding box comparisons in a real implementation
+      return elements.filter((element) => {
+        // Simple simulation: check if the element has a containment relationship
+        // This is just a placeholder - real implementation would check geometric containment
+        return element.properties.ContainedIn === referenceElements[0].id;
+      });
 
     case "containing":
-      // Mock: return 30% of elements
-      return elements.slice(0, Math.floor(elements.length * 0.3))
+      // Find elements that contain reference elements
+      return elements.filter((element) => {
+        // This is just a placeholder - real implementation would check geometric containment
+        return referenceElements.some(
+          (ref) => ref.properties.ContainedIn === element.id
+        );
+      });
 
     case "intersecting":
-      // Mock: return 50% of elements
-      return elements.slice(0, Math.floor(elements.length * 0.5))
+      // Find elements that intersect with reference elements
+      // This would require collision detection in a real implementation
+      return elements.filter(() => {
+        // This is just a placeholder - real implementation would check geometric intersection
+        // Randomly select about 30% of elements for demonstration
+        return Math.random() < 0.3;
+      });
 
     case "touching":
-      // Mock: return 20% of elements
-      return elements.slice(0, Math.floor(elements.length * 0.2))
+      // Find elements that touch reference elements
+      // This would require adjacency detection in a real implementation
+      return elements.filter(() => {
+        // This is just a placeholder - real implementation would check for adjacency
+        // Randomly select about 20% of elements for demonstration
+        return Math.random() < 0.2;
+      });
 
     case "within-distance":
-      // Mock: return elements based on distance parameter
-      const ratio = Math.min(1, distance / 5) // 0-5m maps to 0-100%
-      return elements.slice(0, Math.floor(elements.length * ratio))
+      // Find elements within a certain distance of reference elements
+      // This would require distance calculation in a real implementation
+      return elements.filter(() => {
+        // This is just a placeholder - real implementation would check distances
+        // Simulate that more elements are included as distance increases
+        const normalized = Math.min(1, distance / 10);
+        return Math.random() < normalized;
+      });
 
     default:
-      return elements
+      console.warn(`Unknown spatial query type: ${queryType}`);
+      return [];
   }
 }
 
@@ -315,22 +1213,51 @@ export function spatialQuery(
 export function queryRelationships(
   elements: IfcElement[],
   relationType = "containment",
-  direction = "outgoing",
+  direction = "outgoing"
 ): IfcElement[] {
-  console.log("Relationship query:", relationType, direction)
+  console.log("Relationship query:", relationType, direction);
 
-  // Mock implementation - would use actual IFC relationship data
-  // Just return a subset of elements as a simulation
-  const ratioMap = {
-    containment: 0.6,
-    aggregation: 0.4,
-    voiding: 0.2,
-    material: 0.8,
-    "space-boundary": 0.3,
+  if (!elements || elements.length === 0) {
+    console.warn("No elements for relationship query");
+    return [];
   }
 
-  const ratio = ratioMap[relationType] || 0.5
-  return elements.slice(0, Math.floor(elements.length * ratio))
+  // Define valid relationship types for type checking
+  const validRelationTypes = [
+    "containment",
+    "aggregation",
+    "voiding",
+    "material",
+    "space-boundary",
+    "connectivity",
+  ];
+
+  // Use a safe relationType or default to containment
+  const safeRelationType = validRelationTypes.includes(relationType)
+    ? relationType
+    : "containment";
+
+  // NOTE: In a real implementation, we would use IfcOpenShell to traverse relationships
+
+  // This is a placeholder - in reality we would check actual relationships
+  // For now, we'll return a subset of elements based on the relationship type
+
+  // In a real implementation, you'd do something like:
+  /*
+  if (direction === "outgoing") {
+    return elements.flatMap(element => {
+      // Get related elements from the IFC model based on relationship type
+      // Code would use the IfcOpenShell API to get related elements
+    });
+  } else {
+    // Similar for incoming relationships
+  }
+  */
+
+  // For demo purposes, just return a subset of elements
+  // In reality, you would query the actual relationships in the IFC model
+  const ratio = 0.5; // Default ratio
+  return elements.slice(0, Math.floor(elements.length * ratio));
 }
 
 // Analysis functions
@@ -338,59 +1265,149 @@ export function performAnalysis(
   elements: IfcElement[],
   referenceElements: IfcElement[] = [],
   analysisType = "clash",
-  options: Record<string, any> = {},
+  options: Record<string, any> = {}
 ): any {
-  console.log("Performing analysis:", analysisType, options)
+  console.log("Performing analysis:", analysisType, options);
+
+  if (!elements || elements.length === 0) {
+    console.warn("No elements for analysis");
+    return { error: "No elements to analyze" };
+  }
+
+  // NOTE: In a real implementation, we would use IfcOpenShell plus additional libraries
+  // for specific analysis types (clash detection, spatial analysis, etc.)
 
   switch (analysisType) {
     case "clash":
-      // Mock clash detection results
-      const tolerance = options.tolerance || 10
-      const clashCount = Math.floor(elements.length * referenceElements.length * 0.05)
-      return {
-        clashes: clashCount,
-        details: Array(clashCount)
-          .fill(0)
-          .map((_, i) => ({
+      // Clash detection would use geometric intersection tests
+      // This is a placeholder implementation
+      if (referenceElements.length === 0) {
+        return { error: "No reference elements for clash detection" };
+      }
+
+      const tolerance = Number(options.tolerance) || 10;
+      const clashes = [];
+
+      // In a real implementation, we would check for geometric intersections
+      // For now, simulate clash detection with random data
+      for (let i = 0; i < Math.min(20, elements.length); i++) {
+        const randomRefIndex = Math.floor(
+          Math.random() * referenceElements.length
+        );
+
+        if (Math.random() < 0.3) {
+          // 30% chance of clash
+          clashes.push({
             id: `clash-${i}`,
-            element1: `element-${Math.floor(Math.random() * elements.length)}`,
-            element2: `reference-${Math.floor(Math.random() * referenceElements.length)}`,
-            distance: Math.random() * tolerance,
-          })),
-      }
-
-    case "adjacency":
-      // Mock adjacency analysis
-      return {
-        adjacentElements: Math.floor(elements.length * 0.4),
-        details: elements.slice(0, Math.floor(elements.length * 0.4)).map((element) => ({
-          id: element.id,
-          adjacentTo: Math.floor(1 + Math.random() * 3), // 1-3 adjacent elements
-        })),
-      }
-
-    case "space":
-      // Mock space analysis
-      const metric = options.metric || "area"
-      const totalArea = elements.length * 15 // mock area calculation
-      const totalVolume = elements.length * 45 // mock volume calculation
-
-      if (metric === "area") {
-        return { totalArea, areaPerElement: totalArea / elements.length }
-      } else if (metric === "volume") {
-        return { totalVolume, volumePerElement: totalVolume / elements.length }
-      } else if (metric === "occupancy") {
-        const occupancy = Math.floor(totalArea / 10) // 1 person per 10 square meters
-        return { occupancy, density: occupancy / totalArea }
-      } else {
-        return {
-          circulation: totalArea * 0.3, // 30% circulation
-          program: totalArea * 0.7, // 70% program space
+            element1: elements[i],
+            element2: referenceElements[randomRefIndex],
+            distance: (Math.random() * tolerance) / 2, // Random distance within tolerance
+            point: {
+              x: Math.random() * 10,
+              y: Math.random() * 10,
+              z: Math.random() * 3,
+            },
+          });
         }
       }
 
+      return {
+        clashCount: clashes.length,
+        clashes: clashes,
+        tolerance: tolerance,
+      };
+
+    case "adjacency":
+      // Adjacency analysis would check for elements that are adjacent to each other
+      // In a real implementation, we would use computational geometry
+
+      const adjacencyResults = elements.map((element) => {
+        // In reality, you'd check which elements are actually adjacent
+        const adjacentCount = Math.floor(1 + Math.random() * 3);
+
+        // Get random adjacent elements
+        const adjacentElements = [];
+        for (let i = 0; i < adjacentCount; i++) {
+          const randomIndex = Math.floor(Math.random() * elements.length);
+          if (elements[randomIndex].id !== element.id) {
+            adjacentElements.push(elements[randomIndex]);
+          }
+        }
+
+        return {
+          element: element,
+          adjacentElements: adjacentElements,
+          adjacentCount: adjacentElements.length,
+        };
+      });
+
+      return {
+        totalElements: elements.length,
+        adjacencyResults: adjacencyResults,
+        averageAdjacency:
+          adjacencyResults.reduce((sum, r) => sum + r.adjacentCount, 0) /
+          elements.length,
+      };
+
+    case "spatial":
+      // Spatial analysis checks space utilization, occupancy, etc.
+      const metric = options.metric || "area";
+
+      // Calculate areas (in a real app, would extract from IFC)
+      let totalArea = 0;
+      let totalVolume = 0;
+
+      elements.forEach((element) => {
+        // Look for area and volume in quantity sets
+        if (element.qtos) {
+          for (const qtoSet in element.qtos) {
+            const qto = element.qtos[qtoSet];
+
+            if (qto.Area || qto.NetArea || qto.GrossArea) {
+              totalArea += Number(qto.Area || qto.NetArea || qto.GrossArea);
+            }
+
+            if (qto.Volume || qto.NetVolume || qto.GrossVolume) {
+              totalVolume += Number(
+                qto.Volume || qto.NetVolume || qto.GrossVolume
+              );
+            }
+          }
+        } else {
+          // Use defaults if no quantity info
+          if (element.type.includes("IFCSPACE")) {
+            totalArea += 20; // Default space area
+            totalVolume += 60; // Default space volume
+          }
+        }
+      });
+
+      // Format results based on requested metric
+      if (metric === "area") {
+        return {
+          totalArea: parseFloat(totalArea.toFixed(2)),
+          areaPerElement: parseFloat((totalArea / elements.length).toFixed(2)),
+        };
+      } else if (metric === "volume") {
+        return {
+          totalVolume: parseFloat(totalVolume.toFixed(2)),
+          volumePerElement: parseFloat(
+            (totalVolume / elements.length).toFixed(2)
+          ),
+        };
+      } else if (metric === "occupancy") {
+        // Estimate occupancy (1 person per 10m²)
+        const occupancy = Math.floor(totalArea / 10);
+        return {
+          occupancy,
+          density: parseFloat((occupancy / totalArea).toFixed(4)),
+        };
+      }
+
+      return { error: "Unknown spatial metric" };
+
     case "path":
-      // Mock path finding analysis
+      // Path finding analysis (would use a graph algorithm in real implementation)
       return {
         pathLength: 42.5,
         waypoints: [
@@ -398,73 +1415,149 @@ export function performAnalysis(
           { x: 10, y: 0, z: 0 },
           { x: 10, y: 20, z: 0 },
           { x: 30, y: 20, z: 0 },
-          { x: 30, y: 0, z: 0 },
-          { x: 40, y: 0, z: 0 },
         ],
-      }
-
-    case "visibility":
-      // Mock visibility analysis
-      return {
-        visibleElements: Math.floor(elements.length * 0.6),
-        visibilityScore: 0.75,
-        viewpoints: [
-          { x: 0, y: 0, z: 1.7, visibleCount: Math.floor(elements.length * 0.5) },
-          { x: 10, y: 10, z: 1.7, visibleCount: Math.floor(elements.length * 0.7) },
-          { x: 20, y: 0, z: 1.7, visibleCount: Math.floor(elements.length * 0.6) },
-        ],
-      }
+      };
 
     default:
-      return { error: "Unknown analysis type" }
+      return { error: "Unknown analysis type" };
   }
 }
 
 // Export functions
 export function exportData(
-  elements: IfcElement[],
+  elementsInput: IfcElement[] | { elements: IfcElement[] },
   format = "csv",
   fileName = "export",
-  properties = "Name,Type,Material",
+  properties = "Name,Type,Material"
 ): string {
-  console.log("Exporting data:", format, fileName, properties)
+  console.log("Exporting data:", format, fileName, properties);
 
-  const propertyList = properties.split(",")
+  // Handle different input formats
+  let elements: IfcElement[];
+
+  if (!elementsInput) {
+    console.warn("No input provided to exportData");
+    return "No data";
+  }
+
+  // Check if the input is an array or an object with elements property
+  if (Array.isArray(elementsInput)) {
+    elements = elementsInput;
+  } else if (
+    typeof elementsInput === "object" &&
+    "elements" in elementsInput &&
+    Array.isArray(elementsInput.elements)
+  ) {
+    elements = elementsInput.elements;
+  } else {
+    console.warn("Invalid input format for export:", elementsInput);
+    return "Invalid data format";
+  }
+
+  if (elements.length === 0) {
+    console.warn("No elements to export");
+    return "No data";
+  }
+
+  const propertyList = properties.split(",");
 
   switch (format) {
     case "csv":
-      // Generate mock CSV
-      const csvHeader = propertyList.join(",")
+      // Generate CSV
+      const csvHeader = propertyList.join(",");
       const csvRows = elements.map((element) => {
-        return propertyList.map((prop) => element.properties[prop] || "").join(",")
-      })
-      return `${csvHeader}\n${csvRows.join("\n")}`
+        return propertyList
+          .map((prop) => {
+            // Handle nested properties
+            if (prop.includes(".") && element.psets) {
+              const [psetName, propName] = prop.split(".");
+              return element.psets[psetName]?.[propName] || "";
+            }
+            return element.properties?.[prop] || "";
+          })
+          .map((val) => {
+            // Escape values with commas
+            if (typeof val === "string" && val.includes(",")) {
+              return `"${val}"`;
+            }
+            return val;
+          })
+          .join(",");
+      });
+      return `${csvHeader}\n${csvRows.join("\n")}`;
 
     case "json":
-      // Generate mock JSON
+      // Generate JSON
       const jsonData = elements.map((element) => {
-        const obj: Record<string, any> = {}
+        const obj: Record<string, any> = {};
         propertyList.forEach((prop) => {
-          obj[prop] = element.properties[prop] || null
-        })
-        return obj
-      })
-      return JSON.stringify(jsonData, null, 2)
+          // Handle nested properties
+          if (prop.includes(".") && element.psets) {
+            const [psetName, propName] = prop.split(".");
+            obj[prop] = element.psets[psetName]?.[propName] || null;
+          } else {
+            obj[prop] = element.properties?.[prop] || null;
+          }
+        });
+        return obj;
+      });
+      return JSON.stringify(jsonData, null, 2);
 
     case "excel":
       // Would use a library like ExcelJS in a real app
-      return "Excel export (mock)"
+      // For now, just return CSV data
+      return `Excel format data (use CSV format instead for better compatibility)`;
 
     case "ifc":
-      // Would use IfcOpenShell to generate IFC
-      return "IFC export (mock)"
+      // Export the modified IFC file
+      try {
+        // Check if we have a model object or just elements
+        let modelToExport;
+        if (elements[0] && elements[0].model) {
+          // If the elements have a reference to their parent model, use it
+          modelToExport = elements[0].model;
+        } else {
+          // Otherwise construct a model object from the elements
+          modelToExport = {
+            id: `modified-model-${Date.now()}`,
+            name: fileName || "Modified IFC Model",
+            elements: elements,
+          };
+        }
+
+        // Trigger download by sending the modified model to the IFC worker
+        if (typeof window !== "undefined") {
+          const downloadEvent = new CustomEvent("ifc:export", {
+            detail: {
+              model: modelToExport,
+              fileName: fileName || "exported.ifc",
+            },
+          });
+          window.dispatchEvent(downloadEvent);
+
+          console.log("IFC export requested:", {
+            elementCount: elements.length,
+            fileName: fileName || "exported.ifc",
+          });
+
+          return `IFC export initiated. Downloading ${
+            fileName || "exported.ifc"
+          }...`;
+        } else {
+          return "IFC export is only available in browser environments";
+        }
+      } catch (error) {
+        console.error("Error during IFC export:", error);
+        return `IFC export failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`;
+      }
 
     case "glb":
-      // Would use Three.js to generate GLB
-      return "GLB export (mock)"
+      // Would use Three.js with web-ifc to export to GLB
+      return `GLB export (requires 3D geometry processing)`;
 
     default:
-      return "Unknown format"
+      return `Unknown format: ${format}`;
   }
 }
-

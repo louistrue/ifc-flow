@@ -1,22 +1,28 @@
-"use client"
+"use client";
 
-import { useState, useEffect } from "react"
-import { X } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Separator } from "@/components/ui/separator"
-import { ScrollArea } from "@/components/ui/scroll-area"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { useState, useEffect } from "react";
+import { X } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 export function PropertiesPanel({ node, setNodes, setSelectedNode }) {
-  const [properties, setProperties] = useState({})
+  const [properties, setProperties] = useState({});
 
   useEffect(() => {
     if (node && node.data) {
-      setProperties(node.data.properties || {})
+      setProperties(node.data.properties || {});
     }
-  }, [node])
+  }, [node]);
 
   const updateNodeProperties = () => {
     setNodes((nds) =>
@@ -28,12 +34,12 @@ export function PropertiesPanel({ node, setNodes, setSelectedNode }) {
               ...n.data,
               properties,
             },
-          }
+          };
         }
-        return n
-      }),
-    )
-  }
+        return n;
+      })
+    );
+  };
 
   const renderProperties = () => {
     switch (node.type) {
@@ -52,7 +58,7 @@ export function PropertiesPanel({ node, setNodes, setSelectedNode }) {
               </div>
             </div>
           </>
-        )
+        );
       case "geometryNode":
         return (
           <>
@@ -61,7 +67,9 @@ export function PropertiesPanel({ node, setNodes, setSelectedNode }) {
                 <Label htmlFor="elementType">Element Type</Label>
                 <Select
                   value={properties.elementType || "all"}
-                  onValueChange={(value) => setProperties({ ...properties, elementType: value })}
+                  onValueChange={(value) =>
+                    setProperties({ ...properties, elementType: value })
+                  }
                 >
                   <SelectTrigger id="elementType">
                     <SelectValue placeholder="Select element type" />
@@ -79,7 +87,9 @@ export function PropertiesPanel({ node, setNodes, setSelectedNode }) {
                 <Label htmlFor="includeOpenings">Include Openings</Label>
                 <Select
                   value={properties.includeOpenings || "true"}
-                  onValueChange={(value) => setProperties({ ...properties, includeOpenings: value })}
+                  onValueChange={(value) =>
+                    setProperties({ ...properties, includeOpenings: value })
+                  }
                 >
                   <SelectTrigger id="includeOpenings">
                     <SelectValue placeholder="Include openings" />
@@ -92,7 +102,7 @@ export function PropertiesPanel({ node, setNodes, setSelectedNode }) {
               </div>
             </div>
           </>
-        )
+        );
       case "filterNode":
         return (
           <>
@@ -102,7 +112,9 @@ export function PropertiesPanel({ node, setNodes, setSelectedNode }) {
                 <Input
                   id="property"
                   value={properties.property || ""}
-                  onChange={(e) => setProperties({ ...properties, property: e.target.value })}
+                  onChange={(e) =>
+                    setProperties({ ...properties, property: e.target.value })
+                  }
                   placeholder="e.g. Type, Material, etc."
                 />
               </div>
@@ -110,7 +122,9 @@ export function PropertiesPanel({ node, setNodes, setSelectedNode }) {
                 <Label htmlFor="operator">Operator</Label>
                 <Select
                   value={properties.operator || "equals"}
-                  onValueChange={(value) => setProperties({ ...properties, operator: value })}
+                  onValueChange={(value) =>
+                    setProperties({ ...properties, operator: value })
+                  }
                 >
                   <SelectTrigger id="operator">
                     <SelectValue placeholder="Select operator" />
@@ -128,13 +142,15 @@ export function PropertiesPanel({ node, setNodes, setSelectedNode }) {
                 <Input
                   id="value"
                   value={properties.value || ""}
-                  onChange={(e) => setProperties({ ...properties, value: e.target.value })}
+                  onChange={(e) =>
+                    setProperties({ ...properties, value: e.target.value })
+                  }
                   placeholder="Value to match"
                 />
               </div>
             </div>
           </>
-        )
+        );
       case "transformNode":
         return (
           <>
@@ -150,7 +166,12 @@ export function PropertiesPanel({ node, setNodes, setSelectedNode }) {
                       id="translateX"
                       type="number"
                       value={properties.translateX || 0}
-                      onChange={(e) => setProperties({ ...properties, translateX: e.target.value })}
+                      onChange={(e) =>
+                        setProperties({
+                          ...properties,
+                          translateX: e.target.value,
+                        })
+                      }
                     />
                   </div>
                   <div>
@@ -161,7 +182,12 @@ export function PropertiesPanel({ node, setNodes, setSelectedNode }) {
                       id="translateY"
                       type="number"
                       value={properties.translateY || 0}
-                      onChange={(e) => setProperties({ ...properties, translateY: e.target.value })}
+                      onChange={(e) =>
+                        setProperties({
+                          ...properties,
+                          translateY: e.target.value,
+                        })
+                      }
                     />
                   </div>
                   <div>
@@ -172,7 +198,12 @@ export function PropertiesPanel({ node, setNodes, setSelectedNode }) {
                       id="translateZ"
                       type="number"
                       value={properties.translateZ || 0}
-                      onChange={(e) => setProperties({ ...properties, translateZ: e.target.value })}
+                      onChange={(e) =>
+                        setProperties({
+                          ...properties,
+                          translateZ: e.target.value,
+                        })
+                      }
                     />
                   </div>
                 </div>
@@ -188,7 +219,12 @@ export function PropertiesPanel({ node, setNodes, setSelectedNode }) {
                       id="rotateX"
                       type="number"
                       value={properties.rotateX || 0}
-                      onChange={(e) => setProperties({ ...properties, rotateX: e.target.value })}
+                      onChange={(e) =>
+                        setProperties({
+                          ...properties,
+                          rotateX: e.target.value,
+                        })
+                      }
                     />
                   </div>
                   <div>
@@ -199,7 +235,12 @@ export function PropertiesPanel({ node, setNodes, setSelectedNode }) {
                       id="rotateY"
                       type="number"
                       value={properties.rotateY || 0}
-                      onChange={(e) => setProperties({ ...properties, rotateY: e.target.value })}
+                      onChange={(e) =>
+                        setProperties({
+                          ...properties,
+                          rotateY: e.target.value,
+                        })
+                      }
                     />
                   </div>
                   <div>
@@ -210,7 +251,12 @@ export function PropertiesPanel({ node, setNodes, setSelectedNode }) {
                       id="rotateZ"
                       type="number"
                       value={properties.rotateZ || 0}
-                      onChange={(e) => setProperties({ ...properties, rotateZ: e.target.value })}
+                      onChange={(e) =>
+                        setProperties({
+                          ...properties,
+                          rotateZ: e.target.value,
+                        })
+                      }
                     />
                   </div>
                 </div>
@@ -226,7 +272,9 @@ export function PropertiesPanel({ node, setNodes, setSelectedNode }) {
                       id="scaleX"
                       type="number"
                       value={properties.scaleX || 1}
-                      onChange={(e) => setProperties({ ...properties, scaleX: e.target.value })}
+                      onChange={(e) =>
+                        setProperties({ ...properties, scaleX: e.target.value })
+                      }
                     />
                   </div>
                   <div>
@@ -237,7 +285,9 @@ export function PropertiesPanel({ node, setNodes, setSelectedNode }) {
                       id="scaleY"
                       type="number"
                       value={properties.scaleY || 1}
-                      onChange={(e) => setProperties({ ...properties, scaleY: e.target.value })}
+                      onChange={(e) =>
+                        setProperties({ ...properties, scaleY: e.target.value })
+                      }
                     />
                   </div>
                   <div>
@@ -248,14 +298,16 @@ export function PropertiesPanel({ node, setNodes, setSelectedNode }) {
                       id="scaleZ"
                       type="number"
                       value={properties.scaleZ || 1}
-                      onChange={(e) => setProperties({ ...properties, scaleZ: e.target.value })}
+                      onChange={(e) =>
+                        setProperties({ ...properties, scaleZ: e.target.value })
+                      }
                     />
                   </div>
                 </div>
               </div>
             </div>
           </>
-        )
+        );
       case "viewerNode":
         return (
           <>
@@ -264,7 +316,9 @@ export function PropertiesPanel({ node, setNodes, setSelectedNode }) {
                 <Label htmlFor="viewMode">View Mode</Label>
                 <Select
                   value={properties.viewMode || "shaded"}
-                  onValueChange={(value) => setProperties({ ...properties, viewMode: value })}
+                  onValueChange={(value) =>
+                    setProperties({ ...properties, viewMode: value })
+                  }
                 >
                   <SelectTrigger id="viewMode">
                     <SelectValue placeholder="Select view mode" />
@@ -280,7 +334,9 @@ export function PropertiesPanel({ node, setNodes, setSelectedNode }) {
                 <Label htmlFor="colorBy">Color By</Label>
                 <Select
                   value={properties.colorBy || "type"}
-                  onValueChange={(value) => setProperties({ ...properties, colorBy: value })}
+                  onValueChange={(value) =>
+                    setProperties({ ...properties, colorBy: value })
+                  }
                 >
                   <SelectTrigger id="colorBy">
                     <SelectValue placeholder="Select coloring method" />
@@ -295,7 +351,7 @@ export function PropertiesPanel({ node, setNodes, setSelectedNode }) {
               </div>
             </div>
           </>
-        )
+        );
       case "quantityNode":
         return (
           <>
@@ -304,7 +360,9 @@ export function PropertiesPanel({ node, setNodes, setSelectedNode }) {
                 <Label htmlFor="quantityType">Quantity Type</Label>
                 <Select
                   value={properties.quantityType || "area"}
-                  onValueChange={(value) => setProperties({ ...properties, quantityType: value })}
+                  onValueChange={(value) =>
+                    setProperties({ ...properties, quantityType: value })
+                  }
                 >
                   <SelectTrigger id="quantityType">
                     <SelectValue placeholder="Select quantity type" />
@@ -322,7 +380,9 @@ export function PropertiesPanel({ node, setNodes, setSelectedNode }) {
                 <Label htmlFor="groupBy">Group By</Label>
                 <Select
                   value={properties.groupBy || "none"}
-                  onValueChange={(value) => setProperties({ ...properties, groupBy: value })}
+                  onValueChange={(value) =>
+                    setProperties({ ...properties, groupBy: value })
+                  }
                 >
                   <SelectTrigger id="groupBy">
                     <SelectValue placeholder="Select grouping" />
@@ -340,13 +400,15 @@ export function PropertiesPanel({ node, setNodes, setSelectedNode }) {
                 <Input
                   id="unit"
                   value={properties.unit || ""}
-                  onChange={(e) => setProperties({ ...properties, unit: e.target.value })}
+                  onChange={(e) =>
+                    setProperties({ ...properties, unit: e.target.value })
+                  }
                   placeholder="e.g. m, m², m³"
                 />
               </div>
             </div>
           </>
-        )
+        );
 
       case "propertyNode":
         return (
@@ -356,7 +418,9 @@ export function PropertiesPanel({ node, setNodes, setSelectedNode }) {
                 <Label htmlFor="action">Action</Label>
                 <Select
                   value={properties.action || "get"}
-                  onValueChange={(value) => setProperties({ ...properties, action: value })}
+                  onValueChange={(value) =>
+                    setProperties({ ...properties, action: value })
+                  }
                 >
                   <SelectTrigger id="action">
                     <SelectValue placeholder="Select action" />
@@ -369,15 +433,74 @@ export function PropertiesPanel({ node, setNodes, setSelectedNode }) {
                   </SelectContent>
                 </Select>
               </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="targetPset">Property Set</Label>
+                <Select
+                  value={properties.targetPset || ""}
+                  onValueChange={(value) =>
+                    setProperties({ ...properties, targetPset: value })
+                  }
+                >
+                  <SelectTrigger id="targetPset">
+                    <SelectValue placeholder="Select property set" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="any">Any Property Set</SelectItem>
+                    <SelectItem value="Pset_WallCommon">
+                      Pset_WallCommon
+                    </SelectItem>
+                    <SelectItem value="Pset_BeamCommon">
+                      Pset_BeamCommon
+                    </SelectItem>
+                    <SelectItem value="Pset_SlabCommon">
+                      Pset_SlabCommon
+                    </SelectItem>
+                    <SelectItem value="Pset_ColumnCommon">
+                      Pset_ColumnCommon
+                    </SelectItem>
+                    <SelectItem value="Pset_WindowCommon">
+                      Pset_WindowCommon
+                    </SelectItem>
+                    <SelectItem value="Pset_DoorCommon">
+                      Pset_DoorCommon
+                    </SelectItem>
+                    <SelectItem value="Pset_BuildingCommon">
+                      Pset_BuildingCommon
+                    </SelectItem>
+                    <SelectItem value="Pset_SpaceCommon">
+                      Pset_SpaceCommon
+                    </SelectItem>
+                    <SelectItem value="CustomProperties">
+                      CustomProperties
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+                <div className="text-xs text-muted-foreground">
+                  For "get" action: Where to look for the property (optional).
+                  For "set/add" actions: Where to add the property.
+                </div>
+              </div>
+
               <div className="space-y-2">
                 <Label htmlFor="propertyName">Property Name</Label>
                 <Input
                   id="propertyName"
                   value={properties.propertyName || ""}
-                  onChange={(e) => setProperties({ ...properties, propertyName: e.target.value })}
-                  placeholder="Property name"
+                  onChange={(e) =>
+                    setProperties({
+                      ...properties,
+                      propertyName: e.target.value,
+                    })
+                  }
+                  placeholder="e.g. IsExternal, FireRating"
                 />
+                <div className="text-xs text-muted-foreground">
+                  Common properties: IsExternal, FireRating, LoadBearing,
+                  ThermalTransmittance
+                </div>
               </div>
+
               {properties.action === "set" || properties.action === "add" ? (
                 <>
                   <div className="space-y-2">
@@ -388,13 +511,19 @@ export function PropertiesPanel({ node, setNodes, setSelectedNode }) {
                           type="checkbox"
                           id="useValueInput"
                           checked={properties.useValueInput || false}
-                          onChange={(e) => setProperties({ ...properties, useValueInput: e.target.checked })}
+                          onChange={(e) =>
+                            setProperties({
+                              ...properties,
+                              useValueInput: e.target.checked,
+                            })
+                          }
                           className="h-4 w-4 rounded border-gray-300"
                         />
                       </div>
                     </div>
                     <div className="text-xs text-muted-foreground">
-                      When enabled, property values will be taken from the top input connection
+                      When enabled, property values will be taken from the top
+                      input connection
                     </div>
                   </div>
                   {!properties.useValueInput && (
@@ -403,7 +532,12 @@ export function PropertiesPanel({ node, setNodes, setSelectedNode }) {
                       <Input
                         id="propertyValue"
                         value={properties.propertyValue || ""}
-                        onChange={(e) => setProperties({ ...properties, propertyValue: e.target.value })}
+                        onChange={(e) =>
+                          setProperties({
+                            ...properties,
+                            propertyValue: e.target.value,
+                          })
+                        }
                         placeholder="Property value"
                       />
                     </div>
@@ -412,7 +546,7 @@ export function PropertiesPanel({ node, setNodes, setSelectedNode }) {
               ) : null}
             </div>
           </>
-        )
+        );
 
       case "classificationNode":
         return (
@@ -422,7 +556,9 @@ export function PropertiesPanel({ node, setNodes, setSelectedNode }) {
                 <Label htmlFor="system">Classification System</Label>
                 <Select
                   value={properties.system || "uniclass"}
-                  onValueChange={(value) => setProperties({ ...properties, system: value })}
+                  onValueChange={(value) =>
+                    setProperties({ ...properties, system: value })
+                  }
                 >
                   <SelectTrigger id="system">
                     <SelectValue placeholder="Select system" />
@@ -440,7 +576,9 @@ export function PropertiesPanel({ node, setNodes, setSelectedNode }) {
                 <Label htmlFor="action">Action</Label>
                 <Select
                   value={properties.action || "get"}
-                  onValueChange={(value) => setProperties({ ...properties, action: value })}
+                  onValueChange={(value) =>
+                    setProperties({ ...properties, action: value })
+                  }
                 >
                   <SelectTrigger id="action">
                     <SelectValue placeholder="Select action" />
@@ -457,14 +595,16 @@ export function PropertiesPanel({ node, setNodes, setSelectedNode }) {
                   <Input
                     id="code"
                     value={properties.code || ""}
-                    onChange={(e) => setProperties({ ...properties, code: e.target.value })}
+                    onChange={(e) =>
+                      setProperties({ ...properties, code: e.target.value })
+                    }
                     placeholder="Classification code"
                   />
                 </div>
               ) : null}
             </div>
           </>
-        )
+        );
 
       case "spatialNode":
         return (
@@ -474,7 +614,9 @@ export function PropertiesPanel({ node, setNodes, setSelectedNode }) {
                 <Label htmlFor="queryType">Query Type</Label>
                 <Select
                   value={properties.queryType || "contained"}
-                  onValueChange={(value) => setProperties({ ...properties, queryType: value })}
+                  onValueChange={(value) =>
+                    setProperties({ ...properties, queryType: value })
+                  }
                 >
                   <SelectTrigger id="queryType">
                     <SelectValue placeholder="Select query type" />
@@ -484,7 +626,9 @@ export function PropertiesPanel({ node, setNodes, setSelectedNode }) {
                     <SelectItem value="containing">Containing</SelectItem>
                     <SelectItem value="intersecting">Intersecting</SelectItem>
                     <SelectItem value="touching">Touching</SelectItem>
-                    <SelectItem value="within-distance">Within Distance</SelectItem>
+                    <SelectItem value="within-distance">
+                      Within Distance
+                    </SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -495,13 +639,15 @@ export function PropertiesPanel({ node, setNodes, setSelectedNode }) {
                     id="distance"
                     type="number"
                     value={properties.distance || "1.0"}
-                    onChange={(e) => setProperties({ ...properties, distance: e.target.value })}
+                    onChange={(e) =>
+                      setProperties({ ...properties, distance: e.target.value })
+                    }
                   />
                 </div>
               ) : null}
             </div>
           </>
-        )
+        );
 
       case "exportNode":
         return (
@@ -511,7 +657,9 @@ export function PropertiesPanel({ node, setNodes, setSelectedNode }) {
                 <Label htmlFor="format">Export Format</Label>
                 <Select
                   value={properties.format || "csv"}
-                  onValueChange={(value) => setProperties({ ...properties, format: value })}
+                  onValueChange={(value) =>
+                    setProperties({ ...properties, format: value })
+                  }
                 >
                   <SelectTrigger id="format">
                     <SelectValue placeholder="Select format" />
@@ -530,23 +678,32 @@ export function PropertiesPanel({ node, setNodes, setSelectedNode }) {
                 <Input
                   id="fileName"
                   value={properties.fileName || "export"}
-                  onChange={(e) => setProperties({ ...properties, fileName: e.target.value })}
+                  onChange={(e) =>
+                    setProperties({ ...properties, fileName: e.target.value })
+                  }
                 />
               </div>
-              {properties.format === "csv" || properties.format === "excel" || properties.format === "json" ? (
+              {properties.format === "csv" ||
+              properties.format === "excel" ||
+              properties.format === "json" ? (
                 <div className="space-y-2">
                   <Label htmlFor="properties">Include Properties</Label>
                   <Input
                     id="properties"
                     value={properties.properties || "Name,Type,Material"}
-                    onChange={(e) => setProperties({ ...properties, properties: e.target.value })}
+                    onChange={(e) =>
+                      setProperties({
+                        ...properties,
+                        properties: e.target.value,
+                      })
+                    }
                     placeholder="Comma-separated properties"
                   />
                 </div>
               ) : null}
             </div>
           </>
-        )
+        );
 
       case "relationshipNode":
         return (
@@ -556,7 +713,9 @@ export function PropertiesPanel({ node, setNodes, setSelectedNode }) {
                 <Label htmlFor="relationType">Relationship Type</Label>
                 <Select
                   value={properties.relationType || "containment"}
-                  onValueChange={(value) => setProperties({ ...properties, relationType: value })}
+                  onValueChange={(value) =>
+                    setProperties({ ...properties, relationType: value })
+                  }
                 >
                   <SelectTrigger id="relationType">
                     <SelectValue placeholder="Select relationship" />
@@ -566,7 +725,9 @@ export function PropertiesPanel({ node, setNodes, setSelectedNode }) {
                     <SelectItem value="aggregation">Aggregation</SelectItem>
                     <SelectItem value="voiding">Voiding</SelectItem>
                     <SelectItem value="material">Material</SelectItem>
-                    <SelectItem value="space-boundary">Space Boundary</SelectItem>
+                    <SelectItem value="space-boundary">
+                      Space Boundary
+                    </SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -574,7 +735,9 @@ export function PropertiesPanel({ node, setNodes, setSelectedNode }) {
                 <Label htmlFor="direction">Direction</Label>
                 <Select
                   value={properties.direction || "outgoing"}
-                  onValueChange={(value) => setProperties({ ...properties, direction: value })}
+                  onValueChange={(value) =>
+                    setProperties({ ...properties, direction: value })
+                  }
                 >
                   <SelectTrigger id="direction">
                     <SelectValue placeholder="Select direction" />
@@ -588,7 +751,7 @@ export function PropertiesPanel({ node, setNodes, setSelectedNode }) {
               </div>
             </div>
           </>
-        )
+        );
 
       case "analysisNode":
         return (
@@ -598,17 +761,23 @@ export function PropertiesPanel({ node, setNodes, setSelectedNode }) {
                 <Label htmlFor="analysisType">Analysis Type</Label>
                 <Select
                   value={properties.analysisType || "clash"}
-                  onValueChange={(value) => setProperties({ ...properties, analysisType: value })}
+                  onValueChange={(value) =>
+                    setProperties({ ...properties, analysisType: value })
+                  }
                 >
                   <SelectTrigger id="analysisType">
                     <SelectValue placeholder="Select analysis type" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="clash">Clash Detection</SelectItem>
-                    <SelectItem value="adjacency">Adjacency Analysis</SelectItem>
+                    <SelectItem value="adjacency">
+                      Adjacency Analysis
+                    </SelectItem>
                     <SelectItem value="space">Space Analysis</SelectItem>
                     <SelectItem value="path">Path Finding</SelectItem>
-                    <SelectItem value="visibility">Visibility Analysis</SelectItem>
+                    <SelectItem value="visibility">
+                      Visibility Analysis
+                    </SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -619,7 +788,12 @@ export function PropertiesPanel({ node, setNodes, setSelectedNode }) {
                     id="tolerance"
                     type="number"
                     value={properties.tolerance || "10"}
-                    onChange={(e) => setProperties({ ...properties, tolerance: e.target.value })}
+                    onChange={(e) =>
+                      setProperties({
+                        ...properties,
+                        tolerance: e.target.value,
+                      })
+                    }
                   />
                 </div>
               ) : null}
@@ -628,7 +802,9 @@ export function PropertiesPanel({ node, setNodes, setSelectedNode }) {
                   <Label htmlFor="metric">Metric</Label>
                   <Select
                     value={properties.metric || "area"}
-                    onValueChange={(value) => setProperties({ ...properties, metric: value })}
+                    onValueChange={(value) =>
+                      setProperties({ ...properties, metric: value })
+                    }
                   >
                     <SelectTrigger id="metric">
                       <SelectValue placeholder="Select metric" />
@@ -644,7 +820,7 @@ export function PropertiesPanel({ node, setNodes, setSelectedNode }) {
               ) : null}
             </div>
           </>
-        )
+        );
 
       case "watchNode":
         return (
@@ -654,7 +830,9 @@ export function PropertiesPanel({ node, setNodes, setSelectedNode }) {
                 <Label htmlFor="displayMode">Display Mode</Label>
                 <Select
                   value={properties.displayMode || "table"}
-                  onValueChange={(value) => setProperties({ ...properties, displayMode: value })}
+                  onValueChange={(value) =>
+                    setProperties({ ...properties, displayMode: value })
+                  }
                 >
                   <SelectTrigger id="displayMode">
                     <SelectValue placeholder="Select display mode" />
@@ -662,9 +840,16 @@ export function PropertiesPanel({ node, setNodes, setSelectedNode }) {
                   <SelectContent>
                     <SelectItem value="table">Table</SelectItem>
                     <SelectItem value="raw">Raw JSON</SelectItem>
-                    <SelectItem value="chart">Chart</SelectItem>
+                    <SelectItem value="summary">Summary</SelectItem>
                   </SelectContent>
                 </Select>
+                <div className="text-xs text-muted-foreground">
+                  {properties.displayMode === "table" &&
+                    "Display data in a tabular format"}
+                  {properties.displayMode === "raw" && "Show raw JSON data"}
+                  {properties.displayMode === "summary" &&
+                    "Summarize data with counts and statistics"}
+                </div>
               </div>
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
@@ -674,13 +859,19 @@ export function PropertiesPanel({ node, setNodes, setSelectedNode }) {
                       type="checkbox"
                       id="autoUpdate"
                       checked={properties.autoUpdate || false}
-                      onChange={(e) => setProperties({ ...properties, autoUpdate: e.target.checked })}
+                      onChange={(e) =>
+                        setProperties({
+                          ...properties,
+                          autoUpdate: e.target.checked,
+                        })
+                      }
                       className="h-4 w-4 rounded border-gray-300"
                     />
                   </div>
                 </div>
                 <div className="text-xs text-muted-foreground">
-                  When enabled, watch will update automatically when input changes
+                  When enabled, watch will update automatically when input
+                  changes
                 </div>
               </div>
               <div className="space-y-2">
@@ -690,7 +881,7 @@ export function PropertiesPanel({ node, setNodes, setSelectedNode }) {
                   className="w-full"
                   onClick={() => {
                     // In a real app, this would trigger a data refresh
-                    console.log("Refreshing watch data")
+                    console.log("Refreshing watch data");
                   }}
                 >
                   Refresh Data
@@ -698,7 +889,7 @@ export function PropertiesPanel({ node, setNodes, setSelectedNode }) {
               </div>
             </div>
           </>
-        )
+        );
 
       case "parameterNode":
         return (
@@ -708,7 +899,9 @@ export function PropertiesPanel({ node, setNodes, setSelectedNode }) {
                 <Label htmlFor="paramType">Parameter Type</Label>
                 <Select
                   value={properties.paramType || "number"}
-                  onValueChange={(value) => setProperties({ ...properties, paramType: value })}
+                  onValueChange={(value) =>
+                    setProperties({ ...properties, paramType: value })
+                  }
                 >
                   <SelectTrigger id="paramType">
                     <SelectValue placeholder="Select parameter type" />
@@ -730,7 +923,9 @@ export function PropertiesPanel({ node, setNodes, setSelectedNode }) {
                       id="value"
                       type="number"
                       value={properties.value || "0"}
-                      onChange={(e) => setProperties({ ...properties, value: e.target.value })}
+                      onChange={(e) =>
+                        setProperties({ ...properties, value: e.target.value })
+                      }
                     />
                   </div>
                   <div className="space-y-2">
@@ -767,7 +962,9 @@ export function PropertiesPanel({ node, setNodes, setSelectedNode }) {
                   <Input
                     id="value"
                     value={properties.value || ""}
-                    onChange={(e) => setProperties({ ...properties, value: e.target.value })}
+                    onChange={(e) =>
+                      setProperties({ ...properties, value: e.target.value })
+                    }
                   />
                 </div>
               ) : properties.paramType === "boolean" ? (
@@ -779,7 +976,12 @@ export function PropertiesPanel({ node, setNodes, setSelectedNode }) {
                         type="checkbox"
                         id="boolValue"
                         checked={properties.value === "true"}
-                        onChange={(e) => setProperties({ ...properties, value: e.target.checked ? "true" : "false" })}
+                        onChange={(e) =>
+                          setProperties({
+                            ...properties,
+                            value: e.target.checked ? "true" : "false",
+                          })
+                        }
                         className="h-4 w-4 rounded border-gray-300"
                       />
                     </div>
@@ -788,11 +990,18 @@ export function PropertiesPanel({ node, setNodes, setSelectedNode }) {
               ) : properties.paramType === "list" ? (
                 <>
                   <div className="space-y-2">
-                    <Label htmlFor="listItems">List Items (comma separated)</Label>
+                    <Label htmlFor="listItems">
+                      List Items (comma separated)
+                    </Label>
                     <Input
                       id="listItems"
                       value={properties.listItems || ""}
-                      onChange={(e) => setProperties({ ...properties, listItems: e.target.value })}
+                      onChange={(e) =>
+                        setProperties({
+                          ...properties,
+                          listItems: e.target.value,
+                        })
+                      }
                       placeholder="Item1, Item2, Item3"
                     />
                   </div>
@@ -800,17 +1009,21 @@ export function PropertiesPanel({ node, setNodes, setSelectedNode }) {
                     <Label htmlFor="selectedItem">Selected Item</Label>
                     <Select
                       value={properties.value || ""}
-                      onValueChange={(value) => setProperties({ ...properties, value })}
+                      onValueChange={(value) =>
+                        setProperties({ ...properties, value })
+                      }
                     >
                       <SelectTrigger id="selectedItem">
                         <SelectValue placeholder="Select an item" />
                       </SelectTrigger>
                       <SelectContent>
-                        {(properties.listItems || "").split(",").map((item, index) => (
-                          <SelectItem key={index} value={item.trim()}>
-                            {item.trim()}
-                          </SelectItem>
-                        ))}
+                        {(properties.listItems || "")
+                          .split(",")
+                          .map((item, index) => (
+                            <SelectItem key={index} value={item.trim()}>
+                              {item.trim()}
+                            </SelectItem>
+                          ))}
                       </SelectContent>
                     </Select>
                   </div>
@@ -818,24 +1031,28 @@ export function PropertiesPanel({ node, setNodes, setSelectedNode }) {
               ) : null}
             </div>
           </>
-        )
+        );
 
       default:
         return (
           <div className="text-center text-sm text-muted-foreground py-4">
             No properties available for this node type.
           </div>
-        )
+        );
     }
-  }
+  };
 
-  if (!node) return null
+  if (!node) return null;
 
   return (
     <div className="w-80 border-l bg-card">
       <div className="flex items-center justify-between p-4 border-b">
         <h3 className="font-medium">Properties: {node.data.label}</h3>
-        <Button variant="ghost" size="icon" onClick={() => setSelectedNode(null)}>
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => setSelectedNode(null)}
+        >
           <X className="h-4 w-4" />
         </Button>
       </div>
@@ -857,11 +1074,11 @@ export function PropertiesPanel({ node, setNodes, setSelectedNode }) {
                             ...n.data,
                             label: e.target.value,
                           },
-                        }
+                        };
                       }
-                      return n
-                    }),
-                  )
+                      return n;
+                    })
+                  );
                 }}
               />
             </div>
@@ -879,6 +1096,5 @@ export function PropertiesPanel({ node, setNodes, setSelectedNode }) {
         </div>
       </ScrollArea>
     </div>
-  )
+  );
 }
-
