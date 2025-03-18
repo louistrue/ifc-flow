@@ -1,101 +1,1194 @@
-import Image from "next/image";
+"use client"
 
+import { useState, useCallback, useRef, useEffect } from "react"
+import ReactFlow, {
+  ReactFlowProvider,
+  addEdge,
+  useNodesState,
+  useEdgesState,
+  Controls,
+  Background,
+  Panel,
+  MiniMap,
+  useReactFlow,
+  type Connection,
+  type NodeTypes,
+  type Edge,
+  type Node,
+  type NodeChange,
+  applyNodeChanges,
+} from "reactflow"
+import "reactflow/dist/style.css"
+import { Sidebar } from "@/components/sidebar"
+import { PropertiesPanel } from "@/components/properties-panel"
+import { IfcNode } from "@/components/nodes/ifc-node"
+import { GeometryNode } from "@/components/nodes/geometry-node"
+import { FilterNode } from "@/components/nodes/filter-node"
+import { TransformNode } from "@/components/nodes/transform-node"
+import { ViewerNode } from "@/components/nodes/viewer-node"
+import { AppMenubar } from "@/components/menubar"
+import { QuantityNode } from "@/components/nodes/quantity-node"
+import { PropertyNode } from "@/components/nodes/property-node"
+import { ClassificationNode } from "@/components/nodes/classification-node"
+import { SpatialNode } from "@/components/nodes/spatial-node"
+import { ExportNode } from "@/components/nodes/export-node"
+import { RelationshipNode } from "@/components/nodes/relationship-node"
+import { AnalysisNode } from "@/components/nodes/analysis-node"
+import { WatchNode } from "@/components/nodes/watch-node"
+import { ParameterNode } from "@/components/nodes/parameter-node"
+import { Toaster } from "@/components/toaster"
+import { WorkflowExecutor } from "@/lib/workflow-executor"
+import { loadIfcFile } from "@/lib/ifc-utils"
+import { useToast } from "@/hooks/use-toast"
+import { FileUp } from "lucide-react"
+import type { Workflow } from "@/lib/workflow-storage"
+import { useHotkeys } from "react-hotkeys-hook"
+import { parseKeyCombination, useKeyboardShortcuts } from "@/lib/keyboard-shortcuts"
+import { useAppSettings } from "@/lib/settings-manager"
+import { useTheme } from "next-themes"
+
+// Define custom node types
+const nodeTypes: NodeTypes = {
+  ifcNode: IfcNode,
+  geometryNode: GeometryNode,
+  filterNode: FilterNode,
+  transformNode: TransformNode,
+  viewerNode: ViewerNode,
+  quantityNode: QuantityNode,
+  propertyNode: PropertyNode,
+  classificationNode: ClassificationNode,
+  spatialNode: SpatialNode,
+  exportNode: ExportNode,
+  relationshipNode: RelationshipNode,
+  analysisNode: AnalysisNode,
+  watchNode: WatchNode,
+  parameterNode: ParameterNode,
+}
+
+// Custom node style to highlight selected nodes
+const nodeStyle = {
+  selected: {
+    boxShadow: "0 0 10px 2px rgba(59, 130, 246, 0.6)",
+    borderRadius: "6px",
+    zIndex: 10,
+  },
+  default: {},
+}
+
+// Create a wrapper component that uses the ReactFlow hooks
+function FlowWithProvider() {
+  // Initial nodes and edges
+  const [nodes, setNodes, onNodesChange] = useNodesState([])
+  const [edges, setEdges, onEdgesChange] = useEdgesState([])
+  const [selectedNode, setSelectedNode] = useState(null)
+  const [editingNode, setEditingNode] = useState(null) // New state for editing node
+  const reactFlowWrapper = useRef(null)
+  const [reactFlowInstance, setReactFlowInstance] = useState(null)
+  const { toast } = useToast()
+  const { shortcuts } = useKeyboardShortcuts()
+  const { settings } = useAppSettings()
+  const { theme, setTheme } = useTheme()
+
+  // View settings
+  const [showGrid, setShowGrid] = useState(settings.viewer.showGrid)
+  const [showMinimap, setShowMinimap] = useState(false)
+
+  // Current workflow state
+  const [currentWorkflow, setCurrentWorkflow] = useState<Workflow | null>(null)
+
+  // Workflow execution state
+  const [isRunning, setIsRunning] = useState(false)
+  const [executionResults, setExecutionResults] = useState(new Map())
+
+  // Undo/redo state
+  const [history, setHistory] = useState<{ nodes: Node[]; edges: Edge[] }[]>([])
+  const [historyIndex, setHistoryIndex] = useState(-1)
+  const [canUndo, setCanUndo] = useState(false)
+  const [canRedo, setCanRedo] = useState(false)
+
+  // Node movement tracking
+  const [nodeMovementStart, setNodeMovementStart] = useState<{ [key: string]: { x: number; y: number } }>({})
+  const [isNodeDragging, setIsNodeDragging] = useState(false)
+
+  // File drop state
+  const [isFileDragging, setIsFileDragging] = useState(false)
+
+  // Clipboard state for copy/paste
+  const [clipboard, setClipboard] = useState<{ nodes: Node[]; edges: Edge[] } | null>(null)
+
+  // Auto-save timer
+  const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null)
+
+  // Get the ReactFlow utility functions
+  const reactFlowUtils = useReactFlow()
+
+  // Apply theme from settings
+  useEffect(() => {
+    if (settings.general.theme !== "system") {
+      setTheme(settings.general.theme)
+    }
+  }, [settings.general.theme, setTheme])
+
+  // Apply grid setting from settings
+  useEffect(() => {
+    setShowGrid(settings.viewer.showGrid)
+  }, [settings.viewer.showGrid])
+
+  // Set up auto-save
+  useEffect(() => {
+    // Clear any existing timer
+    if (autoSaveTimerRef.current) {
+      clearInterval(autoSaveTimerRef.current)
+      autoSaveTimerRef.current = null
+    }
+
+    // Set up new timer if auto-save is enabled
+    if (settings.general.autoSave && currentWorkflow) {
+      const interval = settings.general.autoSaveInterval * 60 * 1000 // Convert minutes to milliseconds
+      autoSaveTimerRef.current = setInterval(() => {
+        handleAutoSave()
+      }, interval)
+    }
+
+    return () => {
+      if (autoSaveTimerRef.current) {
+        clearInterval(autoSaveTimerRef.current)
+      }
+    }
+  }, [settings.general.autoSave, settings.general.autoSaveInterval, currentWorkflow])
+
+  // Handle auto-save
+  const handleAutoSave = () => {
+    if (currentWorkflow && reactFlowInstance) {
+      const flowData = reactFlowInstance.toObject()
+      const updatedWorkflow = {
+        ...currentWorkflow,
+        flowData,
+        updatedAt: new Date().toISOString(),
+      }
+
+      // Save to storage
+      import("@/lib/workflow-storage").then(({ workflowStorage }) => {
+        workflowStorage.saveWorkflow(updatedWorkflow)
+        toast({
+          title: "Auto-saved",
+          description: `Workflow "${currentWorkflow.name}" has been auto-saved`,
+        })
+      })
+    }
+  }
+
+  // Custom node changes handler to track only start and end positions
+  const handleNodesChange = useCallback(
+    (changes: NodeChange[]) => {
+      // Track the start of node dragging
+      changes.forEach((change) => {
+        if (change.type === "position" && change.dragging) {
+          if (!isNodeDragging) {
+            // This is the start of a drag operation
+            setIsNodeDragging(true)
+
+            // Store the starting positions of all selected nodes
+            const startPositions = {}
+            nodes.forEach((node) => {
+              if (node.selected || node.id === change.id) {
+                startPositions[node.id] = { ...node.position }
+              }
+            })
+
+            if (Object.keys(startPositions).length > 0 && Object.keys(nodeMovementStart).length === 0) {
+              setNodeMovementStart(startPositions)
+            }
+          }
+        } else if (change.type === "position" && change.dragging === false && isNodeDragging) {
+          // This is the end of a drag operation
+          setIsNodeDragging(false)
+
+          // Only add to history if we have start positions and this is a real movement
+          if (Object.keys(nodeMovementStart).length > 0) {
+            // Add the current state to history
+            setHistory((prev) => [...prev.slice(0, historyIndex + 1), { nodes, edges }])
+            setHistoryIndex((prev) => prev + 1)
+
+            // Reset the start positions
+            setNodeMovementStart({})
+          }
+        } else if (change.type === "select") {
+          // When a node is selected, update the selectedNode state
+          if (change.selected) {
+            const node = nodes.find((n) => n.id === change.id)
+            if (node) {
+              setSelectedNode(node)
+            }
+          } else if (selectedNode && selectedNode.id === change.id) {
+            // If the currently selected node is deselected, clear the selection
+            setSelectedNode(null)
+          }
+        }
+      })
+
+      // Apply the changes to nodes with custom styling for selected nodes
+      const updatedNodes = applyNodeChanges(changes, nodes).map((node) => {
+        if (node.selected) {
+          return {
+            ...node,
+            style: { ...node.style, ...nodeStyle.selected },
+          }
+        } else {
+          // Remove selection styling if not selected
+          const { boxShadow, border, borderRadius, zIndex, ...restStyle } = node.style || {}
+          return {
+            ...node,
+            style: restStyle,
+          }
+        }
+      })
+
+      setNodes(updatedNodes)
+    },
+    [nodes, edges, isNodeDragging, nodeMovementStart, historyIndex, selectedNode],
+  )
+
+  // Update canUndo and canRedo
+  useEffect(() => {
+    setCanUndo(historyIndex > 0)
+    setCanRedo(historyIndex < history.length - 1)
+  }, [historyIndex, history])
+
+  // Add event listeners for file drag events on the document
+  useEffect(() => {
+    const handleDocumentDragOver = (e) => {
+      e.preventDefault()
+      // Check if files are being dragged
+      if (e.dataTransfer.types.includes("Files")) {
+        setIsFileDragging(true)
+      }
+    }
+
+    const handleDocumentDragLeave = (e) => {
+      // Only consider it a leave if we're leaving the document
+      if (e.clientX <= 0 || e.clientY <= 0 || e.clientX >= window.innerWidth || e.clientY >= window.innerHeight) {
+        setIsFileDragging(false)
+      }
+    }
+
+    const handleDocumentDrop = () => {
+      setIsFileDragging(false)
+    }
+
+    document.addEventListener("dragover", handleDocumentDragOver)
+    document.addEventListener("dragleave", handleDocumentDragLeave)
+    document.addEventListener("drop", handleDocumentDrop)
+
+    return () => {
+      document.removeEventListener("dragover", handleDocumentDragOver)
+      document.removeEventListener("dragleave", handleDocumentDragLeave)
+      document.removeEventListener("drop", handleDocumentDrop)
+    }
+  }, [])
+
+  // Handle undo
+  const handleUndo = useCallback(() => {
+    if (historyIndex > 0) {
+      const newIndex = historyIndex - 1
+      const { nodes: prevNodes, edges: prevEdges } = history[newIndex]
+
+      // Apply selection styling to nodes
+      const styledNodes = prevNodes.map((node) => {
+        if (node.selected) {
+          return {
+            ...node,
+            style: { ...node.style, ...nodeStyle.selected },
+          }
+        }
+        return node
+      })
+
+      setNodes(styledNodes)
+      setEdges(prevEdges)
+      setHistoryIndex(newIndex)
+
+      // Update selected node
+      const selectedNodes = styledNodes.filter((node) => node.selected)
+      if (selectedNodes.length === 1) {
+        setSelectedNode(selectedNodes[0])
+      } else {
+        setSelectedNode(null)
+      }
+    }
+  }, [historyIndex, history, setNodes, setEdges])
+
+  // Handle redo
+  const handleRedo = useCallback(() => {
+    if (historyIndex < history.length - 1) {
+      const newIndex = historyIndex + 1
+      const { nodes: nextNodes, edges: nextEdges } = history[newIndex]
+
+      // Apply selection styling to nodes
+      const styledNodes = nextNodes.map((node) => {
+        if (node.selected) {
+          return {
+            ...node,
+            style: { ...node.style, ...nodeStyle.selected },
+          }
+        }
+        return node
+      })
+
+      setNodes(styledNodes)
+      setEdges(nextEdges)
+      setHistoryIndex(newIndex)
+
+      // Update selected node
+      const selectedNodes = styledNodes.filter((node) => node.selected)
+      if (selectedNodes.length === 1) {
+        setSelectedNode(selectedNodes[0])
+      } else {
+        setSelectedNode(null)
+      }
+    }
+  }, [historyIndex, history, setNodes, setEdges])
+
+  // Handle connections between nodes
+  const onConnect = useCallback(
+    (connection: Connection) => {
+      setEdges((eds) => {
+        const newEdges = addEdge(connection, eds)
+
+        // Add to history
+        setHistory((prev) => [...prev.slice(0, historyIndex + 1), { nodes, edges: newEdges }])
+        setHistoryIndex((prev) => prev + 1)
+
+        return newEdges
+      })
+    },
+    [nodes, edges, historyIndex, setEdges],
+  )
+
+  // Handle node selection for properties panel
+  const onNodeClick = useCallback((event, node) => {
+    // Single click only selects the node but doesn't open the properties panel
+    // The selection is handled in handleNodesChange
+  }, [])
+
+  // Handle node double-click to open properties panel
+  const onNodeDoubleClick = useCallback((event, node) => {
+    // Double click opens the properties panel
+    setEditingNode(node)
+  }, [])
+
+  // Handle dropping new nodes from the sidebar
+  const onDragOver = useCallback((event) => {
+    event.preventDefault()
+
+    // Handle different drag types
+    if (event.dataTransfer.types.includes("application/reactflow")) {
+      event.dataTransfer.dropEffect = "move"
+    } else if (event.dataTransfer.types.includes("Files")) {
+      event.dataTransfer.dropEffect = "copy"
+    }
+  }, [])
+
+  // Handle dropping files or nodes on the canvas
+  const onDrop = useCallback(
+    (event) => {
+      event.preventDefault()
+      setIsFileDragging(false)
+
+      const reactFlowBounds = reactFlowWrapper.current.getBoundingClientRect()
+
+      // Get the position where the item was dropped
+      const position = reactFlowInstance.project({
+        x: event.clientX - reactFlowBounds.left,
+        y: event.clientY - reactFlowBounds.top,
+      })
+
+      // Check if a node is being dropped from the sidebar
+      const nodeType = event.dataTransfer.getData("application/reactflow")
+      if (nodeType && nodeType !== "") {
+        // Create a new node
+        const newNode = {
+          id: `${nodeType}-${Date.now()}`,
+          type: nodeType,
+          position,
+          data: { label: `${nodeType.replace("Node", "")}`, properties: {} },
+        }
+
+        setNodes((nds) => {
+          // Deselect all nodes
+          const deselectedNodes = nds.map((n) => ({
+            ...n,
+            selected: false,
+            style: { ...n.style },
+          }))
+
+          // Add the new node (selected)
+          const newNodes = [
+            ...deselectedNodes,
+            {
+              ...newNode,
+              selected: true,
+              style: nodeStyle.selected,
+            },
+          ]
+
+          // Set the new node as selected
+          setSelectedNode(newNode)
+
+          // Add to history
+          setHistory((prev) => [...prev.slice(0, historyIndex + 1), { nodes: newNodes, edges }])
+          setHistoryIndex((prev) => prev + 1)
+
+          return newNodes
+        })
+        return
+      }
+
+      // Check if files are being dropped
+      if (event.dataTransfer.files && event.dataTransfer.files.length > 0) {
+        const file = event.dataTransfer.files[0]
+
+        // Check if it's an IFC file
+        if (file.name.toLowerCase().endsWith(".ifc")) {
+          handleCreateIfcNode(file, position)
+        } else {
+          toast({
+            title: "Invalid file type",
+            description: "Only IFC files are supported",
+            variant: "destructive",
+          })
+        }
+      }
+    },
+    [reactFlowInstance, setNodes, edges, historyIndex, toast],
+  )
+
+  // Create a new IFC node with the dropped file
+  const handleCreateIfcNode = async (file, position) => {
+    try {
+      // Create a new IFC node
+      const newNodeId = `ifcNode-${Date.now()}`
+
+      // Add the node first with a loading state
+      setNodes((nds) => {
+        // Deselect all nodes
+        const deselectedNodes = nds.map((n) => ({
+          ...n,
+          selected: false,
+          style: { ...n.style },
+        }))
+
+        // Add the new node (selected)
+        const newNode = {
+          id: newNodeId,
+          type: "ifcNode",
+          position,
+          data: {
+            label: file.name,
+            properties: { file: file.name },
+            isLoading: true,
+          },
+          selected: true,
+          style: nodeStyle.selected,
+        }
+
+        const newNodes = [...deselectedNodes, newNode]
+
+        // Set the new node as selected
+        setSelectedNode(newNode)
+
+        // Add to history
+        setHistory((prev) => [...prev.slice(0, historyIndex + 1), { nodes: newNodes, edges }])
+        setHistoryIndex((prev) => prev + 1)
+
+        return newNodes
+      })
+
+      // Load the IFC file
+      const model = await loadIfcFile(file)
+
+      // Update the node with the loaded model
+      setNodes((nds) => {
+        const updatedNodes = nds.map((node) => {
+          if (node.id === newNodeId) {
+            return {
+              ...node,
+              data: {
+                ...node.data,
+                model,
+                isLoading: false,
+              },
+              selected: true,
+              style: nodeStyle.selected,
+            }
+          }
+          return node
+        })
+
+        // Add to history
+        setHistory((prev) => [...prev.slice(0, historyIndex + 1), { nodes: updatedNodes, edges }])
+        setHistoryIndex((prev) => prev + 1)
+
+        return updatedNodes
+      })
+
+      toast({
+        title: "IFC file loaded",
+        description: `Successfully loaded ${file.name}`,
+      })
+    } catch (error) {
+      console.error("Error loading IFC file:", error)
+      toast({
+        title: "Error loading IFC file",
+        description: error.message,
+        variant: "destructive",
+      })
+    }
+  }
+
+  // Handle opening an IFC file
+  const handleOpenFile = async (file) => {
+    try {
+      const model = await loadIfcFile(file)
+
+      // Create a new IFC node with the loaded model
+      const ifcNode = {
+        id: `ifcNode-${Date.now()}`,
+        type: "ifcNode",
+        position: { x: 100, y: 100 },
+        data: {
+          label: file.name,
+          properties: { file: file.name },
+          model,
+        },
+        selected: true,
+        style: nodeStyle.selected,
+      }
+
+      setNodes((nds) => {
+        // Deselect all nodes
+        const deselectedNodes = nds.map((n) => ({
+          ...n,
+          selected: false,
+          style: { ...n.style },
+        }))
+
+        const newNodes = [...deselectedNodes, ifcNode]
+
+        // Set the new node as selected
+        setSelectedNode(ifcNode)
+
+        // Add to history
+        setHistory((prev) => [...prev.slice(0, historyIndex + 1), { nodes: newNodes, edges }])
+        setHistoryIndex((prev) => prev + 1)
+
+        return newNodes
+      })
+    } catch (error) {
+      console.error("Error loading IFC file:", error)
+      toast({
+        title: "Error loading IFC file",
+        description: error.message,
+        variant: "destructive",
+      })
+    }
+  }
+
+  // Handle saving a workflow
+  const handleSaveWorkflow = (filename, flowData) => {
+    // In a real app, this would save to a file or database
+    const json = JSON.stringify(flowData, null, 2)
+    const blob = new Blob([json], { type: "application/json" })
+    const url = URL.createObjectURL(blob)
+
+    const a = document.createElement("a")
+    a.href = url
+    a.download = `${filename}.json`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+
+  // Handle loading a workflow from the library
+  const handleLoadWorkflow = (workflow: Workflow) => {
+    if (workflow && workflow.flowData) {
+      // Clear current state
+      setNodes([])
+      setEdges([])
+
+      // Set the current workflow
+      setCurrentWorkflow(workflow)
+
+      // Load the workflow data
+      if (reactFlowInstance) {
+        // Small delay to ensure the canvas is clear
+        setTimeout(() => {
+          const { nodes: flowNodes, edges: flowEdges } = workflow.flowData
+
+          // Apply selection styling to nodes
+          const styledNodes = (flowNodes || []).map((node) => {
+            if (node.selected) {
+              return {
+                ...node,
+                style: { ...node.style, ...nodeStyle.selected },
+              }
+            }
+            return node
+          })
+
+          // Load nodes and edges
+          setNodes(styledNodes)
+          setEdges(flowEdges || [])
+
+          // Reset history
+          setHistory([{ nodes: styledNodes, edges: flowEdges || [] }])
+          setHistoryIndex(0)
+
+          // Update selected node
+          const selectedNodes = styledNodes.filter((node) => node.selected)
+          if (selectedNodes.length === 1) {
+            setSelectedNode(selectedNodes[0])
+          } else {
+            setSelectedNode(null)
+          }
+
+          // Don't automatically fit view - user can manually fit if needed
+          // reactFlowInstance.fitView()
+        }, 50)
+      }
+    }
+  }
+
+  // Handle running a workflow
+  const handleRunWorkflow = async () => {
+    try {
+      const executor = new WorkflowExecutor(nodes, edges)
+      const results = await executor.execute()
+      setExecutionResults(results)
+
+      // Update node data with results
+      setNodes((nds) => {
+        const updatedNodes = nds.map((node) => {
+          if (results.has(node.id)) {
+            return {
+              ...node,
+              data: {
+                ...node.data,
+                result: results.get(node.id),
+              },
+            }
+          }
+          return node
+        })
+
+        return updatedNodes
+      })
+
+      setIsRunning(false)
+    } catch (error) {
+      console.error("Error executing workflow:", error)
+      setIsRunning(false)
+      toast({
+        title: "Error executing workflow",
+        description: error.message,
+        variant: "destructive",
+      })
+    }
+  }
+
+  // Handle exporting results
+  const handleExportResults = (format, filename) => {
+    // Find export nodes and their results
+    const exportNodes = nodes.filter((node) => node.type === "exportNode")
+
+    if (exportNodes.length === 0) {
+      console.warn("No export nodes found in workflow")
+      toast({
+        title: "Export failed",
+        description: "No export nodes found in workflow",
+        variant: "destructive",
+      })
+      return
+    }
+
+    // Export data from the first export node
+    const node = exportNodes[0]
+    const nodeId = node.id
+
+    if (!executionResults.has(nodeId)) {
+      console.warn("No results found for export node")
+      toast({
+        title: "Export failed",
+        description: "No results found for export node. Run the workflow first.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    const result = executionResults.get(nodeId)
+
+    // In a real app, this would create a file based on the format
+    const blob = new Blob([result], { type: "text/plain" })
+    const url = URL.createObjectURL(blob)
+
+    const a = document.createElement("a")
+    a.href = url
+    a.download = `${filename}.${format}`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+
+  // Function to get the flow object for saving
+  const getFlowObject = () => {
+    if (reactFlowInstance) {
+      return reactFlowInstance.toObject()
+    }
+    return { nodes, edges }
+  }
+
+  // Handle select all nodes
+  const handleSelectAll = useCallback(() => {
+    setNodes((nds) => {
+      const updatedNodes = nds.map((node) => ({
+        ...node,
+        selected: true,
+        style: { ...node.style, ...nodeStyle.selected },
+      }))
+      return updatedNodes
+    })
+
+    // Clear selected node since multiple are selected
+    setSelectedNode(null)
+
+    toast({
+      title: "Select All",
+      description: `Selected ${nodes.length} nodes`,
+    })
+  }, [nodes, setNodes, toast])
+
+  // Handle copy selected nodes
+  const handleCopy = useCallback(() => {
+    const selectedNodes = nodes.filter((node) => node.selected)
+
+    if (selectedNodes.length === 0) {
+      toast({
+        title: "Nothing to copy",
+        description: "Select nodes to copy first",
+      })
+      return
+    }
+
+    // Get all edges between selected nodes
+    const nodeIds = selectedNodes.map((node) => node.id)
+    const relevantEdges = edges.filter((edge) => nodeIds.includes(edge.source) && nodeIds.includes(edge.target))
+
+    // Store in clipboard
+    setClipboard({
+      nodes: selectedNodes,
+      edges: relevantEdges,
+    })
+
+    toast({
+      title: "Copied",
+      description: `Copied ${selectedNodes.length} nodes to clipboard`,
+    })
+  }, [nodes, edges, toast])
+
+  // Handle cut selected nodes
+  const handleCut = useCallback(() => {
+    const selectedNodes = nodes.filter((node) => node.selected)
+
+    if (selectedNodes.length === 0) {
+      toast({
+        title: "Nothing to cut",
+        description: "Select nodes to cut first",
+      })
+      return
+    }
+
+    // Get all edges between selected nodes
+    const nodeIds = selectedNodes.map((node) => node.id)
+    const relevantEdges = edges.filter((edge) => nodeIds.includes(edge.source) && nodeIds.includes(edge.target))
+
+    // Store in clipboard
+    setClipboard({
+      nodes: selectedNodes,
+      edges: relevantEdges,
+    })
+
+    // Remove the nodes and edges
+    setNodes((nds) => nds.filter((node) => !node.selected))
+    setEdges((eds) => eds.filter((edge) => !nodeIds.includes(edge.source) || !nodeIds.includes(edge.target)))
+
+    // Clear selected node if it was cut
+    if (selectedNode && nodeIds.includes(selectedNode.id)) {
+      setSelectedNode(null)
+    }
+
+    // Add to history
+    const newNodes = nodes.filter((node) => !nodeIds.includes(node.id))
+    const newEdges = edges.filter((edge) => !nodeIds.includes(edge.source) && !nodeIds.includes(edge.target))
+
+    setHistory((prev) => [...prev.slice(0, historyIndex + 1), { nodes: newNodes, edges: newEdges }])
+    setHistoryIndex((prev) => prev + 1)
+
+    toast({
+      title: "Cut",
+      description: `Cut ${selectedNodes.length} nodes to clipboard`,
+    })
+  }, [nodes, edges, selectedNode, historyIndex, toast])
+
+  // Handle paste nodes
+  const handlePaste = useCallback(() => {
+    if (!clipboard || clipboard.nodes.length === 0) {
+      toast({
+        title: "Nothing to paste",
+        description: "Copy or cut nodes first",
+      })
+      return
+    }
+
+    // Create new IDs for the pasted nodes
+    const idMap = {}
+    const newNodes = clipboard.nodes.map((node) => {
+      const newId = `${node.type}-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`
+      idMap[node.id] = newId
+
+      // Offset position slightly to make it clear it's a copy
+      const position = {
+        x: node.position.x + 50,
+        y: node.position.y + 50,
+      }
+
+      return {
+        ...node,
+        id: newId,
+        position,
+        selected: true,
+        style: { ...node.style, ...nodeStyle.selected },
+      }
+    })
+
+    // Update edges with new IDs
+    const newEdges = clipboard.edges.map((edge) => ({
+      ...edge,
+      id: `e-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+      source: idMap[edge.source],
+      target: idMap[edge.target],
+    }))
+
+    // Deselect all current nodes
+    setNodes((nds) => {
+      const deselectedNodes = nds.map((n) => ({
+        ...n,
+        selected: false,
+        style: { ...n.style },
+      }))
+
+      // Add the new nodes
+      const updatedNodes = [...deselectedNodes, ...newNodes]
+
+      // Add to history
+      setHistory((prev) => [
+        ...prev.slice(0, historyIndex + 1),
+        { nodes: updatedNodes, edges: [...edges, ...newEdges] },
+      ])
+      setHistoryIndex((prev) => prev + 1)
+
+      return updatedNodes
+    })
+
+    // Add the new edges
+    setEdges((eds) => [...eds, ...newEdges])
+
+    toast({
+      title: "Pasted",
+      description: `Pasted ${newNodes.length} nodes from clipboard`,
+    })
+  }, [clipboard, nodes, edges, historyIndex, toast])
+
+  // Handle delete selected nodes
+  const handleDelete = useCallback(() => {
+    // Delete selected nodes
+    const selectedNodes = nodes.filter((node) => node.selected)
+    if (selectedNodes.length > 0) {
+      const nodeIds = selectedNodes.map((node) => node.id)
+
+      // Remove the nodes
+      setNodes((nodes) => nodes.filter((node) => !nodeIds.includes(node.id)))
+
+      // Remove any connected edges
+      setEdges((edges) => edges.filter((edge) => !nodeIds.includes(edge.source) && !nodeIds.includes(edge.target)))
+
+      // Clear selected node if it was deleted
+      if (selectedNode && nodeIds.includes(selectedNode.id)) {
+        setSelectedNode(null)
+      }
+
+      // Add to history
+      const newNodes = nodes.filter((node) => !nodeIds.includes(node.id))
+      const newEdges = edges.filter((edge) => !nodeIds.includes(edge.source) && !nodeIds.includes(edge.target))
+
+      setHistory((prev) => [...prev.slice(0, historyIndex + 1), { nodes: newNodes, edges: newEdges }])
+      setHistoryIndex((prev) => prev + 1)
+
+      toast({
+        title: "Nodes deleted",
+        description: `Deleted ${selectedNodes.length} node${selectedNodes.length > 1 ? "s" : ""}`,
+      })
+    }
+  }, [nodes, edges, selectedNode, historyIndex, toast])
+
+  // Define keyboard shortcut handlers
+  const openFileHotkey = () => {
+    const openFileDialogTrigger = document.querySelector("[data-open-file-dialog-trigger]") as HTMLElement
+    if (openFileDialogTrigger) openFileDialogTrigger.click()
+  }
+
+  const saveWorkflowHotkey = () => {
+    const saveWorkflowDialogTrigger = document.querySelector("[data-save-workflow-dialog-trigger]") as HTMLElement
+    if (saveWorkflowDialogTrigger) saveWorkflowDialogTrigger.click()
+  }
+
+  const saveLocallyHotkey = () => {
+    const saveLocallyTrigger = document.querySelector("[data-save-locally-trigger]") as HTMLElement
+    if (saveLocallyTrigger) saveLocallyTrigger.click()
+  }
+
+  const openWorkflowLibraryHotkey = () => {
+    const workflowLibraryTrigger = document.querySelector("[data-workflow-library-trigger]") as HTMLElement
+    if (workflowLibraryTrigger) workflowLibraryTrigger.click()
+  }
+
+  const zoomInHotkey = () => {
+    if (reactFlowInstance) {
+      const zoom = reactFlowInstance.getZoom()
+      reactFlowInstance.zoomTo(Math.min(zoom + 0.2, 2))
+    }
+  }
+
+  const zoomOutHotkey = () => {
+    if (reactFlowInstance) {
+      const zoom = reactFlowInstance.getZoom()
+      reactFlowInstance.zoomTo(Math.max(zoom - 0.2, 0.2))
+    }
+  }
+
+  const fitViewHotkey = () => {
+    if (reactFlowInstance) {
+      reactFlowInstance.fitView()
+    }
+  }
+
+  const toggleGridHotkey = () => setShowGrid(!showGrid)
+
+  const toggleMinimapHotkey = () => setShowMinimap(!showMinimap)
+
+  const helpHotkey = () => {
+    const helpDialogTrigger = document.querySelector("[data-help-dialog-trigger]") as HTMLElement
+    if (helpDialogTrigger) helpDialogTrigger.click()
+  }
+
+  const keyboardShortcutsHotkey = () => {
+    const helpDialogTrigger = document.querySelector("[data-help-dialog-trigger]") as HTMLElement
+    if (helpDialogTrigger) {
+      helpDialogTrigger.click()
+      // Set active tab to shortcuts
+      setTimeout(() => {
+        const shortcutsTab = document.querySelector('[data-tab="shortcuts"]') as HTMLElement
+        if (shortcutsTab) shortcutsTab.click()
+      }, 100)
+    }
+  }
+
+  // Register all keyboard shortcuts at the top level
+  // Open File
+  useHotkeys(parseKeyCombination(shortcuts.find((s) => s.id === "open-file")?.keys || "ctrl+o"), openFileHotkey, {
+    preventDefault: true,
+  })
+
+  // Save Workflow
+  useHotkeys(
+    parseKeyCombination(shortcuts.find((s) => s.id === "save-workflow")?.keys || "ctrl+s"),
+    saveWorkflowHotkey,
+    { preventDefault: true },
+  )
+
+  // Save Workflow Locally
+  useHotkeys(
+    parseKeyCombination(shortcuts.find((s) => s.id === "save-workflow-locally")?.keys || "ctrl+shift+s"),
+    saveLocallyHotkey,
+    { preventDefault: true },
+  )
+
+  // Open Workflow Library
+  useHotkeys(
+    parseKeyCombination(shortcuts.find((s) => s.id === "open-workflow-library")?.keys || "ctrl+l"),
+    openWorkflowLibraryHotkey,
+    { preventDefault: true },
+  )
+
+  // Undo
+  useHotkeys(parseKeyCombination(shortcuts.find((s) => s.id === "undo")?.keys || "ctrl+z"), handleUndo, {
+    preventDefault: true,
+    enabled: canUndo,
+  })
+
+  // Redo
+  useHotkeys(parseKeyCombination(shortcuts.find((s) => s.id === "redo")?.keys || "ctrl+shift+z"), handleRedo, {
+    preventDefault: true,
+    enabled: canRedo,
+  })
+
+  // Select All
+  useHotkeys(parseKeyCombination(shortcuts.find((s) => s.id === "select-all")?.keys || "ctrl+a"), handleSelectAll, {
+    preventDefault: true,
+  })
+
+  // Cut
+  useHotkeys(parseKeyCombination(shortcuts.find((s) => s.id === "cut")?.keys || "ctrl+x"), handleCut, {
+    preventDefault: true,
+  })
+
+  // Copy
+  useHotkeys(parseKeyCombination(shortcuts.find((s) => s.id === "copy")?.keys || "ctrl+c"), handleCopy, {
+    preventDefault: true,
+  })
+
+  // Paste
+  useHotkeys(parseKeyCombination(shortcuts.find((s) => s.id === "paste")?.keys || "ctrl+v"), handlePaste, {
+    preventDefault: true,
+  })
+
+  // Delete
+  useHotkeys(parseKeyCombination(shortcuts.find((s) => s.id === "delete")?.keys || "delete"), handleDelete, {
+    preventDefault: true,
+  })
+
+  // Run Workflow
+  useHotkeys(parseKeyCombination(shortcuts.find((s) => s.id === "run-workflow")?.keys || "f5"), handleRunWorkflow, {
+    preventDefault: true,
+  })
+
+  // Zoom In
+  useHotkeys(parseKeyCombination(shortcuts.find((s) => s.id === "zoom-in")?.keys || "ctrl+="), zoomInHotkey, {
+    preventDefault: true,
+  })
+
+  // Zoom Out
+  useHotkeys(parseKeyCombination(shortcuts.find((s) => s.id === "zoom-out")?.keys || "ctrl+-"), zoomOutHotkey, {
+    preventDefault: true,
+  })
+
+  // Fit View
+  useHotkeys(parseKeyCombination(shortcuts.find((s) => s.id === "fit-view")?.keys || "ctrl+0"), fitViewHotkey, {
+    preventDefault: true,
+  })
+
+  // Toggle Grid
+  useHotkeys(parseKeyCombination(shortcuts.find((s) => s.id === "toggle-grid")?.keys || "ctrl+g"), toggleGridHotkey, {
+    preventDefault: true,
+  })
+
+  // Toggle Minimap
+  useHotkeys(
+    parseKeyCombination(shortcuts.find((s) => s.id === "toggle-minimap")?.keys || "ctrl+m"),
+    toggleMinimapHotkey,
+    { preventDefault: true },
+  )
+
+  // Help
+  useHotkeys(parseKeyCombination(shortcuts.find((s) => s.id === "help")?.keys || "f1"), helpHotkey, {
+    preventDefault: true,
+  })
+
+  // Keyboard Shortcuts
+  useHotkeys(
+    parseKeyCombination(shortcuts.find((s) => s.id === "keyboard-shortcuts")?.keys || "shift+f1"),
+    keyboardShortcutsHotkey,
+    { preventDefault: true },
+  )
+
+  return (
+    <div className="flex h-screen w-full bg-background">
+      <Sidebar onLoadWorkflow={handleLoadWorkflow} getFlowObject={getFlowObject} />
+      <div className="flex flex-col flex-1">
+        <AppMenubar
+          onOpenFile={handleOpenFile}
+          onSaveWorkflow={handleSaveWorkflow}
+          onRunWorkflow={handleRunWorkflow}
+          onLoadWorkflow={handleLoadWorkflow}
+          isRunning={isRunning}
+          setIsRunning={setIsRunning}
+          canUndo={canUndo}
+          canRedo={canRedo}
+          onUndo={handleUndo}
+          onRedo={handleRedo}
+          getFlowObject={getFlowObject}
+          currentWorkflow={currentWorkflow}
+          reactFlowInstance={reactFlowInstance}
+          showGrid={showGrid}
+          setShowGrid={setShowGrid}
+          showMinimap={showMinimap}
+          setShowMinimap={setShowMinimap}
+          onSelectAll={handleSelectAll}
+          onCopy={handleCopy}
+          onCut={handleCut}
+          onPaste={handlePaste}
+          onDelete={handleDelete}
+        />
+        <div className={`flex-1 h-full relative ${isFileDragging ? "bg-blue-50" : ""}`} ref={reactFlowWrapper}>
+          {isFileDragging && (
+            <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none">
+              <div className="bg-white bg-opacity-80 p-6 rounded-lg shadow-lg border-2 border-dashed border-blue-500">
+                <FileUp className="h-12 w-12 text-blue-500 mx-auto mb-2" />
+                <p className="text-lg font-medium text-blue-700">Drop IFC file here</p>
+              </div>
+            </div>
+          )}
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            onNodesChange={handleNodesChange}
+            onEdgesChange={onEdgesChange}
+            onConnect={onConnect}
+            onInit={setReactFlowInstance}
+            onDrop={onDrop}
+            onDragOver={onDragOver}
+            onNodeClick={onNodeClick}
+            onNodeDoubleClick={onNodeDoubleClick}
+            nodeTypes={nodeTypes}
+            snapToGrid
+            snapGrid={[15, 15]}
+            minZoom={0.1}
+            maxZoom={2}
+          >
+            <Controls />
+            {showGrid && <Background color="#aaa" gap={16} />}
+            {showMinimap && <MiniMap />}
+            <Panel position="bottom-right">
+              <div className="bg-card rounded-md p-2 text-xs text-muted-foreground">
+                {currentWorkflow ? currentWorkflow.name : "Grasshopper for IFC - v0.1.0"}
+              </div>
+            </Panel>
+          </ReactFlow>
+        </div>
+      </div>
+      {editingNode && <PropertiesPanel node={editingNode} setNodes={setNodes} setSelectedNode={setEditingNode} />}
+      <Toaster />
+    </div>
+  )
+}
+
+// Main component that wraps everything with ReactFlowProvider
 export default function Home() {
   return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-8 row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-semibold">
-              app/page.tsx
-            </code>
-            .
-          </li>
-          <li>Save and see your changes instantly.</li>
-        </ol>
-
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:min-w-44"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
-        </div>
-      </main>
-      <footer className="row-start-3 flex gap-6 flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
-    </div>
-  );
+    <ReactFlowProvider>
+      <FlowWithProvider />
+    </ReactFlowProvider>
+  )
 }
+
