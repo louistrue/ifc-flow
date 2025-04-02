@@ -1547,9 +1547,7 @@ function FlowWithProvider() {
             {showMinimap && <MiniMap />}
             <Panel position="bottom-right">
               <div className="bg-card rounded-md p-2 text-xs text-muted-foreground">
-                {currentWorkflow
-                  ? currentWorkflow.name
-                  : "Grasshopper for IFC - v0.1.0"}
+                {currentWorkflow ? currentWorkflow.name : "IFCflow - v0.1.0"}
               </div>
             </Panel>
           </ReactFlow>

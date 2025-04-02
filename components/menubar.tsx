@@ -430,7 +430,7 @@ export function AppMenubar({
                 </MenubarShortcut>
               </MenubarItem>
               <MenubarSeparator />
-              <MenubarItem>About Grasshopper for IFC</MenubarItem>
+              <MenubarItem>About IFCflow</MenubarItem>
             </MenubarContent>
           </MenubarMenu>
         </Menubar>

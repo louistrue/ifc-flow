@@ -1,11 +1,11 @@
-"use client"
+"use client";
 
-import { useState, useEffect } from "react"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { ScrollArea } from "@/components/ui/scroll-area"
-import { Button } from "@/components/ui/button"
-import { Separator } from "@/components/ui/separator"
-import { Input } from "@/components/ui/input"
+import { useState, useEffect } from "react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Button } from "@/components/ui/button";
+import { Separator } from "@/components/ui/separator";
+import { Input } from "@/components/ui/input";
 import {
   FileUp,
   Box,
@@ -27,131 +27,200 @@ import {
   Search,
   Clock,
   Plus,
-} from "lucide-react"
-import { type Workflow as WorkflowType, workflowStorage } from "@/lib/workflow-storage"
-import { SaveWorkflowDialog } from "@/components/dialogs/save-workflow-dialog"
-import { useToast } from "@/hooks/use-toast"
+} from "lucide-react";
+import {
+  type Workflow as WorkflowType,
+  workflowStorage,
+} from "@/lib/workflow-storage";
+import { SaveWorkflowDialog } from "@/components/dialogs/save-workflow-dialog";
+import { useToast } from "@/hooks/use-toast";
 
 const nodeCategories = [
   {
     name: "Input",
     nodes: [
-      { id: "ifcNode", label: "IFC File", icon: <FileUp className="h-4 w-4 mr-2" /> },
-      { id: "parameterNode", label: "Parameter", icon: <Sliders className="h-4 w-4 mr-2" /> },
+      {
+        id: "ifcNode",
+        label: "IFC File",
+        icon: <FileUp className="h-4 w-4 mr-2" />,
+      },
+      {
+        id: "parameterNode",
+        label: "Parameter",
+        icon: <Sliders className="h-4 w-4 mr-2" />,
+      },
     ],
   },
   {
     name: "Geometry",
     nodes: [
-      { id: "geometryNode", label: "Extract Geometry", icon: <Box className="h-4 w-4 mr-2" /> },
-      { id: "transformNode", label: "Transform", icon: <Move className="h-4 w-4 mr-2" /> },
-      { id: "spatialNode", label: "Spatial Query", icon: <Layers className="h-4 w-4 mr-2" /> },
+      {
+        id: "geometryNode",
+        label: "Extract Geometry",
+        icon: <Box className="h-4 w-4 mr-2" />,
+      },
+      {
+        id: "transformNode",
+        label: "Transform",
+        icon: <Move className="h-4 w-4 mr-2" />,
+      },
+      {
+        id: "spatialNode",
+        label: "Spatial Query",
+        icon: <Layers className="h-4 w-4 mr-2" />,
+      },
     ],
   },
   {
     name: "Data",
     nodes: [
-      { id: "filterNode", label: "Filter Elements", icon: <Filter className="h-4 w-4 mr-2" /> },
-      { id: "propertyNode", label: "Property Editor", icon: <Edit className="h-4 w-4 mr-2" /> },
-      { id: "quantityNode", label: "Quantity Takeoff", icon: <Calculator className="h-4 w-4 mr-2" /> },
-      { id: "classificationNode", label: "Classification", icon: <FileText className="h-4 w-4 mr-2" /> },
-      { id: "relationshipNode", label: "Relationships", icon: <GitBranch className="h-4 w-4 mr-2" /> },
-      { id: "analysisNode", label: "Analysis", icon: <BarChart className="h-4 w-4 mr-2" /> },
+      {
+        id: "filterNode",
+        label: "Filter Elements",
+        icon: <Filter className="h-4 w-4 mr-2" />,
+      },
+      {
+        id: "propertyNode",
+        label: "Property Editor",
+        icon: <Edit className="h-4 w-4 mr-2" />,
+      },
+      {
+        id: "quantityNode",
+        label: "Quantity Takeoff",
+        icon: <Calculator className="h-4 w-4 mr-2" />,
+      },
+      {
+        id: "classificationNode",
+        label: "Classification",
+        icon: <FileText className="h-4 w-4 mr-2" />,
+      },
+      {
+        id: "relationshipNode",
+        label: "Relationships",
+        icon: <GitBranch className="h-4 w-4 mr-2" />,
+      },
+      {
+        id: "analysisNode",
+        label: "Analysis",
+        icon: <BarChart className="h-4 w-4 mr-2" />,
+      },
     ],
   },
   {
     name: "Output",
     nodes: [
-      { id: "viewerNode", label: "Viewer", icon: <Eye className="h-4 w-4 mr-2" /> },
-      { id: "watchNode", label: "Watch", icon: <Eye className="h-4 w-4 mr-2" /> },
-      { id: "exportNode", label: "Export", icon: <Download className="h-4 w-4 mr-2" /> },
+      {
+        id: "viewerNode",
+        label: "Viewer",
+        icon: <Eye className="h-4 w-4 mr-2" />,
+      },
+      {
+        id: "watchNode",
+        label: "Watch",
+        icon: <Eye className="h-4 w-4 mr-2" />,
+      },
+      {
+        id: "exportNode",
+        label: "Export",
+        icon: <Download className="h-4 w-4 mr-2" />,
+      },
     ],
   },
-]
+];
 
 export function Sidebar({ onLoadWorkflow, getFlowObject }) {
-  const [collapsed, setCollapsed] = useState(false)
-  const [presets, setPresets] = useState<WorkflowType[]>([])
-  const [searchQuery, setSearchQuery] = useState("")
-  const [savePresetDialogOpen, setSavePresetDialogOpen] = useState(false)
-  const { toast } = useToast()
+  const [collapsed, setCollapsed] = useState(false);
+  const [presets, setPresets] = useState<WorkflowType[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [savePresetDialogOpen, setSavePresetDialogOpen] = useState(false);
+  const { toast } = useToast();
 
   // Load presets from storage
   useEffect(() => {
-    const workflows = workflowStorage.getWorkflows()
-    const presetWorkflows = workflows.filter((workflow) => workflow.tags.includes("preset"))
-    setPresets(presetWorkflows)
-  }, [])
+    const workflows = workflowStorage.getWorkflows();
+    const presetWorkflows = workflows.filter((workflow) =>
+      workflow.tags.includes("preset")
+    );
+    setPresets(presetWorkflows);
+  }, []);
 
   const onDragStart = (event, nodeType) => {
-    event.dataTransfer.setData("application/reactflow", nodeType)
-    event.dataTransfer.effectAllowed = "move"
-  }
+    event.dataTransfer.setData("application/reactflow", nodeType);
+    event.dataTransfer.effectAllowed = "move";
+  };
 
   // Filter presets based on search query
   const filteredPresets = presets.filter(
     (preset) =>
       preset.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      preset.description.toLowerCase().includes(searchQuery.toLowerCase()),
-  )
+      preset.description.toLowerCase().includes(searchQuery.toLowerCase())
+  );
 
   // Handle saving a preset
   const handleSavePreset = (workflow: WorkflowType) => {
     // Make sure it has the preset tag
     if (!workflow.tags.includes("preset")) {
-      workflow.tags.push("preset")
+      workflow.tags.push("preset");
     }
 
     // Save to storage
-    workflowStorage.saveWorkflow(workflow)
+    workflowStorage.saveWorkflow(workflow);
 
     // Update the presets list
     setPresets((prev) => {
-      const exists = prev.some((p) => p.id === workflow.id)
+      const exists = prev.some((p) => p.id === workflow.id);
       if (exists) {
-        return prev.map((p) => (p.id === workflow.id ? workflow : p))
+        return prev.map((p) => (p.id === workflow.id ? workflow : p));
       } else {
-        return [...prev, workflow]
+        return [...prev, workflow];
       }
-    })
+    });
 
     toast({
       title: "Preset saved",
       description: `${workflow.name} has been saved to your presets`,
-    })
-  }
+    });
+  };
 
   // Handle saving locally
   const handleSaveLocally = (workflow: WorkflowType) => {
     // Save workflow to local file
-    const json = JSON.stringify(workflow, null, 2)
-    const blob = new Blob([json], { type: "application/json" })
-    const url = URL.createObjectURL(blob)
+    const json = JSON.stringify(workflow, null, 2);
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
 
-    const a = document.createElement("a")
-    a.href = url
-    a.download = `${workflow.name.replace(/\s+/g, "-").toLowerCase()}.json`
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(url)
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${workflow.name.replace(/\s+/g, "-").toLowerCase()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
 
     toast({
       title: "Preset saved locally",
       description: `${workflow.name} has been saved to your device`,
-    })
-  }
+    });
+  };
 
   return (
     <>
-      <div className={`relative border-r bg-card ${collapsed ? "w-12" : "w-64"} transition-all duration-300`}>
+      <div
+        className={`relative border-r bg-card ${
+          collapsed ? "w-12" : "w-64"
+        } transition-all duration-300`}
+      >
         <Button
           variant="ghost"
           size="icon"
           className="absolute -right-3 top-3 z-10 h-6 w-6 rounded-full border bg-background"
           onClick={() => setCollapsed(!collapsed)}
         >
-          {collapsed ? <ChevronRight className="h-3 w-3" /> : <ChevronLeft className="h-3 w-3" />}
+          {collapsed ? (
+            <ChevronRight className="h-3 w-3" />
+          ) : (
+            <ChevronLeft className="h-3 w-3" />
+          )}
         </Button>
 
         {collapsed ? (
@@ -175,7 +244,7 @@ export function Sidebar({ onLoadWorkflow, getFlowObject }) {
           <div className="flex flex-col h-full">
             <div className="flex items-center p-4">
               <Workflow className="h-6 w-6 mr-2 text-primary" />
-              <h2 className="text-lg font-semibold">IFC Grasshopper</h2>
+              <h2 className="text-lg font-semibold">IFCflow</h2>
             </div>
             <Separator />
             <Tabs defaultValue="nodes" className="flex-1">
@@ -188,14 +257,18 @@ export function Sidebar({ onLoadWorkflow, getFlowObject }) {
                   <div className="p-4 space-y-4">
                     {nodeCategories.map((category) => (
                       <div key={category.name} className="space-y-2">
-                        <h3 className="text-sm font-medium text-muted-foreground">{category.name}</h3>
+                        <h3 className="text-sm font-medium text-muted-foreground">
+                          {category.name}
+                        </h3>
                         <div className="space-y-1">
                           {category.nodes.map((node) => (
                             <div
                               key={node.id}
                               className="flex items-center rounded-md border border-dashed px-3 py-2 cursor-grab bg-background hover:bg-accent"
                               draggable
-                              onDragStart={(event) => onDragStart(event, node.id)}
+                              onDragStart={(event) =>
+                                onDragStart(event, node.id)
+                              }
                             >
                               {node.icon}
                               <span className="text-sm">{node.label}</span>
@@ -233,7 +306,9 @@ export function Sidebar({ onLoadWorkflow, getFlowObject }) {
                   <ScrollArea className="h-[calc(100vh-180px)]">
                     {filteredPresets.length === 0 ? (
                       <div className="text-center py-8">
-                        <div className="text-muted-foreground mb-2">No presets found</div>
+                        <div className="text-muted-foreground mb-2">
+                          No presets found
+                        </div>
                         <p className="text-xs text-muted-foreground">
                           {searchQuery
                             ? "Try adjusting your search"
@@ -249,19 +324,26 @@ export function Sidebar({ onLoadWorkflow, getFlowObject }) {
                             onClick={() => onLoadWorkflow(preset)}
                           >
                             <div className="flex items-center justify-between">
-                              <span className="text-sm font-medium">{preset.name}</span>
+                              <span className="text-sm font-medium">
+                                {preset.name}
+                              </span>
                             </div>
                             {preset.description && (
-                              <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{preset.description}</p>
+                              <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
+                                {preset.description}
+                              </p>
                             )}
                             <div className="flex items-center text-xs text-muted-foreground mt-1">
                               <Clock className="h-3 w-3 mr-1" />
                               <span>
-                                {new Date(preset.updatedAt).toLocaleDateString(undefined, {
-                                  year: "numeric",
-                                  month: "short",
-                                  day: "numeric",
-                                })}
+                                {new Date(preset.updatedAt).toLocaleDateString(
+                                  undefined,
+                                  {
+                                    year: "numeric",
+                                    month: "short",
+                                    day: "numeric",
+                                  }
+                                )}
                               </span>
                             </div>
                           </div>
@@ -293,6 +375,5 @@ export function Sidebar({ onLoadWorkflow, getFlowObject }) {
         }}
       />
     </>
-  )
+  );
 }
-
