@@ -4,6 +4,8 @@
 importScripts("https://cdn.jsdelivr.net/pyodide/v0.23.4/full/pyodide.js");
 
 let pyodide = null;
+// Create a cache to store the loaded IFC model data
+let ifcModelCache = null;
 
 // Initialize Pyodide with IfcOpenShell
 async function initPyodide() {
@@ -48,7 +50,15 @@ async function initPyodide() {
 
     await pyodide.runPythonAsync(`
       import micropip
+      # Install lark for stream support
+      await micropip.install('lark')
       await micropip.install('https://cdn.jsdelivr.net/gh/IfcOpenShell/wasm-wheels@33b437e5fd5425e606f34aff602c42034ff5e6dc/ifcopenshell-0.8.1+latest-cp312-cp312-emscripten_3_1_58_wasm32.whl')
+    `);
+
+    // Initialize the module for caching IFC models
+    await pyodide.runPythonAsync(`
+      import sys
+      import ifcopenshell      
     `);
 
     self.postMessage({
@@ -181,7 +191,7 @@ async function handleLoadIfc({ arrayBuffer, filename, messageId }) {
           `
           try:
               print("Python: Loading IFC file...")
-              # Load the IFC file
+              # Load the IFC file from the virtual filesystem
               ifc_file = ifcopenshell.open('model.ifc')
               print("Python: IFC file loaded successfully")
               
@@ -217,7 +227,8 @@ async function handleLoadIfc({ arrayBuffer, filename, messageId }) {
                   "schema": schema,
                   "project": project_info,
                   "element_counts": element_counts,
-                  "total_elements": sum(element_counts.values())
+                  "total_elements": sum(element_counts.values()),
+                  "model_id": "${filename}"
               }
               print("Python: Result object created")
               
@@ -260,10 +271,18 @@ async function handleLoadIfc({ arrayBuffer, filename, messageId }) {
 
         // Parse the result JSON
         const modelInfo = JSON.parse(result);
-        console.log("handleLoadIfc: Model info extracted", {
+        // Store model info in the JavaScript side cache as well
+        ifcModelCache = {
+          filename: modelInfo.filename,
+          schema: modelInfo.schema,
+        };
+
+        console.log("handleLoadIfc: Model info extracted and cached", {
           schema: modelInfo.schema,
           filename: modelInfo.filename,
           totalElements: modelInfo.total_elements,
+          modelId: modelInfo.model_id,
+          jsCache: JSON.stringify(ifcModelCache),
         });
 
         // Clean up
@@ -372,6 +391,7 @@ async function handleExtractData({ types = ["IfcWall"], messageId }) {
         
         import json
         import traceback
+        import os
       `,
         { globals: namespace }
       );
@@ -384,7 +404,9 @@ async function handleExtractData({ types = ["IfcWall"], messageId }) {
         `
         try:
             print("Python: Loading IFC file for structured extraction")
-            # Load the IFC file (already in filesystem)
+            # Load the IFC file (always from filesystem)
+            if not os.path.exists('model.ifc'):
+                raise FileNotFoundError("The 'model.ifc' file does not exist in the virtual filesystem.")
             ifc_file = ifcopenshell.open('model.ifc')
             print("Python: IFC file loaded successfully")
             
@@ -596,7 +618,7 @@ async function handleExtractData({ types = ["IfcWall"], messageId }) {
 
 // Add this new handler function after the handleExtractData function
 async function handleExportIfc(data) {
-  const { model, fileName, messageId } = data;
+  const { model, fileName, messageId, arrayBuffer } = data;
 
   try {
     self.postMessage({
@@ -604,6 +626,22 @@ async function handleExportIfc(data) {
       message: "Preparing to export modified IFC file...",
       percentage: 10,
       messageId,
+    });
+
+    // Get the proper model ID to look up in the cache
+    // Try to use model ID from the model data, or from ifcModelCache, or fileName as fallback
+    const modelId = (ifcModelCache && ifcModelCache.filename) || fileName;
+
+    // Also try the original filename if available
+    const originalFilename =
+      (ifcModelCache && ifcModelCache.filename) || fileName;
+
+    console.log("Export - Model info:", {
+      modelId: modelId,
+      originalFilename: originalFilename,
+      elements: model.elements ? model.elements.length : 0,
+      sourceFilename: ifcModelCache?.filename,
+      jsCache: JSON.stringify(ifcModelCache),
     });
 
     // Get or initialize pyodide
@@ -615,13 +653,38 @@ async function handleExportIfc(data) {
     // Add model data to Python scope
     namespace.set("model_json", JSON.stringify(model));
     namespace.set("export_filename", fileName || "exported.ifc");
+    namespace.set("model_id", modelId);
 
     self.postMessage({
       type: "progress",
-      message: "Converting model back to IFC format...",
+      message: "Applying changes to IFC model...",
       percentage: 30,
       messageId,
     });
+
+    // Ensure the original IFC file buffer was passed from the main thread
+    if (!arrayBuffer || !(arrayBuffer instanceof ArrayBuffer)) {
+      throw new Error(
+        "Original IFC file buffer was not provided or is invalid. Cannot export."
+      );
+    }
+
+    try {
+      // Write the provided buffer to the filesystem
+      console.log(
+        "handleExportIfc: Writing provided IFC data to model.ifc before modification..."
+      );
+      pyodide.FS.writeFile("model.ifc", new Uint8Array(arrayBuffer));
+      console.log("handleExportIfc: Successfully wrote model.ifc");
+    } catch (fsError) {
+      console.error(
+        "handleExportIfc: Error writing model.ifc to Pyodide filesystem:",
+        fsError
+      );
+      throw new Error(
+        `Failed to prepare IFC file in virtual filesystem: ${fsError.message}`
+      );
+    }
 
     try {
       await pyodide.runPythonAsync(
@@ -629,147 +692,321 @@ async function handleExportIfc(data) {
         import json
         import traceback
         import ifcopenshell
+        import ifcopenshell.guid
         import tempfile
+        import sys
+        import os
+        import re
         
         try:
             print("Starting IFC export...")
             
             # Parse the model JSON into Python objects
             model_data = json.loads(model_json)
-            print(f"Loaded model with {len(model_data['elements'])} elements")
+            print(f"Loaded model data with {len(model_data['elements'])} elements")
             
-            # Create a new IFC file based on the original
-            print("Creating new IFC file...")
+            # Load the IFC file from the filesystem
             ifc_file = None
             
-            # Check if we already have an active IFC file in memory
-            try:
-                ifc_file = ifcopenshell.file()
-                print("Created new IFC file")
-            except Exception as e:
-                print(f"Error creating new IFC file: {e}")
-                raise e
+            if os.path.exists('model.ifc'):
+                print("Found 'model.ifc' file in filesystem, opening...")
+                try:
+                    # Open the original file that was previously loaded
+                    ifc_file = ifcopenshell.open('model.ifc')
+                    print(f"Opened original IFC file with schema {ifc_file.schema}")
+                except Exception as e:
+                    print(f"Error opening original IFC file: {e}")
+                    raise RuntimeError(f"Failed to open 'model.ifc': {e}")
+            else:
+                # This should ideally not happen if load was successful
+                raise FileNotFoundError("The 'model.ifc' file does not exist in the virtual filesystem. Cannot export.")
+
+            # We should not create a new file, we must modify the existing one.
+            # If ifc_file is None here, something went wrong earlier.
+            if not ifc_file:
+                raise RuntimeError("IFC file object is None after attempting to load from filesystem.")
             
-            # Set up schema
-            print("Setting up IFC schema...")
-            try:
-                # Create basic IFC structure (project, site, building)
-                project = ifc_file.create_entity("IfcProject", GlobalId=ifcopenshell.guid.new())
-                context = ifc_file.create_entity("IfcGeometricRepresentationContext", ContextType="Model")
-                project.RepresentationContexts = [context]
-                unit = ifc_file.create_entity("IfcSIUnit", Name="METRE", UnitType="LENGTHUNIT")
-                unit_assignment = ifc_file.create_entity("IfcUnitAssignment", Units=[unit])
-                project.UnitsInContext = unit_assignment
-                site = ifc_file.create_entity("IfcSite", GlobalId=ifcopenshell.guid.new())
-                building = ifc_file.create_entity("IfcBuilding", GlobalId=ifcopenshell.guid.new())
-                
-                # Create hierarchy relationships
-                rel1 = ifc_file.create_entity("IfcRelAggregates", GlobalId=ifcopenshell.guid.new())
-                rel1.RelatingObject = project
-                rel1.RelatedObjects = [site]
-                
-                rel2 = ifc_file.create_entity("IfcRelAggregates", GlobalId=ifcopenshell.guid.new())
-                rel2.RelatingObject = site
-                rel2.RelatedObjects = [building]
-                
-                print("Basic IFC structure created")
-            except Exception as e:
-                print(f"Error setting up IFC schema: {e}")
-                # Continue anyway
-            
-            # Create a temporary file to store the IFC
+            # Create a temporary file to store the modified IFC
             ifc_temp = tempfile.NamedTemporaryFile(suffix=".ifc", delete=False)
             temp_path = ifc_temp.name
             ifc_temp.close()
             
-            # Since this is a basic demonstration, we're not transferring geometry
-            # but we are showing where property changes would be applied
-            print("Adding modified properties...")
+            print("Applying property modifications...")
             
-            # Process only a limited number of elements for the demo
-            # Use a counting approach instead of slicing to avoid unhashable slice issue
-            max_elements = 5
-            processed_count = 0
+            # Process elements with property changes
+            modified_count = 0 # Initialize the counter
+
+            # Collect information about all elements for easier lookup by express ID or GlobalId
+            element_lookup = {}
+            all_entities_by_id = {}
+            all_products_by_guid = {}
+            try:
+                # Iterate directly over the file object to get entities
+                all_products = ifc_file.by_type('IfcProduct')
+
+                # Create lookup tables
+                for entity in ifc_file: # Iterate directly over the file object
+                    if hasattr(entity, 'id') and entity.id():
+                        all_entities_by_id[entity.id()] = entity
+
+                for product in all_products:
+                    if hasattr(product, 'GlobalId') and product.GlobalId:
+                        all_products_by_guid[product.GlobalId] = product
+            except Exception as e:
+                print(f"Error creating element lookup: {e}")
             
-            # Loop through all elements (but limit processing)
-            for i in range(len(model_data['elements'])):
-                # Check if we've reached our limit
-                if processed_count >= max_elements:
-                    break
+            # Map of element identifiers to their modified properties
+            property_changes = {}
+            
+            # Extract the property changes from the model data
+            for element_data in model_data['elements']:
+                # Skip elements without property changes
+                if 'propertyInfo' not in element_data:
+                    continue
                     
-                # Get the current element
-                element_data = model_data['elements'][i]
+                # Get the property information
+                prop_info = element_data.get('propertyInfo', {})
                 
+                # Skip if no property exists or isn't meaningful
+                if not prop_info.get('exists', False) and 'value' not in prop_info:
+                    continue
+                
+                # Look for identifiers in this order:
+                # 1. Express ID (numeric index)
+                # 2. GlobalId from properties
+                # 3. ID string from element data ('IfcType-ExpressId')
+                element_id = None
+                element_global_id = None
+                element_type = element_data.get('type')
+                
+                express_id = element_data.get('expressId')
+                
+                if express_id:
+                    element_id = express_id
+                elif 'properties' in element_data and 'GlobalId' in element_data['properties']:
+                    element_global_id = element_data['properties']['GlobalId']
+                    element_id = element_global_id # Use GlobalId as primary lookup if expressId is missing
+                elif 'id' in element_data and isinstance(element_data['id'], str) and '-' in element_data['id']:
+                    try:
+                        parts = element_data['id'].split('-')
+                        element_id = int(parts[-1]) # Extract express ID from string like 'IfcWall-139'
+                        if not element_type:
+                            element_type = parts[0]
+                    except ValueError:
+                        print(f"Could not parse express ID from element 'id': {element_data['id']}")
+                
+                # Skip if we can't identify the element
+                if not element_id and not element_global_id:
+                    print(f"WARNING: Element not found in IFC file using ID: {element_id}, Express ID: {express_id}, Global ID: {element_global_id}. Skipping modification.")
+                    continue # Skip to the next element
+                
+                # Store the property change
+                property_changes[element_id] = {
+                    'propName': prop_info.get('name', ''),
+                    'psetName': prop_info.get('psetName', ''),
+                    'value': prop_info.get('value'),
+                    'type': element_data.get('type', 'IfcProduct'),
+                    'expressId': express_id,
+                    'globalId': element_data.get('properties', {}).get('GlobalId'),
+                    'elementName': element_data.get('properties', {}).get('Name', f"Element {element_id or element_global_id}")
+                }
+            
+            print(f"Found {len(property_changes)} elements with property changes")
+            
+            # Apply the property changes to the IFC file
+            for element_id, change in property_changes.items():
                 try:
-                    # Create element of the right type
-                    element_type = element_data.get('type', 'IfcBuildingElementProxy')
-                    global_id = element_data.get('properties', {}).get('GlobalId', ifcopenshell.guid.new())
-                    name = element_data.get('properties', {}).get('Name', 'Unknown')
+                    # Find the element first by direct lookup
+                    element = None
+                    express_id_to_find = change.get('expressId')
+                    global_id_to_find = change.get('globalId')
                     
-                    element = ifc_file.create_entity(element_type, GlobalId=global_id, Name=name)
+                    # Prioritize lookup by express ID if available and valid
+                    if express_id_to_find and isinstance(express_id_to_find, int):
+                        element = all_entities_by_id.get(express_id_to_find)
                     
-                    # Attach to building
-                    rel_contained = ifc_file.create_entity("IfcRelContainedInSpatialStructure", GlobalId=ifcopenshell.guid.new())
-                    rel_contained.RelatingStructure = building
-                    rel_contained.RelatedElements = [element]
+                    # If not found by express ID, try GlobalId
+                    if not element and global_id_to_find:
+                        element = all_products_by_guid.get(global_id_to_find)
+
+                    # Last resort: if element_id was a string like 'IfcWall-139'
+                    if not element and isinstance(element_id, int) and element_id != express_id_to_find:
+                        element = all_entities_by_id.get(element_id)
+
+                    # Check if the element exists
+                    if not element:
+                        print(f"WARNING: Element not found in IFC file using ID: {element_id}, Express ID: {express_id_to_find}, Global ID: {global_id_to_find}. Skipping modification.")
+                        continue # Skip to the next element
                     
-                    # Add properties
-                    if 'psets' in element_data:
-                        for pset_name, pset_props in element_data['psets'].items():
-                            # Create a property set
-                            property_values = []
+                    try:
+                        # Get the property name and value using the correct keys
+                        prop_name = change['propName']
+                        prop_value = change['value']
+                        pset_name = change['psetName']
+                        
+                        # Skip if no property name or pset name
+                        if not prop_name or not pset_name:
+                            print(f"Skipping property change - missing property name or pset name")
+                            continue
+                        
+                        print(f"Modifying {element.is_a()}{change.get('elementName', '')} (GlobalId: {change.get('globalId', 'unknown')}) - Setting {pset_name}.{prop_name} = {prop_value}")
+                        
+                        # Wrap the entire property modification in a try-except block
+                        try:
+                            # Check if the property set exists
+                            existing_pset = None
                             
-                            for prop_name, prop_value in pset_props.items():
-                                # Skip non-property entries like "id"
-                                if prop_name == "id":
-                                    continue
-                                    
-                                # Create the appropriate property based on value type
-                                if isinstance(prop_value, bool):
-                                    prop = ifc_file.create_entity("IfcPropertySingleValue", Name=prop_name)
-                                    prop.NominalValue = ifc_file.create_entity("IfcBoolean", prop_value)
-                                elif isinstance(prop_value, (int, float)):
-                                    prop = ifc_file.create_entity("IfcPropertySingleValue", Name=prop_name)
-                                    prop.NominalValue = ifc_file.create_entity("IfcReal", float(prop_value))
-                                elif isinstance(prop_value, str):
-                                    prop = ifc_file.create_entity("IfcPropertySingleValue", Name=prop_name)
-                                    prop.NominalValue = ifc_file.create_entity("IfcText", prop_value)
-                                elif prop_value is None:
-                                    # Skip null values
-                                    continue
-                                else:
-                                    # For complex types, convert to string
-                                    print(f"Converting complex value {prop_name} to string")
-                                    prop = ifc_file.create_entity("IfcPropertySingleValue", Name=prop_name)
-                                    prop.NominalValue = ifc_file.create_entity("IfcText", str(prop_value))
-                                    
-                                property_values.append(prop)
+                            # Find existing property set
+                            try:
+                                if hasattr(element, 'IsDefinedBy'):
+                                    for definition in element.IsDefinedBy:
+                                        try:
+                                            if definition.is_a('IfcRelDefinesByProperties'):
+                                                property_set = definition.RelatingPropertyDefinition
+                                                if property_set.is_a('IfcPropertySet') and property_set.Name == pset_name:
+                                                    existing_pset = property_set
+                                                    break
+                                        except Exception as e:
+                                            print(f"Error checking property set: {e}")
+                            except Exception as e:
+                                print(f"Error finding property sets: {e}")
                             
-                            if property_values:
-                                # Create the property set
-                                pset = ifc_file.create_entity(
-                                    "IfcPropertySet",
-                                    GlobalId=ifcopenshell.guid.new(),
-                                    Name=pset_name,
-                                    HasProperties=property_values
-                                )
+                            # If property set exists, update or add the property
+                            if existing_pset:
+                                # Check if property exists
+                                existing_prop = None
+                                try:
+                                    for prop in existing_pset.HasProperties:
+                                        try:
+                                            if prop.is_a('IfcPropertySingleValue') and prop.Name == prop_name:
+                                                existing_prop = prop
+                                                break
+                                        except Exception as e:
+                                            print(f"Error checking property: {e}")
+                                except Exception as e:
+                                    print(f"Error iterating properties: {e}")
                                 
-                                # Relate it to the element
-                                rel_props = ifc_file.create_entity(
-                                    "IfcRelDefinesByProperties",
-                                    GlobalId=ifcopenshell.guid.new()
-                                )
-                                rel_props.RelatingPropertyDefinition = pset
-                                rel_props.RelatedObjects = [element]
-                    
-                    print(f"Added element {element_type} with properties")
-                    processed_count += 1
+                                # Update existing property
+                                if existing_prop:
+                                    try:
+                                        # Create appropriate value type based on Python type
+                                        if isinstance(prop_value, bool):
+                                            existing_prop.NominalValue = ifc_file.create_entity("IfcBoolean", prop_value)
+                                        elif isinstance(prop_value, (int, float)):
+                                            existing_prop.NominalValue = ifc_file.create_entity("IfcReal", float(prop_value))
+                                        elif isinstance(prop_value, str):
+                                            # --- Check if string represents a boolean ---
+                                            lower_val = prop_value.lower()
+                                            if lower_val == 'true':
+                                                existing_prop.NominalValue = ifc_file.create_entity("IfcBoolean", True)
+                                            elif lower_val == 'false':
+                                                existing_prop.NominalValue = ifc_file.create_entity("IfcBoolean", False)
+                                            else:
+                                                # Otherwise, treat as regular text
+                                                existing_prop.NominalValue = ifc_file.create_entity("IfcText", prop_value)
+                                        else:
+                                            # For complex types, convert to string
+                                            existing_prop.NominalValue = ifc_file.create_entity("IfcText", str(prop_value))
+                                        print(f"Updated existing property {prop_name}")
+                                    except Exception as e:
+                                        print(f"Error updating property value: {e}")
+                                else:
+                                    # Create new property
+                                    try:
+                                        new_prop = None
+                                        
+                                        # Create the appropriate property based on value type
+                                        if isinstance(prop_value, bool):
+                                            new_prop = ifc_file.create_entity("IfcPropertySingleValue", Name=prop_name)
+                                            new_prop.NominalValue = ifc_file.create_entity("IfcBoolean", prop_value)
+                                        elif isinstance(prop_value, (int, float)):
+                                            new_prop = ifc_file.create_entity("IfcPropertySingleValue", Name=prop_name)
+                                            new_prop.NominalValue = ifc_file.create_entity("IfcReal", float(prop_value))
+                                        elif isinstance(prop_value, str):
+                                            # --- Check if string represents a boolean ---
+                                            lower_val = prop_value.lower()
+                                            if lower_val == 'true':
+                                                new_prop = ifc_file.create_entity("IfcPropertySingleValue", Name=prop_name)
+                                                new_prop.NominalValue = ifc_file.create_entity("IfcBoolean", True)
+                                            elif lower_val == 'false':
+                                                new_prop = ifc_file.create_entity("IfcPropertySingleValue", Name=prop_name)
+                                                new_prop.NominalValue = ifc_file.create_entity("IfcBoolean", False)
+                                            else:
+                                                # Otherwise, treat as regular text
+                                                new_prop = ifc_file.create_entity("IfcPropertySingleValue", Name=prop_name)
+                                                new_prop.NominalValue = ifc_file.create_entity("IfcText", prop_value)
+                                        elif prop_value is None:
+                                            # Skip null values
+                                            continue
+                                        else:
+                                            # For complex types, convert to string
+                                            new_prop = ifc_file.create_entity("IfcPropertySingleValue", Name=prop_name)
+                                            new_prop.NominalValue = ifc_file.create_entity("IfcText", str(prop_value))
+                                        
+                                        # Add property to property set
+                                        existing_pset.HasProperties = list(existing_pset.HasProperties) + [new_prop]
+                                        print(f"Added new property {prop_name} to existing property set")
+                                    except Exception as e:
+                                        print(f"Error creating new property: {e}")
+                            else:
+                                # Create new property set
+                                try:
+                                    print(f"Creating new property set {pset_name} for {element.is_a()}")
+                                    
+                                    # Create property
+                                    new_prop = None
+                                    
+                                    # Create the appropriate property based on value type
+                                    if isinstance(prop_value, bool):
+                                        new_prop = ifc_file.create_entity("IfcPropertySingleValue", Name=prop_name)
+                                        new_prop.NominalValue = ifc_file.create_entity("IfcBoolean", prop_value)
+                                    elif isinstance(prop_value, (int, float)):
+                                        new_prop = ifc_file.create_entity("IfcPropertySingleValue", Name=prop_name)
+                                        new_prop.NominalValue = ifc_file.create_entity("IfcReal", float(prop_value))
+                                    elif isinstance(prop_value, str):
+                                        new_prop = ifc_file.create_entity("IfcPropertySingleValue", Name=prop_name)
+                                        new_prop.NominalValue = ifc_file.create_entity("IfcText", prop_value)
+                                    elif prop_value is None:
+                                        # Skip null values
+                                        continue
+                                    else:
+                                        # For complex types, convert to string
+                                        new_prop = ifc_file.create_entity("IfcPropertySingleValue", Name=prop_name)
+                                        new_prop.NominalValue = ifc_file.create_entity("IfcText", str(prop_value))
+                                    
+                                    # Create property set
+                                    pset = ifc_file.create_entity(
+                                        "IfcPropertySet",
+                                        GlobalId=ifcopenshell.guid.new(),
+                                        Name=pset_name,
+                                        HasProperties=[new_prop]
+                                    )
+                                    
+                                    # Relate property set to element
+                                    rel_props = ifc_file.create_entity(
+                                        "IfcRelDefinesByProperties",
+                                        GlobalId=ifcopenshell.guid.new()
+                                    )
+                                    rel_props.RelatingPropertyDefinition = pset
+                                    rel_props.RelatedObjects = [element]
+                                    print(f"Created new property set {pset_name} with property {prop_name}")
+                                except Exception as e:
+                                    print(f"Error creating property set: {e}")
+                            
+                            # Increment counter only if modification was attempted
+                            modified_count += 1
+                        except Exception as e:
+                            print(f"Error during property modification: {e}")
+                    except Exception as e:
+                        print(f"Error handling property change for element: {e}")
                 except Exception as e:
-                    print(f"Error processing element: {e}")
+                    print(f"Error handling element {change['globalId']}: {e}")
+            
+            print(f"Modified {modified_count} elements with property changes")
             
             # Save the IFC file
+            print(f"Writing modified IFC file to {temp_path}")
             ifc_file.write(temp_path)
-            print(f"IFC file written to {temp_path}")
             
             # Read the file back as bytes
             with open(temp_path, 'rb') as f:
@@ -780,7 +1017,6 @@ async function handleExportIfc(data) {
             ifc_base64 = base64.b64encode(ifc_bytes).decode('utf-8')
             
             # Clean temporary file (though it may not actually delete in WASM environment)
-            import os
             try:
                 os.unlink(temp_path)
             except:

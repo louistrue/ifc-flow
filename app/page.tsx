@@ -17,6 +17,7 @@ import ReactFlow, {
   type Node,
   type NodeChange,
   applyNodeChanges,
+  type OnInit,
 } from "reactflow";
 import "reactflow/dist/style.css";
 import { Sidebar } from "@/components/sidebar";
@@ -38,7 +39,7 @@ import { WatchNode } from "@/components/nodes/watch-node";
 import { ParameterNode } from "@/components/nodes/parameter-node";
 import { Toaster } from "@/components/toaster";
 import { WorkflowExecutor } from "@/lib/workflow-executor";
-import { loadIfcFile } from "@/lib/ifc-utils";
+import { loadIfcFile, getIfcFile } from "@/lib/ifc-utils";
 import { useToast } from "@/hooks/use-toast";
 import { FileUp } from "lucide-react";
 import type { Workflow } from "@/lib/workflow-storage";
@@ -78,15 +79,24 @@ const nodeStyle = {
   default: {},
 };
 
+// Define interfaces
+interface FlowState {
+  nodes: Node[];
+  edges: Edge[];
+}
+interface NodePosition {
+  x: number;
+  y: number;
+}
+
 // Create a wrapper component that uses the ReactFlow hooks
 function FlowWithProvider() {
-  // Initial nodes and edges
-  const [nodes, setNodes, onNodesChange] = useNodesState([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState([]);
-  const [selectedNode, setSelectedNode] = useState(null);
-  const [editingNode, setEditingNode] = useState(null); // New state for editing node
-  const reactFlowWrapper = useRef(null);
-  const [reactFlowInstance, setReactFlowInstance] = useState(null);
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node[]>([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge[]>([]);
+  const [selectedNode, setSelectedNode] = useState<Node | null>(null);
+  const [editingNode, setEditingNode] = useState<Node | null>(null);
+  const reactFlowWrapper = useRef<HTMLDivElement>(null);
+  const [reactFlowInstance, setReactFlowInstance] = useState<any>(null);
   const { toast } = useToast();
   const { shortcuts } = useKeyboardShortcuts();
   const { settings } = useAppSettings();
@@ -112,9 +122,9 @@ function FlowWithProvider() {
   const [canRedo, setCanRedo] = useState(false);
 
   // Node movement tracking
-  const [nodeMovementStart, setNodeMovementStart] = useState<{
-    [key: string]: { x: number; y: number };
-  }>({});
+  const [nodeMovementStart, setNodeMovementStart] = useState<
+    Record<string, NodePosition | undefined>
+  >({});
   const [isNodeDragging, setIsNodeDragging] = useState(false);
 
   // File drop state
@@ -177,8 +187,10 @@ function FlowWithProvider() {
   // Handle auto-save
   const handleAutoSave = () => {
     if (currentWorkflow && reactFlowInstance) {
-      const flowData = reactFlowInstance.toObject();
-      const updatedWorkflow = {
+      const flowData = reactFlowInstance.toObject
+        ? reactFlowInstance.toObject()
+        : { nodes, edges };
+      const updatedWorkflow: Workflow = {
         ...currentWorkflow,
         flowData,
         updatedAt: new Date().toISOString(),
@@ -206,7 +218,7 @@ function FlowWithProvider() {
             setIsNodeDragging(true);
 
             // Store the starting positions of all selected nodes
-            const startPositions = {};
+            const startPositions: Record<string, NodePosition | undefined> = {};
             nodes.forEach((node) => {
               if (node.selected || node.id === change.id) {
                 startPositions[node.id] = { ...node.position };
@@ -292,15 +304,15 @@ function FlowWithProvider() {
 
   // Add event listeners for file drag events on the document
   useEffect(() => {
-    const handleDocumentDragOver = (e) => {
+    const handleDocumentDragOver = (e: DragEvent) => {
       e.preventDefault();
       // Check if files are being dragged
-      if (e.dataTransfer.types.includes("Files")) {
+      if (e.dataTransfer?.types.includes("Files")) {
         setIsFileDragging(true);
       }
     };
 
-    const handleDocumentDragLeave = (e) => {
+    const handleDocumentDragLeave = (e: DragEvent) => {
       // Only consider it a leave if we're leaving the document
       if (
         e.clientX <= 0 ||
@@ -316,13 +328,25 @@ function FlowWithProvider() {
       setIsFileDragging(false);
     };
 
-    document.addEventListener("dragover", handleDocumentDragOver);
-    document.addEventListener("dragleave", handleDocumentDragLeave);
+    document.addEventListener(
+      "dragover",
+      handleDocumentDragOver as EventListener
+    );
+    document.addEventListener(
+      "dragleave",
+      handleDocumentDragLeave as EventListener
+    );
     document.addEventListener("drop", handleDocumentDrop);
 
     return () => {
-      document.removeEventListener("dragover", handleDocumentDragOver);
-      document.removeEventListener("dragleave", handleDocumentDragLeave);
+      document.removeEventListener(
+        "dragover",
+        handleDocumentDragOver as EventListener
+      );
+      document.removeEventListener(
+        "dragleave",
+        handleDocumentDragLeave as EventListener
+      );
       document.removeEventListener("drop", handleDocumentDrop);
     };
   }, []);
@@ -349,7 +373,7 @@ function FlowWithProvider() {
       setHistoryIndex(newIndex);
 
       // Update selected node
-      const selectedNodes = styledNodes.filter((node) => node.selected);
+      const selectedNodes = styledNodes.filter((node: Node) => node.selected);
       if (selectedNodes.length === 1) {
         setSelectedNode(selectedNodes[0]);
       } else {
@@ -380,7 +404,7 @@ function FlowWithProvider() {
       setHistoryIndex(newIndex);
 
       // Update selected node
-      const selectedNodes = styledNodes.filter((node) => node.selected);
+      const selectedNodes = styledNodes.filter((node: Node) => node.selected);
       if (selectedNodes.length === 1) {
         setSelectedNode(selectedNodes[0]);
       } else {
@@ -409,19 +433,22 @@ function FlowWithProvider() {
   );
 
   // Handle node selection for properties panel
-  const onNodeClick = useCallback((event, node) => {
+  const onNodeClick = useCallback((event: React.MouseEvent, node: Node) => {
     // Single click only selects the node but doesn't open the properties panel
     // The selection is handled in handleNodesChange
   }, []);
 
   // Handle node double-click to open properties panel
-  const onNodeDoubleClick = useCallback((event, node) => {
-    // Double click opens the properties panel
-    setEditingNode(node);
-  }, []);
+  const onNodeDoubleClick = useCallback(
+    (event: React.MouseEvent, node: Node) => {
+      // Double click opens the properties panel
+      setEditingNode(node);
+    },
+    []
+  );
 
   // Handle dropping new nodes from the sidebar
-  const onDragOver = useCallback((event) => {
+  const onDragOver = useCallback((event: React.DragEvent<HTMLDivElement>) => {
     event.preventDefault();
 
     // Handle different drag types
@@ -434,11 +461,12 @@ function FlowWithProvider() {
 
   // Handle dropping files or nodes on the canvas
   const onDrop = useCallback(
-    (event) => {
+    (event: React.DragEvent<HTMLDivElement>) => {
       event.preventDefault();
       setIsFileDragging(false);
 
-      const reactFlowBounds = reactFlowWrapper.current.getBoundingClientRect();
+      const reactFlowBounds = reactFlowWrapper.current?.getBoundingClientRect();
+      if (!reactFlowBounds || !reactFlowInstance) return;
 
       // Get the position where the item was dropped
       const position = reactFlowInstance.project({
@@ -455,7 +483,7 @@ function FlowWithProvider() {
           type: nodeType,
           position,
           data: { label: `${nodeType.replace("Node", "")}`, properties: {} },
-        };
+        } as Node;
 
         setNodes((nds) => {
           // Deselect all nodes
@@ -510,7 +538,7 @@ function FlowWithProvider() {
   );
 
   // Create a new IFC node with the dropped file
-  const handleCreateIfcNode = async (file, position) => {
+  const handleCreateIfcNode = async (file: File, position: NodePosition) => {
     try {
       // Create a new IFC node
       const newNodeId = `ifcNode-${Date.now()}`;
@@ -536,7 +564,7 @@ function FlowWithProvider() {
           },
           selected: true,
           style: nodeStyle.selected,
-        };
+        } as Node;
 
         const newNodes = [...deselectedNodes, newNode];
 
@@ -588,18 +616,18 @@ function FlowWithProvider() {
         title: "IFC file loaded",
         description: `Successfully loaded ${file.name}`,
       });
-    } catch (error) {
+    } catch (error: unknown) {
       console.error("Error loading IFC file:", error);
       toast({
         title: "Error loading IFC file",
-        description: error.message,
+        description: error instanceof Error ? error.message : String(error),
         variant: "destructive",
       });
     }
   };
 
   // Handle opening an IFC file
-  const handleOpenFile = async (file) => {
+  const handleOpenFile = async (file: File) => {
     try {
       const model = await loadIfcFile(file);
 
@@ -615,7 +643,7 @@ function FlowWithProvider() {
         },
         selected: true,
         style: nodeStyle.selected,
-      };
+      } as Node;
 
       setNodes((nds) => {
         // Deselect all nodes
@@ -639,18 +667,18 @@ function FlowWithProvider() {
 
         return newNodes;
       });
-    } catch (error) {
+    } catch (error: unknown) {
       console.error("Error loading IFC file:", error);
       toast({
         title: "Error loading IFC file",
-        description: error.message,
+        description: error instanceof Error ? error.message : String(error),
         variant: "destructive",
       });
     }
   };
 
   // Handle saving a workflow
-  const handleSaveWorkflow = (filename, flowData) => {
+  const handleSaveWorkflow = (filename: string, flowData: any) => {
     // In a real app, this would save to a file or database
     const json = JSON.stringify(flowData, null, 2);
     const blob = new Blob([json], { type: "application/json" });
@@ -682,7 +710,7 @@ function FlowWithProvider() {
           const { nodes: flowNodes, edges: flowEdges } = workflow.flowData;
 
           // Apply selection styling to nodes
-          const styledNodes = (flowNodes || []).map((node) => {
+          const styledNodes = (flowNodes || []).map((node: Node) => {
             if (node.selected) {
               return {
                 ...node,
@@ -701,7 +729,9 @@ function FlowWithProvider() {
           setHistoryIndex(0);
 
           // Update selected node
-          const selectedNodes = styledNodes.filter((node) => node.selected);
+          const selectedNodes = styledNodes.filter(
+            (node: Node) => node.selected
+          );
           if (selectedNodes.length === 1) {
             setSelectedNode(selectedNodes[0]);
           } else {
@@ -748,14 +778,17 @@ function FlowWithProvider() {
         title: "Workflow executed",
         description: "Workflow completed successfully",
       });
-    } catch (error) {
+    } catch (error: unknown) {
       console.error("Error executing workflow:", error);
       setIsRunning(false);
 
       // Create a more detailed error message
-      const errorDetails = error.stack
-        ? `${error.message}\n\nCheck console for stack trace details.`
-        : error.message;
+      const errorDetails =
+        error instanceof Error && error.stack
+          ? `${error.message}\n\nStack: ${error.stack}`
+          : error instanceof Error
+          ? error.message
+          : String(error);
 
       toast({
         title: "Error executing workflow",
@@ -766,7 +799,7 @@ function FlowWithProvider() {
   };
 
   // Handle exporting results
-  const handleExportResults = (format, filename) => {
+  const handleExportResults = (format: string, filename: string) => {
     // Find export nodes and their results
     const exportNodes = nodes.filter((node) => node.type === "exportNode");
 
@@ -813,7 +846,9 @@ function FlowWithProvider() {
   // Function to get the flow object for saving
   const getFlowObject = () => {
     if (reactFlowInstance) {
-      return reactFlowInstance.toObject();
+      return reactFlowInstance.toObject
+        ? reactFlowInstance.toObject()
+        : { nodes, edges };
     }
     return { nodes, edges };
   };
@@ -893,7 +928,7 @@ function FlowWithProvider() {
     });
 
     // Remove the nodes and edges
-    setNodes((nds) => nds.filter((node) => !node.selected));
+    setNodes((nds) => nds.filter((node) => !nodeIds.includes(node.id)));
     setEdges((eds) =>
       eds.filter(
         (edge) =>
@@ -935,7 +970,7 @@ function FlowWithProvider() {
     }
 
     // Create new IDs for the pasted nodes
-    const idMap = {};
+    const idMap: Record<string, string> = {};
     const newNodes = clipboard.nodes.map((node) => {
       const newId = `${node.type}-${Date.now()}-${Math.random()
         .toString(36)
@@ -1071,21 +1106,23 @@ function FlowWithProvider() {
 
   const zoomInHotkey = () => {
     if (reactFlowInstance) {
-      const zoom = reactFlowInstance.getZoom();
-      reactFlowInstance.zoomTo(Math.min(zoom + 0.2, 2));
+      const zoom = reactFlowInstance.getZoom ? reactFlowInstance.getZoom() : 1;
+      if (reactFlowInstance.zoomTo)
+        reactFlowInstance.zoomTo(Math.min(zoom + 0.2, 2));
     }
   };
 
   const zoomOutHotkey = () => {
     if (reactFlowInstance) {
-      const zoom = reactFlowInstance.getZoom();
-      reactFlowInstance.zoomTo(Math.max(zoom - 0.2, 0.2));
+      const zoom = reactFlowInstance.getZoom ? reactFlowInstance.getZoom() : 1;
+      if (reactFlowInstance.zoomTo)
+        reactFlowInstance.zoomTo(Math.max(zoom - 0.2, 0.2));
     }
   };
 
   const fitViewHotkey = () => {
     if (reactFlowInstance) {
-      reactFlowInstance.fitView();
+      if (reactFlowInstance.fitView) reactFlowInstance.fitView();
     }
   };
 
@@ -1319,13 +1356,51 @@ function FlowWithProvider() {
 
   // Add event handler for IFC export events
   useEffect(() => {
-    const handleIfcExport = (event: CustomEvent) => {
-      const { model, fileName } = event.detail;
+    const handleIfcExport = async (event: CustomEvent) => {
+      const { model, exportFileName, originalFileName } = event.detail;
 
       console.log("IFC export event received:", {
-        fileName,
+        exportFileName: exportFileName,
+        originalFileName: originalFileName,
         modelElementCount: model.elements?.length || 0,
       });
+
+      console.log("Export event model object:", JSON.stringify(model));
+
+      // Retrieve the original File object using the original filename
+      const originalFile = getIfcFile(originalFileName);
+
+      if (!originalFile) {
+        console.error(
+          `Could not find cached File object for ${originalFileName}`
+        );
+        toast({
+          title: "Export Failed",
+          description: `Original file data for ${originalFileName} not found. Please reload the file.`,
+          variant: "destructive",
+        });
+        return; // Stop if file object is missing
+      }
+
+      // Read the file into a *NEW* ArrayBuffer just before sending
+      let bufferForExport: ArrayBuffer;
+      try {
+        bufferForExport = await originalFile.arrayBuffer();
+        console.log(
+          `Read fresh ArrayBuffer for export: ${originalFileName}, size: ${bufferForExport.byteLength}`
+        );
+      } catch (readError) {
+        console.error(
+          `Error reading file ${originalFileName} into ArrayBuffer:`,
+          readError
+        );
+        toast({
+          title: "Export Failed",
+          description: `Could not read data for ${originalFileName}.`,
+          variant: "destructive",
+        });
+        return;
+      }
 
       // Make sure we have a worker initialized
       if (!ifcWorkerRef.current) {
@@ -1384,25 +1459,35 @@ function FlowWithProvider() {
         ifcWorkerRef.current = worker;
       }
 
-      // Send export request to worker
-      ifcWorkerRef.current.postMessage({
-        action: "exportIfc",
-        data: {
-          model,
-          fileName,
+      // Send export request to worker, transferring the NEW ArrayBuffer
+      ifcWorkerRef.current.postMessage(
+        {
+          action: "exportIfc",
+          data: {
+            model, // Model data (with modifications)
+            fileName: exportFileName, // Use the correct variable for the desired output filename
+            arrayBuffer: bufferForExport, // <-- Send the NEW buffer
+          },
+          messageId: Date.now().toString(),
         },
-        messageId: Date.now().toString(),
+        [bufferForExport] // Transfer the NEW buffer to the worker
+      );
+    };
+
+    // Create a non-async wrapper for the event listener
+    const eventListenerWrapper = (event: Event) => {
+      // Type assertion needed because we know it's a CustomEvent from our dispatch
+      handleIfcExport(event as CustomEvent).catch((error: any) => {
+        console.error("Error handling IFC export event:", error);
+        // Optionally show a generic error toast here
       });
     };
 
-    // Add event listener for export requests
-    window.addEventListener("ifc:export", handleIfcExport as EventListener);
+    // Add event listener for export requests using the wrapper
+    window.addEventListener("ifc:export", eventListenerWrapper);
 
     return () => {
-      window.removeEventListener(
-        "ifc:export",
-        handleIfcExport as EventListener
-      );
+      window.removeEventListener("ifc:export", eventListenerWrapper);
     };
   }, [toast]);
 
@@ -1415,7 +1500,9 @@ function FlowWithProvider() {
       <div className="flex flex-col flex-1">
         <AppMenubar
           onOpenFile={handleOpenFile}
-          onSaveWorkflow={handleSaveWorkflow}
+          onSaveWorkflow={(wf: Workflow) =>
+            handleSaveWorkflow(wf.name, wf.flowData)
+          }
           onRunWorkflow={handleRunWorkflow}
           onLoadWorkflow={handleLoadWorkflow}
           isRunning={isRunning}
@@ -1437,29 +1524,14 @@ function FlowWithProvider() {
           onPaste={handlePaste}
           onDelete={handleDelete}
         />
-        <div
-          className={`flex-1 h-full relative ${
-            isFileDragging ? "bg-blue-50" : ""
-          }`}
-          ref={reactFlowWrapper}
-        >
-          {isFileDragging && (
-            <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none">
-              <div className="bg-white bg-opacity-80 p-6 rounded-lg shadow-lg border-2 border-dashed border-blue-500">
-                <FileUp className="h-12 w-12 text-blue-500 mx-auto mb-2" />
-                <p className="text-lg font-medium text-blue-700">
-                  Drop IFC file here
-                </p>
-              </div>
-            </div>
-          )}
+        <div className={`flex-1 h-full relative`} ref={reactFlowWrapper}>
           <ReactFlow
             nodes={nodes}
             edges={edges}
             onNodesChange={handleNodesChange}
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
-            onInit={setReactFlowInstance}
+            onInit={setReactFlowInstance as OnInit<any, any>}
             onDrop={onDrop}
             onDragOver={onDragOver}
             onNodeClick={onNodeClick}

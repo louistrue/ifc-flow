@@ -46,9 +46,17 @@ export interface IfcModel {
 // Global reference to the last loaded model
 let _lastLoadedModel: IfcModel | null = null;
 
+// Cache for storing the original File objects of loaded IFC files
+const ifcFileCache: Map<string, File> = new Map();
+
 // Function to get the last loaded model
 export function getLastLoadedModel(): IfcModel | null {
   return _lastLoadedModel;
+}
+
+// Function to retrieve a stored File object
+export function getIfcFile(fileName: string): File | null {
+  return ifcFileCache.get(fileName) || null;
 }
 
 // Worker management
@@ -90,11 +98,11 @@ async function initIfcWorker(): Promise<Worker> {
 
       // Store the resolver
       workerPromiseResolvers.set(messageId, {
-        resolve: (worker) => {
+        resolve: (worker: Worker) => {
           console.log("Worker initialization complete");
           resolve(worker);
         },
-        reject: (error) => {
+        reject: (error: any) => {
           console.error("Worker initialization failed:", error);
           reject(error);
         },
@@ -250,7 +258,11 @@ export async function loadIfcFile(
     ifcWorker.addEventListener("message", progressHandler);
     console.log("Added progress listener for file:", file.name);
 
-    // Read the file as ArrayBuffer
+    // Store the File object in the cache
+    ifcFileCache.set(file.name, file);
+    console.log(`Stored File object for ${file.name} in cache.`);
+
+    // Read the file as ArrayBuffer - this instance will be transferred
     const arrayBuffer = await file.arrayBuffer();
     console.log(
       `File read as ArrayBuffer: ${file.name}, size: ${arrayBuffer.byteLength} bytes`
@@ -1429,135 +1441,129 @@ export function exportData(
   format = "csv",
   fileName = "export",
   properties = "Name,Type,Material"
-): string {
+): string | Promise<void> {
   console.log("Exporting data:", format, fileName, properties);
 
-  // Handle different input formats
-  let elements: IfcElement[];
+  // If format is IFC, dispatch an event to handle export in main thread
+  if (format.toLowerCase() === "ifc") {
+    const sourceModel = getLastLoadedModel(); // Get the originally loaded model
+    if (!sourceModel || !sourceModel.name) {
+      console.error(
+        "Cannot export IFC: Source model or its name not found. Please load a file first."
+      );
+      return Promise.reject("Cannot export IFC: Source model not found.");
+    }
 
-  if (!elementsInput) {
-    console.warn("No input provided to exportData");
-    return "No data";
+    // Extract elements, handling both array and model object inputs
+    let elementsToUse: IfcElement[];
+    if (Array.isArray(elementsInput)) {
+      elementsToUse = elementsInput;
+    } else if (elementsInput && elementsInput.elements) {
+      elementsToUse = elementsInput.elements;
+    } else {
+      console.error("Cannot export IFC: Invalid input data structure.");
+      return Promise.reject("Cannot export IFC: Invalid input data.");
+    }
+
+    // Create the model object containing the potentially modified elements
+    // but crucially retain the original model's metadata like ID and NAME for lookup purposes
+    const modelDataForWorker: IfcModel = {
+      ...sourceModel, // Include original metadata like id, name, schema, project
+      elements: elementsToUse, // Use the potentially modified elements
+    };
+
+    // Dispatch an event to trigger the export process in the main thread
+    // Pass BOTH the desired export filename AND the original filename for buffer lookup
+    console.log(
+      `Dispatching ifc:export event for ${fileName}.ifc (original: ${sourceModel.name})`
+    );
+    window.dispatchEvent(
+      new CustomEvent("ifc:export", {
+        detail: {
+          model: modelDataForWorker, // Send the potentially modified element data wrapped with original metadata
+          exportFileName: `${fileName}.ifc`, // The name the user wants for the downloaded file
+          originalFileName: sourceModel.name, // The name of the file loaded initially (used for buffer cache lookup)
+        },
+      })
+    );
+    return Promise.resolve(); // Indicate async operation
   }
 
-  // Check if the input is an array or an object with elements property
-  if (Array.isArray(elementsInput)) {
-    elements = elementsInput;
-  } else if (
-    typeof elementsInput === "object" &&
-    "elements" in elementsInput &&
-    Array.isArray(elementsInput.elements)
-  ) {
-    elements = elementsInput.elements;
+  // For other formats (CSV, JSON), process the data here
+  // Extract elements if input is a model object
+  const elements = Array.isArray(elementsInput)
+    ? elementsInput
+    : elementsInput.elements;
+
+  if (!elements || elements.length === 0) {
+    console.warn(`No elements provided to exportData for format ${format}`);
+    return format === "json" ? "[]" : ""; // Return empty array for JSON, empty string for CSV
+  }
+
+  // Get headers from properties string or first element
+  const headers = properties
+    ? properties.split(",").map((h) => h.trim())
+    : Object.keys(elements[0]?.properties || {});
+
+  if (format === "json") {
+    // Export as JSON
+    const data = elements.map((element) => {
+      const row: Record<string, any> = {};
+      headers.forEach((header) => {
+        // Handle nested properties (e.g., Pset_WallCommon.IsExternal)
+        const parts = header.split(".");
+        if (parts.length === 1) {
+          row[header] = element.properties[header];
+        } else if (
+          parts.length === 2 &&
+          element.psets &&
+          element.psets[parts[0]]
+        ) {
+          row[header] = element.psets[parts[0]][parts[1]];
+        }
+      });
+      return row;
+    });
+    return JSON.stringify(data, null, 2);
   } else {
-    console.warn("Invalid input format for export:", elementsInput);
-    return "Invalid data format";
-  }
+    // Export as CSV
+    // Header row
+    let csvContent = headers.join(",") + "\n";
 
-  if (elements.length === 0) {
-    console.warn("No elements to export");
-    return "No data";
-  }
-
-  const propertyList = properties.split(",");
-
-  switch (format) {
-    case "csv":
-      // Generate CSV
-      const csvHeader = propertyList.join(",");
-      const csvRows = elements.map((element) => {
-        return propertyList
-          .map((prop) => {
-            // Handle nested properties
-            if (prop.includes(".") && element.psets) {
-              const [psetName, propName] = prop.split(".");
-              return element.psets[psetName]?.[propName] || "";
-            }
-            return element.properties?.[prop] || "";
-          })
-          .map((val) => {
-            // Escape values with commas
-            if (typeof val === "string" && val.includes(",")) {
-              return `"${val}"`;
-            }
-            return val;
-          })
-          .join(",");
-      });
-      return `${csvHeader}\n${csvRows.join("\n")}`;
-
-    case "json":
-      // Generate JSON
-      const jsonData = elements.map((element) => {
-        const obj: Record<string, any> = {};
-        propertyList.forEach((prop) => {
-          // Handle nested properties
-          if (prop.includes(".") && element.psets) {
-            const [psetName, propName] = prop.split(".");
-            obj[prop] = element.psets[psetName]?.[propName] || null;
-          } else {
-            obj[prop] = element.properties?.[prop] || null;
+    // Data rows
+    elements.forEach((element) => {
+      const row = headers
+        .map((header) => {
+          let value = "";
+          // Handle nested properties (e.g., Pset_WallCommon.IsExternal)
+          const parts = header.split(".");
+          if (parts.length === 1) {
+            value = element.properties[header];
+          } else if (
+            parts.length === 2 &&
+            element.psets &&
+            element.psets[parts[0]]
+          ) {
+            value = element.psets[parts[0]][parts[1]];
           }
-        });
-        return obj;
-      });
-      return JSON.stringify(jsonData, null, 2);
 
-    case "excel":
-      // Would use a library like ExcelJS in a real app
-      // For now, just return CSV data
-      return `Excel format data (use CSV format instead for better compatibility)`;
+          // Format value for CSV (handle commas, quotes, newlines)
+          const strValue = String(
+            value === undefined || value === null ? "" : value
+          );
+          if (
+            strValue.includes(",") ||
+            strValue.includes('"') ||
+            strValue.includes("\n")
+          ) {
+            return `"${strValue.replace(/"/g, '""')}"`;
+          }
+          return strValue;
+        })
+        .join(",");
+      csvContent += row + "\n";
+    });
 
-    case "ifc":
-      // Export the modified IFC file
-      try {
-        // Check if we have a model object or just elements
-        let modelToExport;
-        if (elements[0] && elements[0].model) {
-          // If the elements have a reference to their parent model, use it
-          modelToExport = elements[0].model;
-        } else {
-          // Otherwise construct a model object from the elements
-          modelToExport = {
-            id: `modified-model-${Date.now()}`,
-            name: fileName || "Modified IFC Model",
-            elements: elements,
-          };
-        }
-
-        // Trigger download by sending the modified model to the IFC worker
-        if (typeof window !== "undefined") {
-          const downloadEvent = new CustomEvent("ifc:export", {
-            detail: {
-              model: modelToExport,
-              fileName: fileName || "exported.ifc",
-            },
-          });
-          window.dispatchEvent(downloadEvent);
-
-          console.log("IFC export requested:", {
-            elementCount: elements.length,
-            fileName: fileName || "exported.ifc",
-          });
-
-          return `IFC export initiated. Downloading ${
-            fileName || "exported.ifc"
-          }...`;
-        } else {
-          return "IFC export is only available in browser environments";
-        }
-      } catch (error) {
-        console.error("Error during IFC export:", error);
-        return `IFC export failed: ${
-          error instanceof Error ? error.message : String(error)
-        }`;
-      }
-
-    case "glb":
-      // Would use Three.js with web-ifc to export to GLB
-      return `GLB export (requires 3D geometry processing)`;
-
-    default:
-      return `Unknown format: ${format}`;
+    return csvContent;
   }
 }
