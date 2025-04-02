@@ -27,6 +27,7 @@ import {
   Search,
   Clock,
   Plus,
+  Database,
 } from "lucide-react";
 import {
   type Workflow as WorkflowType,
@@ -34,8 +35,9 @@ import {
 } from "@/lib/workflow-storage";
 import { SaveWorkflowDialog } from "@/components/dialogs/save-workflow-dialog";
 import { useToast } from "@/hooks/use-toast";
+import { NodeStatusBadge } from "@/components/node-status-badge";
 
-const nodeCategories = [
+export const nodeCategories = [
   {
     name: "Input",
     nodes: [
@@ -43,11 +45,13 @@ const nodeCategories = [
         id: "ifcNode",
         label: "IFC File",
         icon: <FileUp className="h-4 w-4 mr-2" />,
+        status: "working",
       },
       {
         id: "parameterNode",
         label: "Parameter",
         icon: <Sliders className="h-4 w-4 mr-2" />,
+        status: "working",
       },
     ],
   },
@@ -58,16 +62,19 @@ const nodeCategories = [
         id: "geometryNode",
         label: "Extract Geometry",
         icon: <Box className="h-4 w-4 mr-2" />,
+        status: "wip",
       },
       {
         id: "transformNode",
         label: "Transform",
         icon: <Move className="h-4 w-4 mr-2" />,
+        status: "wip",
       },
       {
         id: "spatialNode",
         label: "Spatial Query",
         icon: <Layers className="h-4 w-4 mr-2" />,
+        status: "wip",
       },
     ],
   },
@@ -78,31 +85,37 @@ const nodeCategories = [
         id: "filterNode",
         label: "Filter Elements",
         icon: <Filter className="h-4 w-4 mr-2" />,
+        status: "experimental",
       },
       {
         id: "propertyNode",
         label: "Property Editor",
         icon: <Edit className="h-4 w-4 mr-2" />,
+        status: "experimental",
       },
       {
         id: "quantityNode",
         label: "Quantity Takeoff",
         icon: <Calculator className="h-4 w-4 mr-2" />,
+        status: "wip",
       },
       {
         id: "classificationNode",
         label: "Classification",
         icon: <FileText className="h-4 w-4 mr-2" />,
+        status: "experimental",
       },
       {
         id: "relationshipNode",
         label: "Relationships",
         icon: <GitBranch className="h-4 w-4 mr-2" />,
+        status: "wip",
       },
       {
         id: "analysisNode",
         label: "Analysis",
         icon: <BarChart className="h-4 w-4 mr-2" />,
+        status: "wip",
       },
     ],
   },
@@ -112,17 +125,20 @@ const nodeCategories = [
       {
         id: "viewerNode",
         label: "Viewer",
-        icon: <Eye className="h-4 w-4 mr-2" />,
+        icon: <Cube className="h-4 w-4 mr-2" />,
+        status: "wip",
       },
       {
         id: "watchNode",
         label: "Watch",
-        icon: <Eye className="h-4 w-4 mr-2" />,
+        icon: <Database className="h-4 w-4 mr-2" />,
+        status: "working",
       },
       {
         id: "exportNode",
         label: "Export",
         icon: <Download className="h-4 w-4 mr-2" />,
+        status: "experimental",
       },
     ],
   },
@@ -264,14 +280,19 @@ export function Sidebar({ onLoadWorkflow, getFlowObject }) {
                           {category.nodes.map((node) => (
                             <div
                               key={node.id}
-                              className="flex items-center rounded-md border border-dashed px-3 py-2 cursor-grab bg-background hover:bg-accent"
+                              className="flex items-center justify-between rounded-md border border-dashed px-3 py-2 cursor-grab bg-background hover:bg-accent"
                               draggable
                               onDragStart={(event) =>
                                 onDragStart(event, node.id)
                               }
                             >
-                              {node.icon}
-                              <span className="text-sm">{node.label}</span>
+                              <div className="flex items-center">
+                                {node.icon}
+                                <span className="text-sm mr-1">
+                                  {node.label}
+                                </span>
+                              </div>
+                              <NodeStatusBadge status={node.status as any} />
                             </div>
                           ))}
                         </div>

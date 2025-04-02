@@ -3,13 +3,13 @@
 import { memo, useState } from "react";
 import { Handle, Position } from "reactflow";
 import {
-  Eye,
   FileText,
   Table,
   Code,
   BarChart2,
   Copy,
   Check,
+  Database,
 } from "lucide-react";
 import { formatPropertyValue } from "@/lib/ifc/property-utils";
 
@@ -411,7 +411,7 @@ export const WatchNode = memo(({ data, isConnectable }: WatchNodeProps) => {
   return (
     <div className="bg-white border-2 border-teal-500 rounded-md w-64 shadow-md">
       <div className="bg-teal-500 text-white px-3 py-1 flex items-center gap-2">
-        <Eye className="h-4 w-4" />
+        <Database className="h-4 w-4" />
         <div className="text-sm font-medium truncate">
           {data.label || "Watch Node"}
         </div>

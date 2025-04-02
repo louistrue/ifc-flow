@@ -52,18 +52,38 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 
-export function HelpDialog({ open, onOpenChange }) {
+interface HelpDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}
+
+// Define Shortcut type locally based on usage
+interface Shortcut {
+  id: string;
+  name: string;
+  keys: string;
+  defaultKeys: string;
+  category: string;
+}
+
+// Define type for the accumulator in reduce
+type ShortcutsByCategory = Record<string, Shortcut[]>;
+
+export function HelpDialog({ open, onOpenChange }: HelpDialogProps) {
   const [activeTab, setActiveTab] = useState("about");
   const [editingShortcut, setEditingShortcut] = useState<string | null>(null);
   const [listeningForKeys, setListeningForKeys] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  // Explicitly type the shortcuts from the hook if possible, otherwise use the local Shortcut type
   const { shortcuts, updateShortcut, resetShortcut, resetAllShortcuts } =
     useKeyboardShortcuts();
   const dialogRef = useRef<HTMLDivElement>(null);
 
   // Group shortcuts by category
-  const shortcutsByCategory = shortcuts.reduce((acc, shortcut) => {
+  const shortcutsByCategory = (
+    shortcuts as Shortcut[]
+  ).reduce<ShortcutsByCategory>((acc, shortcut) => {
     if (!acc[shortcut.category]) {
       acc[shortcut.category] = [];
     }
@@ -192,10 +212,11 @@ export function HelpDialog({ open, onOpenChange }) {
         <DialogHeader className="pb-2 border-b">
           <DialogTitle className="flex items-center gap-2 text-xl">
             <Info className="h-5 w-5 text-primary" />
-            IFCflow Help
+            Grasshopper for IFC Help
           </DialogTitle>
           <DialogDescription>
-            Documentation and resources to help you use IFCflow effectively
+            Documentation and resources to help you use Grasshopper for IFC
+            effectively
           </DialogDescription>
         </DialogHeader>
 
@@ -268,7 +289,7 @@ export function HelpDialog({ open, onOpenChange }) {
                   <Building className="h-8 w-8 text-primary" />
                 </div>
                 <div className="space-y-2">
-                  <h3 className="text-xl font-medium">IFCflow</h3>
+                  <h3 className="text-xl font-medium">Grasshopper for IFC</h3>
                   <p className="text-muted-foreground">
                     A visual scripting environment for working with IFC
                     (Industry Foundation Classes) files. Create, manipulate, and
@@ -325,7 +346,9 @@ export function HelpDialog({ open, onOpenChange }) {
                     <div>
                       <div className="text-sm font-medium">Version</div>
                       <div className="flex justify-between">
-                        <span className="text-muted-foreground">IFCflow</span>
+                        <span className="text-muted-foreground">
+                          Grasshopper for IFC
+                        </span>
                         <Badge variant="outline">v0.1.0</Badge>
                       </div>
                     </div>
@@ -351,8 +374,9 @@ export function HelpDialog({ open, onOpenChange }) {
               <div>
                 <h4 className="text-lg font-medium mb-3">Getting Started</h4>
                 <p className="mb-4">
-                  New to IFCflow? Check out the tutorial section to learn how to
-                  create your first workflow and process IFC models effectively.
+                  New to Grasshopper for IFC? Check out the tutorial section to
+                  learn how to create your first workflow and process IFC models
+                  effectively.
                 </p>
                 <Button
                   onClick={() => setActiveTab("tutorial")}
@@ -483,61 +507,63 @@ export function HelpDialog({ open, onOpenChange }) {
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {categoryShortcuts.map((shortcut) => (
-                            <TableRow key={shortcut.id}>
-                              <TableCell>{shortcut.name}</TableCell>
-                              <TableCell>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className={`font-mono ${
-                                    editingShortcut === shortcut.id
-                                      ? "bg-primary/20"
-                                      : ""
-                                  }`}
-                                  onClick={() =>
-                                    handleShortcutClick(shortcut.id)
-                                  }
-                                >
-                                  {formatKeyCombination(shortcut.keys)}
-                                </Button>
-                              </TableCell>
-                              <TableCell>
-                                <div className="flex gap-1">
+                          {(categoryShortcuts as Shortcut[]).map(
+                            (shortcut: Shortcut) => (
+                              <TableRow key={shortcut.id}>
+                                <TableCell>{shortcut.name}</TableCell>
+                                <TableCell>
                                   <Button
                                     variant="ghost"
-                                    size="icon"
-                                    className="h-8 w-8"
+                                    size="sm"
+                                    className={`font-mono ${
+                                      editingShortcut === shortcut.id
+                                        ? "bg-primary/20"
+                                        : ""
+                                    }`}
                                     onClick={() =>
-                                      handleCopyShortcut(
-                                        shortcut.id,
-                                        shortcut.keys
-                                      )
+                                      handleShortcutClick(shortcut.id)
                                     }
-                                    title="Copy shortcut"
                                   >
-                                    {copiedId === shortcut.id ? (
-                                      <Check className="h-4 w-4 text-green-500" />
-                                    ) : (
-                                      <Copy className="h-4 w-4" />
-                                    )}
+                                    {formatKeyCombination(shortcut.keys)}
                                   </Button>
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="h-8 w-8"
-                                    onClick={() => resetShortcut(shortcut.id)}
-                                    disabled={
-                                      shortcut.keys === shortcut.defaultKeys
-                                    }
-                                    title="Reset to default"
-                                  >
-                                    <FileDown className="h-4 w-4" />
-                                  </Button>
-                                </div>
-                              </TableCell>
-                            </TableRow>
-                          ))}
+                                </TableCell>
+                                <TableCell>
+                                  <div className="flex gap-1">
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-8 w-8"
+                                      onClick={() =>
+                                        handleCopyShortcut(
+                                          shortcut.id,
+                                          shortcut.keys
+                                        )
+                                      }
+                                      title="Copy shortcut"
+                                    >
+                                      {copiedId === shortcut.id ? (
+                                        <Check className="h-4 w-4 text-green-500" />
+                                      ) : (
+                                        <Copy className="h-4 w-4" />
+                                      )}
+                                    </Button>
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-8 w-8"
+                                      onClick={() => resetShortcut(shortcut.id)}
+                                      disabled={
+                                        shortcut.keys === shortcut.defaultKeys
+                                      }
+                                      title="Reset to default"
+                                    >
+                                      <FileDown className="h-4 w-4" />
+                                    </Button>
+                                  </div>
+                                </TableCell>
+                              </TableRow>
+                            )
+                          )}
                         </TableBody>
                       </Table>
                     </div>
@@ -555,11 +581,11 @@ export function HelpDialog({ open, onOpenChange }) {
               <div>
                 <h3 className="text-xl font-medium flex items-center gap-2">
                   <AlertCircle className="h-5 w-5 text-primary" />
-                  Getting Started with IFCflow
+                  Getting Started with Grasshopper for IFC
                 </h3>
                 <p className="text-muted-foreground mt-1">
-                  Follow this step-by-step guide to learn how to use IFCflow
-                  effectively.
+                  Follow this step-by-step guide to learn how to use Grasshopper
+                  for IFC effectively.
                 </p>
               </div>
 

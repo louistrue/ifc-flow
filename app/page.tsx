@@ -50,6 +50,7 @@ import {
 } from "@/lib/keyboard-shortcuts";
 import { useAppSettings } from "@/lib/settings-manager";
 import { useTheme } from "next-themes";
+import { nodeCategories } from "@/components/sidebar";
 
 // Define custom node types
 const nodeTypes: NodeTypes = {
@@ -88,6 +89,19 @@ interface NodePosition {
   x: number;
   y: number;
 }
+
+// Helper function to find node definition by type
+const findNodeDefinition = (nodeType: string) => {
+  for (const category of nodeCategories) {
+    const nodeDef = category.nodes.find(
+      (node: { id: string }) => node.id === nodeType
+    );
+    if (nodeDef) {
+      return nodeDef;
+    }
+  }
+  return null;
+};
 
 // Create a wrapper component that uses the ReactFlow hooks
 function FlowWithProvider() {
@@ -477,12 +491,17 @@ function FlowWithProvider() {
       // Check if a node is being dropped from the sidebar
       const nodeType = event.dataTransfer.getData("application/reactflow");
       if (nodeType && nodeType !== "") {
+        // Find node definition to get status and label
+        const nodeDef = findNodeDefinition(nodeType);
+        const label = nodeDef ? nodeDef.label : nodeType.replace("Node", "");
+        const status = nodeDef ? nodeDef.status : "working";
+
         // Create a new node
         const newNode = {
           id: `${nodeType}-${Date.now()}`,
           type: nodeType,
           position,
-          data: { label: `${nodeType.replace("Node", "")}`, properties: {} },
+          data: { label, properties: {}, status },
         } as Node;
 
         setNodes((nds) => {
@@ -542,6 +561,8 @@ function FlowWithProvider() {
     try {
       // Create a new IFC node
       const newNodeId = `ifcNode-${Date.now()}`;
+      const nodeDef = findNodeDefinition("ifcNode");
+      const status = nodeDef ? nodeDef.status : "working";
 
       // Add the node first with a loading state
       setNodes((nds) => {
@@ -561,6 +582,7 @@ function FlowWithProvider() {
             label: file.name,
             properties: { file: file.name },
             isLoading: true,
+            status,
           },
           selected: true,
           style: nodeStyle.selected,
@@ -630,6 +652,8 @@ function FlowWithProvider() {
   const handleOpenFile = async (file: File) => {
     try {
       const model = await loadIfcFile(file);
+      const nodeDef = findNodeDefinition("ifcNode");
+      const status = nodeDef ? nodeDef.status : "working";
 
       // Create a new IFC node with the loaded model
       const ifcNode = {
@@ -640,6 +664,7 @@ function FlowWithProvider() {
           label: file.name,
           properties: { file: file.name },
           model,
+          status,
         },
         selected: true,
         style: nodeStyle.selected,
