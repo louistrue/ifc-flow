@@ -12,6 +12,7 @@ import {
   loadIfcFile,
   IfcModel,
   getLastLoadedModel,
+  extractGeometryWithGeom,
 } from "@/lib/ifc-utils";
 
 // Add TypeScript interfaces at the top of the file
@@ -224,12 +225,18 @@ export class WorkflowExecutor {
         break;
 
       case "geometryNode":
-        // Extract geometry from input model
-        result = extractGeometry(
-          inputValues.input,
-          node.data.properties?.elementType,
-          node.data.properties?.includeOpenings === "true"
-        );
+        // Check if we should use actual geometry
+        if (node.data.properties?.useActualGeometry) {
+          // Use the full geometry extraction with web worker
+          result = await this.executeGeometryNode(node);
+        } else {
+          // Use the simple extraction method
+          result = extractGeometry(
+            inputValues.input,
+            node.data.properties?.elementType || "all",
+            node.data.properties?.includeOpenings !== "false"
+          );
+        }
         break;
 
       case "filterNode":
@@ -447,8 +454,40 @@ export class WorkflowExecutor {
         let itemCount = 0;
 
         if (Array.isArray(processedData)) {
-          inputType = "array";
-          itemCount = processedData.length;
+          // Check if this is an array of IFC elements with geometry
+          if (
+            processedData.length > 0 &&
+            processedData[0].type &&
+            processedData[0].type.startsWith("Ifc") &&
+            (processedData[0].geometry ||
+              processedData[0].properties?.hasSimplifiedGeometry)
+          ) {
+            console.log(
+              "Watch node received IFC elements with geometry:",
+              processedData.length
+            );
+
+            // For geometry elements, create a more useful summary
+            const geometryTypes = processedData.reduce((types, el) => {
+              types[el.type] = (types[el.type] || 0) + 1;
+              return types;
+            }, {});
+
+            // Process as a special geometry result
+            processedData = {
+              elements: processedData,
+              elementCount: processedData.length,
+              geometryTypes,
+              hasGeometry: true,
+            };
+
+            inputType = "geometryResult";
+            itemCount = processedData.elements.length;
+          } else {
+            // Regular array
+            inputType = "array";
+            itemCount = processedData.length;
+          }
         } else if (processedData === null) {
           inputType = "null";
         } else if (processedData === undefined) {
@@ -702,5 +741,108 @@ export class WorkflowExecutor {
     });
 
     return result;
+  }
+
+  // Helper to update node data in the internal list
+  private updateNodeDataInList(nodeId: string, newData: any) {
+    this.nodes = this.nodes.map((n) =>
+      n.id === nodeId ? { ...n, data: newData } : n
+    );
+    // Note: This only updates the executor's internal list.
+    // ReactFlow's state needs to be updated separately after execution completes.
+  }
+
+  // Execute geometry node with actual geometry extraction
+  private async executeGeometryNode(node: any): Promise<any> {
+    const nodeId = node.id;
+    console.log(`Executing geometry node with actual geometry for ${nodeId}`);
+
+    // Get input values - find the input node (usually an IFC node)
+    const inputValues = await this.getInputValues(nodeId);
+    if (!inputValues.input) {
+      throw new Error(`No input provided to geometry node ${nodeId}`);
+    }
+
+    const model = inputValues.input;
+    if (!model || !model.file) {
+      throw new Error(
+        `Input to geometry node ${nodeId} is not a valid IFC model with file reference`
+      );
+    }
+
+    const elementType = node.data.properties?.elementType || "all";
+    const includeOpenings = node.data.properties?.includeOpenings !== "false";
+
+    // Update node state to loading
+    let updatedNodeData = {
+      ...node.data,
+      isLoading: true,
+      progress: { percentage: 5, message: "Starting geometry extraction..." },
+      error: null,
+    };
+    this.updateNodeDataInList(nodeId, updatedNodeData);
+
+    try {
+      // Define progress callback
+      const progressCallback = (percentage: number, message?: string) => {
+        this.updateNodeDataInList(nodeId, {
+          ...updatedNodeData,
+          isLoading: true,
+          progress: { percentage, message: message || "Processing..." },
+        });
+      };
+
+      // Extract geometry with the actual geometry approach
+      const elements = await extractGeometryWithGeom(
+        model,
+        elementType,
+        includeOpenings,
+        progressCallback
+      );
+
+      // Update node with results
+      updatedNodeData = {
+        ...updatedNodeData,
+        elements,
+        model,
+        isLoading: false,
+        progress: null,
+      };
+      this.updateNodeDataInList(nodeId, updatedNodeData);
+
+      // Return just the elements for workflow processing
+      return elements.map((el) => {
+        // If the element has a geometry property with a 'simplified' type,
+        // include that in the direct properties for easier access in watch nodes
+        if (el.geometry && el.geometry.type === "simplified") {
+          return {
+            ...el,
+            properties: {
+              ...el.properties,
+              hasSimplifiedGeometry: true,
+              dimensions: el.geometry.dimensions,
+            },
+          };
+        }
+        return el;
+      });
+    } catch (error) {
+      console.error(
+        `Error during geometry extraction for node ${nodeId}:`,
+        error
+      );
+
+      // Update node with error state
+      updatedNodeData = {
+        ...updatedNodeData,
+        isLoading: false,
+        progress: null,
+        error: error instanceof Error ? error.message : String(error),
+      };
+      this.updateNodeDataInList(nodeId, updatedNodeData);
+
+      // Rethrow the error
+      throw error;
+    }
   }
 }

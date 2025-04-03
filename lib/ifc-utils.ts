@@ -49,6 +49,18 @@ let _lastLoadedModel: IfcModel | null = null;
 // Cache for storing the original File objects of loaded IFC files
 const ifcFileCache: Map<string, File> = new Map();
 
+// Function to cache a File object
+export function cacheIfcFile(file: File) {
+  if (file && file.name) {
+    if (!ifcFileCache.has(file.name)) {
+      ifcFileCache.set(file.name, file);
+      console.log(`Cached File object: ${file.name}`);
+    }
+  } else {
+    console.warn("Attempted to cache an invalid File object.");
+  }
+}
+
 // Function to get the last loaded model
 export function getLastLoadedModel(): IfcModel | null {
   return _lastLoadedModel;
@@ -68,167 +80,99 @@ let workerPromiseResolvers: Map<
 > = new Map();
 let workerMessageId = 0;
 
-// Initialize the IfcOpenShell worker
-async function initIfcWorker(): Promise<Worker> {
-  if (ifcWorker !== null && isWorkerInitialized) {
-    console.log("Worker already initialized, reusing");
-    return ifcWorker;
+// Initialize the worker
+export async function initializeWorker(): Promise<void> {
+  if (isWorkerInitialized) {
+    return;
   }
 
-  console.log("Initializing worker");
-  return new Promise((resolve, reject) => {
-    try {
-      // Create worker if it doesn't exist
-      if (!ifcWorker) {
-        console.log("Creating new worker");
-        ifcWorker = new Worker("/ifcWorker.js");
+  try {
+    console.log("Initializing IFC worker...");
+    // Create worker
+    ifcWorker = new Worker("/ifcWorker.js");
 
-        // Set up message handler
-        ifcWorker.onmessage = (e) => handleWorkerMessage(e);
-        ifcWorker.onerror = (e) => {
-          console.error("Worker error during creation:", e);
-          handleWorkerError(e);
-          reject(new Error(`Worker creation error: ${e.message}`));
-        };
+    // Add message handler
+    ifcWorker.onmessage = (event) => {
+      const { type, messageId, error, ...data } = event.data;
+
+      console.log(`Worker message received: ${type}`, { messageId });
+
+      // Handle different message types
+      if (type === "error") {
+        console.error("Worker error:", data.message, data.stack);
+        // Resolve the corresponding promise
+        if (messageId && workerPromiseResolvers.has(messageId)) {
+          workerPromiseResolvers
+            .get(messageId)!
+            .reject(new Error(data.message));
+          workerPromiseResolvers.delete(messageId);
+        }
+      } else if (type === "initialized") {
+        console.log("Worker initialized");
+        if (messageId && workerPromiseResolvers.has(messageId)) {
+          workerPromiseResolvers.get(messageId)!.resolve();
+          workerPromiseResolvers.delete(messageId);
+        }
+      } else if (type === "loadComplete") {
+        console.log("IFC load complete with schema:", data.schema);
+        if (messageId && workerPromiseResolvers.has(messageId)) {
+          // Pass the complete model info object, not just a nested property
+          workerPromiseResolvers.get(messageId)!.resolve(data);
+          workerPromiseResolvers.delete(messageId);
+        }
+      } else if (type === "dataExtracted") {
+        console.log(`Data extracted: ${data.elements.length} elements`);
+        if (messageId && workerPromiseResolvers.has(messageId)) {
+          workerPromiseResolvers.get(messageId)!.resolve(data);
+          workerPromiseResolvers.delete(messageId);
+        }
+      } else if (type === "ifcExported") {
+        console.log(`IFC exported: ${data.fileName}`);
+        if (messageId && workerPromiseResolvers.has(messageId)) {
+          workerPromiseResolvers.get(messageId)!.resolve(data);
+          workerPromiseResolvers.delete(messageId);
+        }
+      } else if (type === "geometry") {
+        console.log(
+          `Geometry extracted: ${data.elements?.length || 0} elements`
+        );
+        if (messageId && workerPromiseResolvers.has(messageId)) {
+          workerPromiseResolvers.get(messageId)!.resolve(data.elements || []);
+          workerPromiseResolvers.delete(messageId);
+        }
       }
+      // Progress messages don't resolve promises
+    };
 
-      // Initialize worker with a unique ID
-      const messageId = `init_${Date.now()}`;
-      console.log("Initializing worker with ID:", messageId);
-
-      // Store the resolver
-      workerPromiseResolvers.set(messageId, {
-        resolve: (worker: Worker) => {
-          console.log("Worker initialization complete");
-          resolve(worker);
-        },
-        reject: (error: any) => {
-          console.error("Worker initialization failed:", error);
-          reject(error);
-        },
-      });
-
-      // Send init message
-      ifcWorker.postMessage({
+    // Initialize the worker
+    const messageId = `init_${Date.now()}`;
+    await new Promise((resolve, reject) => {
+      workerPromiseResolvers.set(messageId, { resolve, reject });
+      ifcWorker!.postMessage({
         action: "init",
         messageId,
       });
 
-      // Add timeout for initialization
+      // Set a timeout for initialization
       setTimeout(() => {
         if (workerPromiseResolvers.has(messageId)) {
-          const error = new Error("Worker initialization timed out");
-          console.error(error);
-          workerPromiseResolvers.get(messageId)?.reject(error);
+          console.error("Worker did not initialize within timeout period");
+          reject(new Error("Worker initialization timed out"));
           workerPromiseResolvers.delete(messageId);
         }
-      }, 30000); // 30 second timeout
-    } catch (error) {
-      console.error("Error initializing worker:", error);
-      reject(error);
-    }
-  });
-}
+      }, 30000); // 30 second timeout for initialization
+    });
 
-// Handle messages from the worker
-function handleWorkerMessage(event: MessageEvent) {
-  const { type, messageId, ...data } = event.data;
-
-  console.log(`Worker message received: ${type}`, { messageId });
-
-  // Handle progress updates
-  if (type === "progress") {
-    // Let these propagate through - they'll be handled by individual callbacks
-    console.log(`Progress: ${data.message} (${data.percentage}%)`);
-    return;
-  }
-
-  // Handle initialized message
-  if (type === "initialized") {
     isWorkerInitialized = true;
     console.log("Worker initialized successfully");
-
-    // Resolve any pending init promises
-    for (const [key, resolver] of workerPromiseResolvers.entries()) {
-      if (key.startsWith("init_")) {
-        resolver.resolve(ifcWorker);
-        workerPromiseResolvers.delete(key);
-        console.log(`Resolved init promise: ${key}`);
-        break;
-      }
-    }
-    return;
+  } catch (err) {
+    console.error("Error initializing worker:", err);
+    throw new Error(
+      `Failed to initialize worker: ${
+        err instanceof Error ? err.message : String(err)
+      }`
+    );
   }
-
-  // Handle load complete
-  if (type === "loadComplete" || type === "dataExtracted") {
-    console.log(`Received ${type} message for ID ${messageId}`);
-
-    // Find and resolve the corresponding promise
-    const resolver = workerPromiseResolvers.get(messageId);
-    if (resolver) {
-      resolver.resolve(data);
-      workerPromiseResolvers.delete(messageId);
-      console.log(`Resolved promise for messageId: ${messageId}`);
-    } else {
-      console.warn(
-        `Received ${type} message but no resolver found for messageId ${messageId}`
-      );
-      console.log(
-        "Current resolvers:",
-        Array.from(workerPromiseResolvers.keys())
-      );
-    }
-    return;
-  }
-
-  // Handle errors
-  if (type === "error") {
-    console.error("Worker error:", data.message, data.stack);
-
-    // Find and reject the corresponding promise
-    if (messageId) {
-      const resolver = workerPromiseResolvers.get(messageId);
-      if (resolver) {
-        resolver.reject(new Error(data.message));
-        workerPromiseResolvers.delete(messageId);
-        console.log(`Rejected promise for messageId: ${messageId}`);
-      } else {
-        console.warn(
-          `Received error message but no resolver found for messageId ${messageId}`
-        );
-        console.log(
-          "Current resolvers:",
-          Array.from(workerPromiseResolvers.keys())
-        );
-      }
-    } else {
-      // No messageId, reject all pending promises
-      console.warn(
-        "Error message received without messageId, rejecting all promises"
-      );
-      workerPromiseResolvers.forEach((resolver, id) => {
-        resolver.reject(new Error(data.message));
-        workerPromiseResolvers.delete(id);
-        console.log(`Rejected promise for messageId: ${id}`);
-      });
-    }
-    return;
-  }
-
-  // Unhandled message type
-  console.warn(`Unhandled worker message type: ${type}`, data);
-}
-
-// Handle worker errors
-function handleWorkerError(error: ErrorEvent) {
-  console.error("Worker error event:", error);
-
-  // Reject all pending promises
-  workerPromiseResolvers.forEach((resolver) => {
-    resolver.reject(new Error(`Worker error: ${error.message}`));
-  });
-  workerPromiseResolvers.clear();
 }
 
 // Load an IFC file using IfcOpenShell via the worker
@@ -240,7 +184,7 @@ export async function loadIfcFile(
 
   try {
     // Initialize the worker if needed
-    const worker = await initIfcWorker();
+    await initializeWorker();
     console.log("Worker initialized for file load:", file.name);
 
     if (!ifcWorker) {
@@ -315,8 +259,9 @@ export async function loadIfcFile(
       }
     }, 60000); // 60 second timeout
 
-    // The result contains basic model info
-    const { modelInfo } = result as any;
+    // The model info is directly in the result
+    // Using 'as any' to bypass TypeScript type checking
+    const modelInfo: any = result;
 
     // Clear the timeout
     clearTimeout(timeout);
@@ -372,6 +317,7 @@ export async function loadIfcFile(
     const model: IfcModel = {
       id: `model-${Date.now()}`,
       name: file.name,
+      file: file,
       schema: modelInfo.schema,
       project: modelInfo.project,
       elementCounts: modelInfo.element_counts,
@@ -384,6 +330,7 @@ export async function loadIfcFile(
       name: model.name,
       schema: model.schema,
       totalElements: model.totalElements,
+      hasFileObject: !!model.file,
     });
 
     // Store as the last loaded model
@@ -393,6 +340,9 @@ export async function loadIfcFile(
       model.elements.length,
       "elements"
     );
+
+    // Store the file object in the cache (redundant if already done, but safe)
+    cacheIfcFile(file);
 
     return model;
   } catch (err) {
@@ -405,54 +355,199 @@ export async function loadIfcFile(
   }
 }
 
-// Extract geometry from IFC elements
+// Extract geometry from IFC elements (Standard method without GEOM worker)
 export function extractGeometry(
   model: IfcModel,
   elementType = "all",
   includeOpenings = true
 ): IfcElement[] {
-  console.log("Extracting geometry:", elementType, includeOpenings);
+  console.log(
+    `Extracting geometry (Standard): Type=${elementType}, Openings=${includeOpenings}, Input Elements=${
+      model?.elements?.length || 0
+    }`
+  );
 
+  // Ensure we have a model and elements to work with
   if (!model || !model.elements || model.elements.length === 0) {
+    console.warn(
+      "extractGeometry (Standard): Received model without elements, returning empty array."
+    );
     return [];
   }
 
   // Filter elements by type
-  if (elementType === "all") {
-    return includeOpenings
-      ? model.elements
-      : model.elements.filter(
-          (element) => !element.type.includes("IFCOPENING")
-        );
+  let filteredElements = model.elements;
+  if (elementType !== "all") {
+    // Map user-friendly types to IFC types
+    const typeMap: Record<string, string[]> = {
+      walls: ["IFCWALL", "IFCWALLSTANDARDCASE"],
+      slabs: ["IFCSLAB", "IFCROOF"],
+      columns: ["IFCCOLUMN"],
+      beams: ["IFCBEAM"],
+      doors: ["IFCDOOR"],
+      windows: ["IFCWINDOW"],
+      stairs: ["IFCSTAIR", "IFCSTAIRFLIGHT"],
+      furniture: ["IFCFURNISHINGELEMENT"],
+      spaces: ["IFCSPACE"],
+      openings: ["IFCOPENINGELEMENT"],
+    };
+
+    const targetTypes = typeMap[elementType]?.map((t) => t.toUpperCase()) || [];
+    if (targetTypes.length > 0) {
+      filteredElements = filteredElements.filter((element) =>
+        targetTypes.includes(element.type.toUpperCase())
+      );
+    } else {
+      console.warn(
+        `extractGeometry (Standard): Unknown element type '${elementType}', processing all.`
+      );
+    }
   }
 
-  // Map user-friendly types to IFC types
-  const typeMap: Record<string, string[]> = {
-    walls: ["IFCWALL", "IFCWALLSTANDARDCASE"],
-    slabs: ["IFCSLAB", "IFCROOF"],
-    columns: ["IFCCOLUMN"],
-    beams: ["IFCBEAM"],
-    doors: ["IFCDOOR"],
-    windows: ["IFCWINDOW"],
-    stairs: ["IFCSTAIR", "IFCSTAIRFLIGHT"],
-    furniture: ["IFCFURNISHINGELEMENT"],
-    spaces: ["IFCSPACE"],
-    openings: ["IFCOPENINGELEMENT"],
-  };
+  // Filter openings if necessary
+  if (!includeOpenings) {
+    filteredElements = filteredElements.filter(
+      (element) => !element.type.toUpperCase().includes("IFCOPENING")
+    );
+  }
 
-  // Filter elements by specified type
-  return model.elements.filter((element) => {
-    const matchesType = typeMap[elementType]?.some((type) =>
-      element.type.toUpperCase().includes(type)
+  console.log(
+    `Extracting geometry (Standard): Returning ${filteredElements.length} elements.`
+  );
+  return filteredElements;
+}
+
+// Extract geometry using simplified method (previously used IfcOpenShell GEOM module)
+export async function extractGeometryWithGeom(
+  model: IfcModel,
+  elementType = "all",
+  includeOpenings = true,
+  onProgress?: (progress: number, message?: string) => void
+): Promise<IfcElement[]> {
+  console.log(
+    `Extracting simplified geometry: Type=${elementType}, Openings=${includeOpenings}`
+  );
+
+  // Ensure we have a model
+  if (!model || !model.file) {
+    console.warn("extractGeometryWithGeom: No model or file provided");
+    return [];
+  }
+
+  // Get the original File object from cache if available
+  const file =
+    typeof model.file === "string"
+      ? getIfcFile(model.file)
+      : (model.file as File);
+
+  if (!file) {
+    console.error("extractGeometryWithGeom: Could not retrieve file object");
+    throw new Error("Could not retrieve IFC file for geometry extraction");
+  }
+
+  // Initialize worker if needed
+  if (!ifcWorker) {
+    await initializeWorker();
+  }
+
+  try {
+    // Create unique message ID
+    const messageId = `geom_${Date.now()}`;
+
+    // Read the file as ArrayBuffer
+    const arrayBuffer = await file.arrayBuffer();
+
+    // Setup promise for worker response
+    const resultPromise = new Promise<IfcElement[]>((resolve, reject) => {
+      workerPromiseResolvers.set(messageId, { resolve, reject });
+
+      // Progress handler
+      const progressHandler = (event: MessageEvent) => {
+        const data = event.data;
+        if (
+          data.type === "progress" &&
+          data.messageId === messageId &&
+          onProgress
+        ) {
+          onProgress(data.percentage, data.message);
+        }
+      };
+
+      // Add progress event listener
+      ifcWorker!.addEventListener("message", progressHandler);
+
+      // Set a timeout to detect if the worker doesn't respond
+      const timeout = setTimeout(() => {
+        if (workerPromiseResolvers.has(messageId)) {
+          console.error(
+            "Worker did not respond to geometry extraction within timeout period"
+          );
+          reject(
+            new Error(
+              "Worker did not respond to geometry extraction within the timeout period"
+            )
+          );
+          workerPromiseResolvers.delete(messageId);
+          ifcWorker!.removeEventListener("message", progressHandler);
+        }
+      }, 120000); // 2 minute timeout for geometry extraction
+
+      // Clean up function
+      const cleanup = () => {
+        clearTimeout(timeout);
+        ifcWorker!.removeEventListener("message", progressHandler);
+        workerPromiseResolvers.delete(messageId);
+      };
+
+      // Set up resolver in a different scope to handle worker response
+      workerPromiseResolvers.set(messageId, {
+        resolve: (data: any) => {
+          cleanup();
+          resolve(data);
+        },
+        reject: (error: any) => {
+          cleanup();
+          reject(error);
+        },
+      });
+
+      console.log("Sending geometry extraction request to worker", {
+        messageId,
+        elementType,
+        includeOpenings,
+        arrayBufferSize: arrayBuffer.byteLength,
+      });
+
+      // Send request to worker
+      ifcWorker!.postMessage(
+        {
+          action: "extractGeometry",
+          messageId,
+          data: {
+            elementType,
+            includeOpenings,
+            arrayBuffer,
+          },
+        },
+        [arrayBuffer]
+      );
+    });
+
+    // Wait for response
+    const elements = await resultPromise;
+    console.log(
+      `extractGeometryWithGeom: Received ${elements.length} elements with geometry`
     );
 
-    // If not including openings, filter them out
-    if (!includeOpenings && element.type.includes("IFCOPENING")) {
-      return false;
-    }
-
-    return matchesType;
-  });
+    return elements;
+  } catch (error) {
+    console.error("Error extracting geometry with GEOM:", error);
+    throw new Error(
+      `Failed to extract geometry: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
+  }
 }
 
 // Filter elements by property

@@ -2,7 +2,8 @@
 
 import { memo, useState, useCallback } from "react";
 import { Handle, Position, useReactFlow } from "reactflow";
-import { FileUp, Loader2, Info, Building } from "lucide-react";
+import { FileUp, Info, Building } from "lucide-react";
+import { NodeLoadingIndicator } from "./node-loading-indicator";
 
 export const IfcNode = memo(({ id, data, isConnectable }) => {
   const [isDraggingOver, setIsDraggingOver] = useState(false);
@@ -51,6 +52,7 @@ export const IfcNode = memo(({ id, data, isConnectable }) => {
                     },
                     isLoading: true,
                     model: null, // Clear any previous model
+                    error: null, // Clear previous errors
                   },
                 };
               }
@@ -58,17 +60,16 @@ export const IfcNode = memo(({ id, data, isConnectable }) => {
             })
           );
 
-          // Load the IFC file
-          import("@/lib/ifc/file-uploader").then(({ handleFileUpload }) => {
-            // Set initial progress
-            setProgress({ percentage: 0, message: "Starting..." });
+          // Reset progress for the new file
+          setProgress({ percentage: 0, message: "" });
 
-            // Handle file upload with progress
+          // Use dynamic import for file uploader
+          import("@/lib/ifc/file-uploader").then(({ handleFileUpload }) => {
             handleFileUpload(
               file,
-              // On success
               (model) => {
                 console.log("IFC model loaded:", model);
+                // Update node with model, clear loading/progress
                 setNodes((nodes) =>
                   nodes.map((node) => {
                     if (node.id === id) {
@@ -76,20 +77,20 @@ export const IfcNode = memo(({ id, data, isConnectable }) => {
                         ...node,
                         data: {
                           ...node.data,
-                          model,
+                          model: model, // Store the full model object
                           isLoading: false,
+                          error: null,
                         },
                       };
                     }
                     return node;
                   })
                 );
+                setProgress({ percentage: 0, message: "" }); // Clear progress state
               },
-              // On error
               (error) => {
                 console.error("Error loading IFC file:", error);
-                setProgress({ percentage: 0, message: "" });
-                // Reset loading state on error
+                // Update node with error, clear loading/progress
                 setNodes((nodes) =>
                   nodes.map((node) => {
                     if (node.id === id) {
@@ -98,16 +99,17 @@ export const IfcNode = memo(({ id, data, isConnectable }) => {
                         data: {
                           ...node.data,
                           isLoading: false,
-                          error: error.message,
+                          error: error.message || "Failed to load IFC",
                         },
                       };
                     }
                     return node;
                   })
                 );
+                setProgress({ percentage: 0, message: "" }); // Clear progress state
               },
-              // On progress
               (percentage, message) => {
+                // Update local progress state
                 setProgress({ percentage, message: message || "" });
               }
             );
@@ -179,47 +181,34 @@ export const IfcNode = memo(({ id, data, isConnectable }) => {
       onDrop={onDrop}
     >
       <div className="bg-blue-500 text-white px-3 py-1 flex items-center gap-2">
-        <FileUp className="h-4 w-4" />
-        <div className="text-sm font-medium truncate">{data.label}</div>
+        <FileUp className="h-4 w-4 flex-shrink-0" />
+        <div className="text-sm font-medium truncate" title={data.label}>{data.label}</div>
       </div>
-      <div className="p-3 text-xs">
-        {data.isLoading ? (
-          <div className="space-y-1">
-            <div className="flex items-center gap-2 text-blue-500">
-              <Loader2 className="h-3 w-3 animate-spin" />
-              <span>Loading IFC file...</span>
+      <NodeLoadingIndicator
+        isLoading={data.isLoading}
+        message="Loading IFC file..."
+        progressMessage={progress.message}
+        percentage={progress.percentage}
+      />
+      {!data.isLoading && data.error && (
+        <div className="p-3 text-xs text-red-500 break-words">Error: {data.error}</div>
+      )}
+      {!data.isLoading && !data.error && data.properties?.file && (
+        <div className="p-3 text-xs">
+          {data.model ? (
+            renderModelInfo()
+          ) : (
+            <div className="text-muted-foreground text-xs mt-1">
+              Loaded. Drag & drop to replace.
             </div>
-            {progress.percentage > 0 && (
-              <div className="space-y-1">
-                <div className="text-xs text-gray-500">{progress.message}</div>
-                <div className="w-full bg-gray-200 rounded-full h-1.5">
-                  <div
-                    className="bg-blue-500 h-1.5 rounded-full"
-                    style={{ width: `${progress.percentage}%` }}
-                  ></div>
-                </div>
-              </div>
-            )}
-          </div>
-        ) : data.error ? (
-          <div className="text-red-500">{data.error}</div>
-        ) : data.properties?.file ? (
-          <div className="space-y-1">
-            <div className="truncate">{data.properties.file}</div>
-            {data.model ? (
-              renderModelInfo()
-            ) : (
-              <div className="text-blue-500 text-xs mt-1">
-                Drag & drop a new IFC file to replace
-              </div>
-            )}
-          </div>
-        ) : (
-          <div className="text-muted-foreground">
-            {isDraggingOver ? "Drop IFC file here" : "No file selected"}
-          </div>
-        )}
-      </div>
+          )}
+        </div>
+      )}
+      {!data.isLoading && !data.error && !data.properties?.file && (
+        <div className="p-3 text-xs text-muted-foreground">
+          {isDraggingOver ? "Drop IFC file here" : "No file selected"}
+        </div>
+      )}
       <Handle
         type="source"
         position={Position.Right}

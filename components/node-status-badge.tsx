@@ -3,7 +3,7 @@
 import { Badge } from "@/components/ui/badge";
 import { AlertTriangle, FlaskConical, Wrench } from "lucide-react";
 
-type NodeStatus = "working" | "wip" | "experimental";
+export type NodeStatus = "working" | "wip" | "experimental";
 
 interface NodeStatusBadgeProps {
   status: NodeStatus;

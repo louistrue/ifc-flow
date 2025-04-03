@@ -100,6 +100,29 @@ export function PropertiesPanel({ node, setNodes, setSelectedNode }) {
                   </SelectContent>
                 </Select>
               </div>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="useActualGeometry">Use Actual Geometry</Label>
+                  <div className="flex items-center space-x-2">
+                    <input
+                      type="checkbox"
+                      id="useActualGeometry"
+                      checked={properties.useActualGeometry || false}
+                      onChange={(e) =>
+                        setProperties({
+                          ...properties,
+                          useActualGeometry: e.target.checked,
+                        })
+                      }
+                      className="h-4 w-4 rounded border-gray-300"
+                    />
+                  </div>
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  When enabled, uses IFCOpenShell GEOM for more accurate
+                  geometry extraction
+                </div>
+              </div>
             </div>
           </>
         );
