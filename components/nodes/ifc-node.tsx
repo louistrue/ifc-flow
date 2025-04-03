@@ -182,7 +182,9 @@ export const IfcNode = memo(({ id, data, isConnectable }) => {
     >
       <div className="bg-blue-500 text-white px-3 py-1 flex items-center gap-2">
         <FileUp className="h-4 w-4 flex-shrink-0" />
-        <div className="text-sm font-medium truncate" title={data.label}>{data.label}</div>
+        <div className="text-sm font-medium truncate" title={data.label}>
+          {data.label}
+        </div>
       </div>
       <NodeLoadingIndicator
         isLoading={data.isLoading}
@@ -191,7 +193,9 @@ export const IfcNode = memo(({ id, data, isConnectable }) => {
         percentage={progress.percentage}
       />
       {!data.isLoading && data.error && (
-        <div className="p-3 text-xs text-red-500 break-words">Error: {data.error}</div>
+        <div className="p-3 text-xs text-red-500 break-words">
+          Error: {data.error}
+        </div>
       )}
       {!data.isLoading && !data.error && data.properties?.file && (
         <div className="p-3 text-xs">

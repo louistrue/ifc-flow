@@ -21,7 +21,7 @@ import ReactFlow, {
 } from "reactflow";
 import "reactflow/dist/style.css";
 import { Sidebar } from "@/components/sidebar";
-import { PropertiesPanel } from "@/components/properties-panel";
+import { PropertiesPanel } from "@/components/properties-panel/properties-panel";
 import { IfcNode } from "@/components/nodes/ifc-node";
 import { GeometryNode } from "@/components/nodes/geometry-node";
 import { FilterNode } from "@/components/nodes/filter-node";
