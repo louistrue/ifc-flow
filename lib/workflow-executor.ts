@@ -655,7 +655,19 @@ export class WorkflowExecutor {
         break;
 
       case "viewerNode":
-        // Viewer nodes just pass through their input
+        // Process data for viewer node
+        console.log("Processing viewerNode", { node, inputValues });
+
+        if (!inputValues || !inputValues.input) {
+          console.log("No input provided to viewer node");
+          result = null;
+          break;
+        }
+
+        // Store input data in the node for rendering
+        node.data.inputData = inputValues.input;
+
+        // Viewer nodes pass through their input
         result = inputValues.input;
         break;
 

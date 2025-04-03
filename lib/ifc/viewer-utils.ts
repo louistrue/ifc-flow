@@ -420,4 +420,9 @@ export class IfcViewer {
       this.ifcAPI.CloseModel(this.modelID);
     }
   }
+
+  // Public method to resize the viewer
+  resize(): void {
+    this.handleResize();
+  }
 }
