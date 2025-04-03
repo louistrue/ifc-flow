@@ -447,18 +447,28 @@ function FlowWithProvider() {
   );
 
   // Handle node selection for properties panel
-  const onNodeClick = useCallback((event: React.MouseEvent, node: Node) => {
-    // Single click only selects the node but doesn't open the properties panel
-    // The selection is handled in handleNodesChange
-  }, []);
+  const onNodeClick = useCallback(
+    (event: React.MouseEvent, node: Node) => {
+      // If we're already in edit mode, single click opens the new node for editing
+      if (editingNode) {
+        setEditingNode(node);
+      } else {
+        // If not in edit mode, just select the node
+        setEditingNode(null);
+      }
+    },
+    [editingNode]
+  );
 
   // Handle node double-click to open properties panel
   const onNodeDoubleClick = useCallback(
     (event: React.MouseEvent, node: Node) => {
-      // Double click opens the properties panel
-      setEditingNode(node);
+      // Only open edit mode on double click if we're not already editing
+      if (!editingNode) {
+        setEditingNode(node);
+      }
     },
-    []
+    [editingNode]
   );
 
   // Handle dropping new nodes from the sidebar
@@ -1561,6 +1571,7 @@ function FlowWithProvider() {
             onDragOver={onDragOver}
             onNodeClick={onNodeClick}
             onNodeDoubleClick={onNodeDoubleClick}
+            onPaneClick={() => setEditingNode(null)}
             nodeTypes={nodeTypes}
             snapToGrid
             snapGrid={[15, 15]}
