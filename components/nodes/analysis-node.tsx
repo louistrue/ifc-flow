@@ -1,10 +1,11 @@
 "use client"
 
 import { memo } from "react"
-import { Handle, Position } from "reactflow"
+import { Handle, Position, type NodeProps } from "reactflow"
 import { BarChart } from "lucide-react"
+import { AnalysisNodeData } from "./node-types"
 
-export const AnalysisNode = memo(({ data, isConnectable }) => {
+export const AnalysisNode = memo(({ data, isConnectable }: NodeProps<AnalysisNodeData>) => {
   return (
     <div className="bg-white border-2 border-red-500 rounded-md w-48 shadow-md">
       <div className="bg-red-500 text-white px-3 py-1 flex items-center gap-2">

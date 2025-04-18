@@ -14,6 +14,22 @@ import { WorkflowLibrary } from "@/components/workflow-library"
 import { useToast } from "@/hooks/use-toast"
 import type { Workflow } from "@/lib/workflow-storage"
 
+interface ToolbarProps {
+  onOpenFile: (file: File) => void;
+  onSaveWorkflow: (filename: string, flowData: any) => void;
+  onRunWorkflow: () => void;
+  onExportResults: (format: string, filename: string) => void;
+  onLoadWorkflow: (workflow: Workflow) => void;
+  isRunning: boolean;
+  setIsRunning: (isRunning: boolean) => void;
+  canUndo: boolean;
+  canRedo: boolean;
+  onUndo: () => void;
+  onRedo: () => void;
+  getFlowObject: () => any;
+  currentWorkflow: Workflow | null;
+}
+
 export function Toolbar({
   onOpenFile,
   onSaveWorkflow,
@@ -28,7 +44,7 @@ export function Toolbar({
   onRedo,
   getFlowObject,
   currentWorkflow,
-}) {
+}: ToolbarProps) {
   const [openFileDialogOpen, setOpenFileDialogOpen] = useState(false)
   const [saveFileDialogOpen, setSaveFileDialogOpen] = useState(false)
   const [saveWorkflowDialogOpen, setSaveWorkflowDialogOpen] = useState(false)
@@ -38,7 +54,7 @@ export function Toolbar({
   const [exportDialogOpen, setExportDialogOpen] = useState(false)
   const { toast } = useToast()
 
-  const handleOpenFile = (file) => {
+  const handleOpenFile = (file: File) => {
     onOpenFile(file)
     setOpenFileDialogOpen(false)
     toast({
@@ -47,7 +63,7 @@ export function Toolbar({
     })
   }
 
-  const handleSaveWorkflow = (filename) => {
+  const handleSaveWorkflow = (filename: string) => {
     // Instead of using reactFlowInstance directly, we get the flow object from the parent
     const flowData = getFlowObject()
     onSaveWorkflow(filename, flowData)
@@ -90,7 +106,7 @@ export function Toolbar({
     }
   }
 
-  const handleExport = (format, filename) => {
+  const handleExport = (format: string, filename: string) => {
     onExportResults(format, filename)
     setExportDialogOpen(false)
     toast({
@@ -248,6 +264,7 @@ export function Toolbar({
         open={saveWorkflowDialogOpen}
         onOpenChange={setSaveWorkflowDialogOpen}
         onSave={handleSaveToLibrary}
+        onSaveLocally={handleSaveToLibrary}
         flowData={getFlowObject()}
         existingWorkflow={currentWorkflow}
       />

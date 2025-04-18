@@ -15,7 +15,13 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Download } from "lucide-react"
 
-export function ExportDialog({ open, onOpenChange, onExport }) {
+interface ExportDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onExport: (format: string, filename: string) => void;
+}
+
+export function ExportDialog({ open, onOpenChange, onExport }: ExportDialogProps) {
   const [format, setFormat] = useState("csv")
   const [filename, setFilename] = useState("export-results")
 

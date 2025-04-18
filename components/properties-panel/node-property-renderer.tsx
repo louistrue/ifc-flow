@@ -665,21 +665,21 @@ export function NodePropertyRenderer({
           {(properties.format === "csv" ||
             properties.format === "excel" ||
             properties.format === "json") && (
-            <div className="space-y-2">
-              <Label htmlFor="properties">Include Properties</Label>
-              <Input
-                id="properties"
-                value={properties.properties || "Name,Type,Material"}
-                onChange={(e) =>
-                  setProperties({
-                    ...properties,
-                    properties: e.target.value,
-                  })
-                }
-                placeholder="Comma-separated properties"
-              />
-            </div>
-          )}
+              <div className="space-y-2">
+                <Label htmlFor="properties">Include Properties</Label>
+                <Input
+                  id="properties"
+                  value={properties.properties || "Name,Type,Material"}
+                  onChange={(e) =>
+                    setProperties({
+                      ...properties,
+                      properties: e.target.value,
+                    })
+                  }
+                  placeholder="Comma-separated properties"
+                />
+              </div>
+            )}
         </div>
       );
 
@@ -987,7 +987,7 @@ export function NodePropertyRenderer({
                   <SelectContent>
                     {(properties.listItems || "")
                       .split(",")
-                      .map((item, index) => (
+                      .map((item: string, index: number) => (
                         <SelectItem key={index} value={item.trim()}>
                           {item.trim()}
                         </SelectItem>

@@ -3,7 +3,13 @@
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
-export function GeometryEditor({ properties, setProperties }) {
+interface geometryEditorProps {
+  properties: Record<string, any>;
+  setProperties: (properties: Record<string, any>) => void;
+}
+
+
+export function GeometryEditor({ properties, setProperties }: geometryEditorProps) {
   return (
     <div className="space-y-4">
       <div className="space-y-2">

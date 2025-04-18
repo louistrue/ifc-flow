@@ -56,7 +56,7 @@ export function extractQuantities(
 
 // Helper function to generate mock quantities
 function getMockQuantity(factor: number, type: string): number {
-  const base = {
+  const base: Record<string, number> = {
     length: 3.5,
     area: 12.5,
     volume: 8.2,

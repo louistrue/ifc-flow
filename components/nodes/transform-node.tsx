@@ -1,10 +1,34 @@
 "use client";
 
 import { memo } from "react";
-import { Handle, Position } from "reactflow";
+import { Handle, Position, type NodeProps } from "reactflow";
 import { Move } from "lucide-react";
+import { TransformNodeData as BaseTransformNodeData } from "./node-types";
 
-function applyTransformation(geometry, transform) {
+interface Geometry {
+  vertices: number[][];
+  placement?: {
+    position?: number[];
+    rotation?: number[];
+    scale?: number[];
+    [key: string]: any;
+  };
+  [key: string]: any;
+}
+
+interface Transform {
+  translation?: number[];
+  rotation?: number[];
+  scale?: number[];
+}
+
+// Extend the base TransformNodeData with additional properties
+interface ExtendedTransformNodeData extends BaseTransformNodeData {
+  geometry?: Geometry;
+  transformedGeometry?: Geometry;
+}
+
+function applyTransformation(geometry: Geometry, transform: Transform): Geometry {
   if (!geometry || !transform) return geometry;
 
   const {
@@ -76,7 +100,7 @@ function applyTransformation(geometry, transform) {
   return transformedGeometry;
 }
 
-export const TransformNode = memo(({ data, isConnectable }) => {
+export const TransformNode = memo(({ data, isConnectable }: NodeProps<ExtendedTransformNodeData>) => {
   // Apply transformation when data changes
   if (data.geometry) {
     const transform = {

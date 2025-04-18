@@ -1,10 +1,10 @@
 "use client"
 
 import { memo } from "react"
-import { Handle, Position } from "reactflow"
+import { Handle, Position, type NodeProps } from "reactflow"
 import { Layers } from "lucide-react"
-
-export const SpatialNode = memo(({ data, isConnectable }) => {
+import { SpatialNodeData } from "./node-types";
+export const SpatialNode = memo(({ data, isConnectable }: NodeProps<SpatialNodeData>) => {
   return (
     <div className="bg-white border-2 border-lime-500 rounded-md w-48 shadow-md">
       <div className="bg-lime-500 text-white px-3 py-1 flex items-center gap-2">

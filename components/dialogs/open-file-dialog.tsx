@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef } from "react"
+import { useState, useRef, ChangeEvent } from "react"
 import {
   Dialog,
   DialogContent,
@@ -14,11 +14,17 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { FileUp } from "lucide-react"
 
-export function OpenFileDialog({ open, onOpenChange, onFileSelected }) {
-  const [selectedFile, setSelectedFile] = useState(null)
-  const fileInputRef = useRef(null)
+interface OpenFileDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onFileSelected: (file: File) => void;
+}
 
-  const handleFileChange = (e) => {
+export function OpenFileDialog({ open, onOpenChange, onFileSelected }: OpenFileDialogProps) {
+  const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+
+  const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       setSelectedFile(e.target.files[0])
     }

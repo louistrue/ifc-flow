@@ -1,9 +1,9 @@
 "use client";
 
 import { memo } from "react";
-import { Handle, Position } from "reactflow";
+import { Handle, Position, type NodeProps } from "reactflow";
 import { Edit, List, FileSearch, AlertTriangle } from "lucide-react";
-
+import { PropertyNodeData } from "./node-types";
 // Define proper types for the component
 interface PropertyInfo {
   name: string;

@@ -1,10 +1,10 @@
 "use client"
 
 import { memo } from "react"
-import { Handle, Position } from "reactflow"
+import { Handle, Position, type NodeProps } from "reactflow"
 import { Filter } from "lucide-react"
-
-export const FilterNode = memo(({ data, isConnectable }) => {
+import { FilterNodeData } from "./node-types";
+export const FilterNode = memo(({ data, isConnectable }: NodeProps<FilterNodeData>) => {
   return (
     <div className="bg-white border-2 border-purple-500 rounded-md w-48 shadow-md">
       <div className="bg-purple-500 text-white px-3 py-1 flex items-center gap-2">

@@ -14,7 +14,13 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Save } from "lucide-react"
 
-export function SaveFileDialog({ open, onOpenChange, onSave }) {
+interface SaveFileDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSave: (filename: string) => void;
+}
+
+export function SaveFileDialog({ open, onOpenChange, onSave }: SaveFileDialogProps) {
   const [filename, setFilename] = useState("my-workflow")
 
   const handleSave = () => {

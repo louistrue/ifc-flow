@@ -4,7 +4,17 @@ import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
-export function FilterEditor({ properties, setProperties }) {
+interface FilterEditorProps {
+  properties: {
+    property?: string;
+    operator?: string;
+    value?: string;
+    [key: string]: any;
+  };
+  setProperties: (properties: any) => void;
+}
+
+export function FilterEditor({ properties, setProperties }: FilterEditorProps) {
   return (
     <div className="space-y-4">
       <div className="space-y-2">

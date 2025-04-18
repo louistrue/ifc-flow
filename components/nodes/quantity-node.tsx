@@ -1,10 +1,10 @@
 "use client"
 
 import { memo } from "react"
-import { Handle, Position } from "reactflow"
+import { Handle, Position, type NodeProps } from "reactflow"
 import { Calculator } from "lucide-react"
-
-export const QuantityNode = memo(({ data, isConnectable }) => {
+import { QuantityNodeData } from "./node-types";
+export const QuantityNode = memo(({ data, isConnectable }: NodeProps<QuantityNodeData>) => {
   return (
     <div className="bg-white border-2 border-amber-500 rounded-md w-48 shadow-md">
       <div className="bg-amber-500 text-white px-3 py-1 flex items-center gap-2">

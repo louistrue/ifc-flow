@@ -822,8 +822,8 @@ function FlowWithProvider() {
         error instanceof Error && error.stack
           ? `${error.message}\n\nStack: ${error.stack}`
           : error instanceof Error
-          ? error.message
-          : String(error);
+            ? error.message
+            : String(error);
 
       toast({
         title: "Error executing workflow",
@@ -1103,9 +1103,8 @@ function FlowWithProvider() {
 
       toast({
         title: "Nodes deleted",
-        description: `Deleted ${selectedNodes.length} node${
-          selectedNodes.length > 1 ? "s" : ""
-        }`,
+        description: `Deleted ${selectedNodes.length} node${selectedNodes.length > 1 ? "s" : ""
+          }`,
       });
     }
   }, [nodes, edges, selectedNode, historyIndex, toast]);
@@ -1213,7 +1212,7 @@ function FlowWithProvider() {
   useHotkeys(
     parseKeyCombination(
       shortcuts.find((s) => s.id === "save-workflow-locally")?.keys ||
-        "ctrl+shift+s"
+      "ctrl+shift+s"
     ),
     saveLocallyHotkey,
     { preventDefault: true }
@@ -1592,7 +1591,7 @@ function FlowWithProvider() {
       {editingNode && (
         <PropertiesPanel
           node={editingNode}
-          setNodes={setNodes}
+          setNodes={setNodes as React.Dispatch<React.SetStateAction<any[]>>}
           setSelectedNode={setEditingNode}
         />
       )}

@@ -87,8 +87,8 @@ export function useClipboard() {
   const pasteNodes = (
     nodes: Node[],
     edges: Edge[],
-    setNodes: (nodes: Node[]) => void,
-    setEdges: (edges: Edge[]) => void,
+    setNodes: React.Dispatch<React.SetStateAction<Node[]>>,
+    setEdges: React.Dispatch<React.SetStateAction<Edge[]>>,
     addToHistory: (nodes: Node[], edges: Edge[]) => void,
     nodeStyle: any,
   ) => {
@@ -101,7 +101,7 @@ export function useClipboard() {
     }
 
     // Create new IDs for the pasted nodes
-    const idMap = {}
+    const idMap: Record<string, string> = {}
     const newNodes = clipboard.nodes.map((node) => {
       const newId = `${node.type}-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`
       idMap[node.id] = newId
@@ -130,8 +130,8 @@ export function useClipboard() {
     }))
 
     // Deselect all current nodes
-    setNodes((nds) => {
-      const deselectedNodes = nds.map((n) => ({
+    setNodes((nds: Node[]) => {
+      const deselectedNodes = nds.map((n: Node) => ({
         ...n,
         selected: false,
         style: { ...n.style },
@@ -147,7 +147,7 @@ export function useClipboard() {
     })
 
     // Add the new edges
-    setEdges((eds) => [...eds, ...newEdges])
+    setEdges((eds: Edge[]) => [...eds, ...newEdges])
 
     toast({
       title: "Pasted",

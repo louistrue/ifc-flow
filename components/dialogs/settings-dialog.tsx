@@ -11,7 +11,12 @@ import { Slider } from "@/components/ui/slider"
 import { useAppSettings } from "@/lib/settings-manager"
 import { Monitor, Moon, Sun } from "lucide-react"
 
-export function SettingsDialog({ open, onOpenChange }) {
+interface SettingsDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}
+
+export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const [activeTab, setActiveTab] = useState("general")
   const { settings, updateGeneralSettings, updateViewerSettings, updatePerformanceSettings, resetSettings } =
     useAppSettings()

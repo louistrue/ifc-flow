@@ -25,7 +25,7 @@ import {
   HelpCircle,
   Upload,
 } from "lucide-react";
-import { workflowStorage } from "@/lib/workflow-storage";
+import { workflowStorage, type Workflow } from "@/lib/workflow-storage";
 import {
   Tooltip,
   TooltipContent,
@@ -35,6 +35,15 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 
+interface SaveWorkflowDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSave: (workflow: Workflow) => void;
+  onSaveLocally: (workflow: Workflow) => void;
+  flowData: any;
+  existingWorkflow?: Workflow | null;
+}
+
 export function SaveWorkflowDialog({
   open,
   onOpenChange,
@@ -42,7 +51,7 @@ export function SaveWorkflowDialog({
   onSaveLocally,
   flowData,
   existingWorkflow,
-}) {
+}: SaveWorkflowDialogProps) {
   const [name, setName] = useState(existingWorkflow?.name || "");
   const [description, setDescription] = useState(
     existingWorkflow?.description || ""

@@ -90,7 +90,7 @@ export function WorkflowLibrary({
   };
 
   // Download a workflow
-  const handleDownloadWorkflow = (workflow) => {
+  const handleDownloadWorkflow = (workflow: Workflow) => {
     workflowStorage.exportWorkflow(workflow);
     toast({
       title: "Workflow downloaded",
@@ -130,12 +130,13 @@ export function WorkflowLibrary({
         title: "Workflow imported",
         description: `"${workflow.name}" has been imported to your library`,
       });
-    } catch (error) {
+    } catch (error: unknown) {
       console.error("Error importing workflow:", error);
-      setImportError(error.message || "Failed to import workflow file");
+      const errorMessage = error instanceof Error ? error.message : "Failed to import workflow file";
+      setImportError(errorMessage);
       toast({
         title: "Import failed",
-        description: error.message || "Could not import the workflow file",
+        description: errorMessage,
         variant: "destructive",
       });
     } finally {

@@ -11,22 +11,25 @@ export function filterElements(
 
   return elements.filter((element) => {
     const propParts = property.split(".")
-    let propValue = element.properties
+    let propValue: any = element.properties
 
     for (const part of propParts) {
-      if (!propValue[part]) return false
+      if (!propValue || !propValue[part]) return false
       propValue = propValue[part]
     }
 
+    // Ensure we're working with string values for comparison
+    const stringValue = String(propValue)
+
     switch (operator) {
       case "equals":
-        return propValue === value
+        return stringValue === value
       case "contains":
-        return propValue.includes(value)
+        return stringValue.includes(value)
       case "startsWith":
-        return propValue.startsWith(value)
+        return stringValue.startsWith(value)
       case "endsWith":
-        return propValue.endsWith(value)
+        return stringValue.endsWith(value)
       default:
         return false
     }

@@ -38,7 +38,7 @@ export const defaultShortcuts: KeyboardShortcut[] = [
     defaultKeys: "ctrl+o",
     keys: "ctrl+o",
     category: "file",
-    action: () => {},
+    action: () => { },
   },
   {
     id: "save-workflow",
@@ -47,7 +47,7 @@ export const defaultShortcuts: KeyboardShortcut[] = [
     defaultKeys: "ctrl+s",
     keys: "ctrl+s",
     category: "file",
-    action: () => {},
+    action: () => { },
   },
   {
     id: "save-workflow-locally",
@@ -56,7 +56,7 @@ export const defaultShortcuts: KeyboardShortcut[] = [
     defaultKeys: "ctrl+shift+s",
     keys: "ctrl+shift+s",
     category: "file",
-    action: () => {},
+    action: () => { },
   },
   {
     id: "open-workflow-library",
@@ -65,7 +65,7 @@ export const defaultShortcuts: KeyboardShortcut[] = [
     defaultKeys: "ctrl+l",
     keys: "ctrl+l",
     category: "file",
-    action: () => {},
+    action: () => { },
   },
   {
     id: "undo",
@@ -74,7 +74,7 @@ export const defaultShortcuts: KeyboardShortcut[] = [
     defaultKeys: "ctrl+z",
     keys: "ctrl+z",
     category: "edit",
-    action: () => {},
+    action: () => { },
   },
   {
     id: "redo",
@@ -83,7 +83,7 @@ export const defaultShortcuts: KeyboardShortcut[] = [
     defaultKeys: "ctrl+shift+z",
     keys: "ctrl+shift+z",
     category: "edit",
-    action: () => {},
+    action: () => { },
   },
   {
     id: "select-all",
@@ -92,7 +92,7 @@ export const defaultShortcuts: KeyboardShortcut[] = [
     defaultKeys: "ctrl+a",
     keys: "ctrl+a",
     category: "edit",
-    action: () => {},
+    action: () => { },
   },
   {
     id: "cut",
@@ -101,7 +101,7 @@ export const defaultShortcuts: KeyboardShortcut[] = [
     defaultKeys: "ctrl+x",
     keys: "ctrl+x",
     category: "edit",
-    action: () => {},
+    action: () => { },
   },
   {
     id: "copy",
@@ -110,7 +110,7 @@ export const defaultShortcuts: KeyboardShortcut[] = [
     defaultKeys: "ctrl+c",
     keys: "ctrl+c",
     category: "edit",
-    action: () => {},
+    action: () => { },
   },
   {
     id: "paste",
@@ -119,7 +119,7 @@ export const defaultShortcuts: KeyboardShortcut[] = [
     defaultKeys: "ctrl+v",
     keys: "ctrl+v",
     category: "edit",
-    action: () => {},
+    action: () => { },
   },
   {
     id: "delete",
@@ -128,7 +128,7 @@ export const defaultShortcuts: KeyboardShortcut[] = [
     defaultKeys: "delete",
     keys: "delete",
     category: "edit",
-    action: () => {},
+    action: () => { },
   },
   {
     id: "run-workflow",
@@ -137,7 +137,7 @@ export const defaultShortcuts: KeyboardShortcut[] = [
     defaultKeys: "f5",
     keys: "f5",
     category: "workflow",
-    action: () => {},
+    action: () => { },
   },
   {
     id: "zoom-in",
@@ -146,7 +146,7 @@ export const defaultShortcuts: KeyboardShortcut[] = [
     defaultKeys: "ctrl+=",
     keys: "ctrl+=",
     category: "view",
-    action: () => {},
+    action: () => { },
   },
   {
     id: "zoom-out",
@@ -155,7 +155,7 @@ export const defaultShortcuts: KeyboardShortcut[] = [
     defaultKeys: "ctrl+-",
     keys: "ctrl+-",
     category: "view",
-    action: () => {},
+    action: () => { },
   },
   {
     id: "fit-view",
@@ -164,7 +164,7 @@ export const defaultShortcuts: KeyboardShortcut[] = [
     defaultKeys: "ctrl+0",
     keys: "ctrl+0",
     category: "view",
-    action: () => {},
+    action: () => { },
   },
   {
     id: "toggle-grid",
@@ -173,7 +173,7 @@ export const defaultShortcuts: KeyboardShortcut[] = [
     defaultKeys: "ctrl+g",
     keys: "ctrl+g",
     category: "view",
-    action: () => {},
+    action: () => { },
   },
   {
     id: "toggle-minimap",
@@ -182,7 +182,7 @@ export const defaultShortcuts: KeyboardShortcut[] = [
     defaultKeys: "ctrl+m",
     keys: "ctrl+m",
     category: "view",
-    action: () => {},
+    action: () => { },
   },
   {
     id: "help",
@@ -191,7 +191,7 @@ export const defaultShortcuts: KeyboardShortcut[] = [
     defaultKeys: "f1",
     keys: "f1",
     category: "navigation",
-    action: () => {},
+    action: () => { },
   },
   {
     id: "keyboard-shortcuts",
@@ -200,7 +200,7 @@ export const defaultShortcuts: KeyboardShortcut[] = [
     defaultKeys: "shift+f1",
     keys: "shift+f1",
     category: "navigation",
-    action: () => {},
+    action: () => { },
   },
 ]
 
@@ -211,7 +211,7 @@ export function loadShortcuts(): KeyboardShortcut[] {
   try {
     const savedShortcuts = localStorage.getItem("keyboard-shortcuts")
     if (savedShortcuts) {
-      const parsed = JSON.parse(savedShortcuts)
+      const parsed = JSON.parse(savedShortcuts) as { id: string; keys: string }[]
 
       // Merge with defaults to ensure we have all shortcuts
       return defaultShortcuts.map((defaultShortcut) => {

@@ -11,22 +11,18 @@ import {
 import { CuboidIcon as Cube } from "lucide-react";
 import { NodeStatusBadge, NodeStatus } from "../node-status-badge";
 import { IfcViewer } from "@/lib/ifc/viewer-utils";
+import { ViewerNodeData as BaseViewerNodeData } from "./node-types";
 
-interface ViewerNodeData {
-  label: string;
+// Extend the base ViewerNodeData with additional properties
+interface ExtendedViewerNodeData extends BaseViewerNodeData {
   status?: NodeStatus;
-  properties?: {
-    viewMode?: string;
-  };
   inputData?: any;
   width?: number;
   height?: number;
 }
 
-type ViewerNodeProps = NodeProps<ViewerNodeData>;
-
 export const ViewerNode = memo(
-  ({ data, id, selected, isConnectable }: ViewerNodeProps) => {
+  ({ data, id, selected, isConnectable }: NodeProps<ExtendedViewerNodeData>) => {
     const status = data?.status || "working";
     const viewerRef = useRef<HTMLDivElement>(null);
     const [viewer, setViewer] = useState<IfcViewer | null>(null);
@@ -193,11 +189,9 @@ export const ViewerNode = memo(
 
     return (
       <div
-        className={`bg-white border-2 ${
-          selected ? "border-cyan-600" : "border-cyan-500"
-        } rounded-md shadow-md relative overflow-hidden ${
-          isResizing ? "nodrag" : ""
-        }`}
+        className={`bg-white border-2 ${selected ? "border-cyan-600" : "border-cyan-500"
+          } rounded-md shadow-md relative overflow-hidden ${isResizing ? "nodrag" : ""
+          }`}
         style={{ width: `${width}px` }}
         data-nodrag={isResizing ? "true" : undefined}
       >
@@ -238,9 +232,8 @@ export const ViewerNode = memo(
 
         {/* Resize handle - nodrag class prevents ReactFlow drag */}
         <div
-          className={`absolute bottom-0 right-0 w-6 h-6 cursor-nwse-resize nodrag ${
-            selected ? "text-cyan-600" : "text-gray-400"
-          } hover:text-cyan-500`}
+          className={`absolute bottom-0 right-0 w-6 h-6 cursor-nwse-resize nodrag ${selected ? "text-cyan-600" : "text-gray-400"
+            } hover:text-cyan-500`}
           onMouseDown={startResize}
         >
           <svg

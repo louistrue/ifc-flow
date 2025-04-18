@@ -1,7 +1,7 @@
 "use client";
 
 import { memo } from "react";
-import { Handle, Position } from "reactflow";
+import { Handle, Position, type NodeProps } from "reactflow";
 import { Box } from "lucide-react";
 import { NodeStatusBadge } from "../node-status-badge";
 import {
@@ -11,34 +11,25 @@ import {
 import type { IfcModel } from "@/lib/ifc/ifc-loader";
 import type { NodeStatus } from "@/components/node-status-badge";
 import { NodeLoadingIndicator } from "./node-loading-indicator";
+import { GeometryNodeData as BaseGeometryNodeData } from "./node-types";
 
 interface GeometryNodeProgress {
   percentage: number;
   message?: string;
 }
 
-interface GeometryNodeData {
-  label: string;
+// Extend the base type with additional properties
+interface ExtendedGeometryNodeData extends BaseGeometryNodeData {
   status?: NodeStatus;
   model?: IfcModel;
   elements?: any[];
-  properties?: {
-    elementType?: string;
-    includeOpenings?: string;
-    useActualGeometry?: boolean;
-  };
   isLoading?: boolean;
   progress?: GeometryNodeProgress | null;
   error?: string | null;
 }
 
-interface GeometryNodeProps {
-  data: GeometryNodeData;
-  isConnectable: boolean;
-}
-
 export const GeometryNode = memo(
-  ({ data, isConnectable }: GeometryNodeProps) => {
+  ({ data, isConnectable }: NodeProps<ExtendedGeometryNodeData>) => {
     const status = data?.status || "working";
     const isLoading = data?.isLoading || false;
     const progress = data?.progress;

@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { OrbitControls } from "three/examples/jsm/controls/OrbitControls";
+import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { IfcAPI } from "web-ifc";
 import { IfcModel, IfcElement } from "@/lib/ifc-utils";
 

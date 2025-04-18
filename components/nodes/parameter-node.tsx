@@ -1,10 +1,10 @@
 "use client"
 
 import { memo } from "react"
-import { Handle, Position } from "reactflow"
+import { Handle, Position, type NodeProps } from "reactflow"
 import { Sliders } from "lucide-react"
-
-export const ParameterNode = memo(({ data, isConnectable }) => {
+import { ParameterNodeData } from "./node-types";
+export const ParameterNode = memo(({ data, isConnectable }: NodeProps<ParameterNodeData>) => {
   const paramType = data.properties?.paramType || "number"
   const value = data.properties?.value || (paramType === "number" ? "0" : "")
 

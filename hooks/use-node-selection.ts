@@ -7,9 +7,9 @@ export function useNodeSelection(nodeStyle: any) {
   const [selectedNode, setSelectedNode] = useState<Node | null>(null)
 
   const selectAllNodes = useCallback(
-    (nodes: Node[], setNodes: (nodes: Node[]) => void, toast: any) => {
-      setNodes((nds) => {
-        const updatedNodes = nds.map((node) => ({
+    (nodes: Node[], setNodes: React.Dispatch<React.SetStateAction<Node[]>>, toast: any) => {
+      setNodes((nds: Node[]) => {
+        const updatedNodes = nds.map((node: Node) => ({
           ...node,
           selected: true,
           style: { ...node.style, ...nodeStyle.selected },
@@ -32,8 +32,8 @@ export function useNodeSelection(nodeStyle: any) {
     (
       nodes: Node[],
       edges: Edge[],
-      setNodes: (nodes: Node[]) => void,
-      setEdges: (edges: Edge[]) => void,
+      setNodes: React.Dispatch<React.SetStateAction<Node[]>>,
+      setEdges: React.Dispatch<React.SetStateAction<Edge[]>>,
       addToHistory: (nodes: Node[], edges: Edge[]) => void,
       toast: any,
     ) => {
@@ -43,10 +43,10 @@ export function useNodeSelection(nodeStyle: any) {
         const nodeIds = selectedNodes.map((node) => node.id)
 
         // Remove the nodes
-        setNodes((nodes) => nodes.filter((node) => !nodeIds.includes(node.id)))
+        setNodes((nodes: Node[]) => nodes.filter((node) => !nodeIds.includes(node.id)))
 
         // Remove any connected edges
-        setEdges((edges) => edges.filter((edge) => !nodeIds.includes(edge.source) && !nodeIds.includes(edge.target)))
+        setEdges((edges: Edge[]) => edges.filter((edge) => !nodeIds.includes(edge.source) && !nodeIds.includes(edge.target)))
 
         // Clear selected node if it was deleted
         if (selectedNode && nodeIds.includes(selectedNode.id)) {

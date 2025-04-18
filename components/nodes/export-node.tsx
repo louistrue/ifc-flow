@@ -1,10 +1,11 @@
 "use client";
 
 import { memo } from "react";
-import { Handle, Position } from "reactflow";
+import { Handle, Position, type NodeProps } from "reactflow";
 import { Download } from "lucide-react";
+import { ExportNodeData } from "./node-types";
 
-export const ExportNode = memo(({ data, isConnectable }) => {
+export const ExportNode = memo(({ data, isConnectable }: NodeProps<ExportNodeData>) => {
   return (
     <div className="bg-white border-2 border-sky-500 rounded-md w-48 shadow-md">
       <div className="bg-sky-500 text-white px-3 py-1 flex items-center gap-2">
@@ -28,7 +29,7 @@ export const ExportNode = memo(({ data, isConnectable }) => {
           {(data.properties?.format === "csv" ||
             data.properties?.format === "excel" ||
             data.properties?.format === "json") &&
-          data.properties?.properties ? (
+            data.properties?.properties ? (
             <div className="flex justify-between">
               <span>Properties:</span>
               <span className="font-medium truncate">

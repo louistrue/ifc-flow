@@ -47,7 +47,7 @@ export function queryRelationships(
 
   // Mock implementation - would use actual IFC relationship data
   // Just return a subset of elements as a simulation
-  const ratioMap = {
+  const ratioMap: Record<string, number> = {
     containment: 0.6,
     aggregation: 0.4,
     voiding: 0.2,

@@ -1,16 +1,28 @@
 "use client";
 
 import { memo, useState, useCallback } from "react";
-import { Handle, Position, useReactFlow } from "reactflow";
+import { Handle, Position, useReactFlow, type NodeProps } from "reactflow";
 import { FileUp, Info, Building } from "lucide-react";
 import { NodeLoadingIndicator } from "./node-loading-indicator";
+import { IfcNodeData as BaseIfcNodeData } from "./node-types";
 
-export const IfcNode = memo(({ id, data, isConnectable }) => {
+interface ExtendedIfcNodeData extends BaseIfcNodeData {
+  isLoading?: boolean;
+  model?: {
+    schema?: string;
+    project?: { Name?: string };
+    elementCounts?: Record<string, number>;
+    totalElements?: number;
+  };
+  error?: string | null;
+}
+
+export const IfcNode = memo(({ id, data, isConnectable }: NodeProps<ExtendedIfcNodeData>) => {
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const [progress, setProgress] = useState({ percentage: 0, message: "" });
   const { setNodes } = useReactFlow();
 
-  const onDragOver = useCallback((event) => {
+  const onDragOver = useCallback((event: React.DragEvent<HTMLDivElement>) => {
     event.preventDefault();
     event.stopPropagation();
 
@@ -26,7 +38,7 @@ export const IfcNode = memo(({ id, data, isConnectable }) => {
   }, []);
 
   const onDrop = useCallback(
-    (event) => {
+    (event: React.DragEvent<HTMLDivElement>) => {
       event.preventDefault();
       event.stopPropagation();
       setIsDraggingOver(false);
@@ -155,7 +167,7 @@ export const IfcNode = memo(({ id, data, isConnectable }) => {
 
           {/* Counts for common element types */}
           <div className="grid grid-cols-2 gap-x-1 text-xs leading-tight">
-            {Object.entries(elementCounts || {}).map(([type, count]) =>
+            {elementCounts && Object.entries(elementCounts).map(([type, count]) =>
               count > 0 ? (
                 <div key={type} className="flex justify-between">
                   <span className="text-gray-500">
@@ -173,9 +185,8 @@ export const IfcNode = memo(({ id, data, isConnectable }) => {
 
   return (
     <div
-      className={`bg-white border-2 ${
-        isDraggingOver ? "border-blue-700 bg-blue-50" : "border-blue-500"
-      } rounded-md w-48 shadow-md transition-colors`}
+      className={`bg-white border-2 ${isDraggingOver ? "border-blue-700 bg-blue-50" : "border-blue-500"
+        } rounded-md w-48 shadow-md transition-colors`}
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
@@ -187,7 +198,7 @@ export const IfcNode = memo(({ id, data, isConnectable }) => {
         </div>
       </div>
       <NodeLoadingIndicator
-        isLoading={data.isLoading}
+        isLoading={data.isLoading || false}
         message="Loading IFC file..."
         progressMessage={progress.message}
         percentage={progress.percentage}

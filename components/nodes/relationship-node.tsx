@@ -1,10 +1,10 @@
 "use client"
 
 import { memo } from "react"
-import { Handle, Position } from "reactflow"
+import { Handle, Position, type NodeProps } from "reactflow"
 import { GitBranch } from "lucide-react"
-
-export const RelationshipNode = memo(({ data, isConnectable }) => {
+import { RelationshipNodeData } from "./node-types";
+export const RelationshipNode = memo(({ data, isConnectable }: NodeProps<RelationshipNodeData>) => {
   return (
     <div className="bg-white border-2 border-violet-500 rounded-md w-48 shadow-md">
       <div className="bg-violet-500 text-white px-3 py-1 flex items-center gap-2">

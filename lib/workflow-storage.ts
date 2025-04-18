@@ -9,6 +9,19 @@ export interface Workflow {
   flowData: any;
 }
 
+// Check if localStorage is available (not available during SSR)
+const isLocalStorageAvailable = () => {
+  if (typeof window === 'undefined') return false;
+  try {
+    const testKey = 'test-localStorage';
+    window.localStorage.setItem(testKey, 'test');
+    window.localStorage.removeItem(testKey);
+    return true;
+  } catch (e) {
+    return false;
+  }
+};
+
 // Storage service for workflows
 export class WorkflowStorage {
   private storageKey = "ifcflow-workflows";
@@ -16,6 +29,10 @@ export class WorkflowStorage {
   // Get all workflows
   getWorkflows(): Workflow[] {
     try {
+      if (!isLocalStorageAvailable()) {
+        console.warn("localStorage not available, returning empty workflow array");
+        return [];
+      }
       const data = localStorage.getItem(this.storageKey);
       return data ? JSON.parse(data) : [];
     } catch (error) {
@@ -32,6 +49,11 @@ export class WorkflowStorage {
 
   // Save a workflow
   saveWorkflow(workflow: Workflow): Workflow {
+    if (!isLocalStorageAvailable()) {
+      console.warn("localStorage not available, workflow not saved");
+      return workflow;
+    }
+
     const workflows = this.getWorkflows();
     const existingIndex = workflows.findIndex((w) => w.id === workflow.id);
 
@@ -57,6 +79,11 @@ export class WorkflowStorage {
 
   // Delete a workflow
   deleteWorkflow(id: string): boolean {
+    if (!isLocalStorageAvailable()) {
+      console.warn("localStorage not available, workflow not deleted");
+      return false;
+    }
+
     const workflows = this.getWorkflows();
     const filteredWorkflows = workflows.filter(
       (workflow) => workflow.id !== id
@@ -79,6 +106,11 @@ export class WorkflowStorage {
 
   // Export workflow to file
   exportWorkflow(workflow: Workflow): void {
+    if (typeof window === 'undefined') {
+      console.warn("Cannot export workflow in server-side context");
+      return;
+    }
+
     const json = JSON.stringify(workflow, null, 2);
     const blob = new Blob([json], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -94,11 +126,20 @@ export class WorkflowStorage {
 
   // Import workflow from file
   async importWorkflow(file: File): Promise<Workflow> {
+    if (!isLocalStorageAvailable()) {
+      return Promise.reject(new Error("localStorage not available"));
+    }
+
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
 
       reader.onload = (event) => {
         try {
+          if (!event.target) {
+            reject(new Error("Error reading file: No data received"));
+            return;
+          }
+
           const workflow = JSON.parse(
             event.target.result as string
           ) as Workflow;

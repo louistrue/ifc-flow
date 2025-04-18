@@ -144,7 +144,12 @@ export const nodeCategories = [
   },
 ];
 
-export function Sidebar({ onLoadWorkflow, getFlowObject }) {
+interface SidebarProps {
+  onLoadWorkflow: (workflow: WorkflowType) => void;
+  getFlowObject: () => any;
+}
+
+export function Sidebar({ onLoadWorkflow, getFlowObject }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [presets, setPresets] = useState<WorkflowType[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
@@ -160,7 +165,7 @@ export function Sidebar({ onLoadWorkflow, getFlowObject }) {
     setPresets(presetWorkflows);
   }, []);
 
-  const onDragStart = (event, nodeType) => {
+  const onDragStart = (event: React.DragEvent<HTMLDivElement>, nodeType: string) => {
     event.dataTransfer.setData("application/reactflow", nodeType);
     event.dataTransfer.effectAllowed = "move";
   };
@@ -222,9 +227,8 @@ export function Sidebar({ onLoadWorkflow, getFlowObject }) {
   return (
     <>
       <div
-        className={`relative border-r bg-card ${
-          collapsed ? "w-12" : "w-64"
-        } transition-all duration-300`}
+        className={`relative border-r bg-card ${collapsed ? "w-12" : "w-64"
+          } transition-all duration-300`}
       >
         <Button
           variant="ghost"
