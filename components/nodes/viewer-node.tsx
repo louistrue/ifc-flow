@@ -5,7 +5,6 @@ import {
   Handle,
   Position,
   useReactFlow,
-  useNodeId,
   NodeProps,
 } from "reactflow";
 import { CuboidIcon as Cube } from "lucide-react";
@@ -23,10 +22,12 @@ interface ExtendedViewerNodeData extends BaseViewerNodeData {
 
 export const ViewerNode = memo(
   ({ data, id, selected, isConnectable }: NodeProps<ExtendedViewerNodeData>) => {
-    const status = data?.status || "working";
     const viewerRef = useRef<HTMLDivElement>(null);
     const [viewer, setViewer] = useState<IfcViewer | null>(null);
     const [elementCount, setElementCount] = useState(0);
+    const [isLoading, setIsLoading] = useState(false);
+    const [errorMessage, setErrorMessage] = useState<string | null>(null);
+    const [loadedFileIdentifier, setLoadedFileIdentifier] = useState<string | null>(null);
     const [isResizing, setIsResizing] = useState(false);
     const { setNodes } = useReactFlow();
 
@@ -98,6 +99,7 @@ export const ViewerNode = memo(
         if (newViewer) {
           newViewer.dispose();
         }
+        setViewer(null);
       };
     }, []);
 
@@ -108,81 +110,88 @@ export const ViewerNode = memo(
         viewer.resize();
 
         // Give a small delay to ensure the resize is completed before fitting
-        setTimeout(() => {
+        const timer = setTimeout(() => {
           if (viewer) {
             viewer.fitCameraToModel();
           }
-        }, 100);
+        }, 150);
+        return () => clearTimeout(timer);
       }
     }, [width, height, viewer]);
 
-    // Handle input data changes
+    // Handle input data changes - Expecting File object
     useEffect(() => {
-      if (!viewer || !data.inputData) return;
+      console.log("ViewerNode: Input data effect triggered.", { hasViewer: !!viewer, inputData: data.inputData });
+      const fileInput = data.inputData?.file;
+      // Create an identifier for the potential new file (or null if no valid file)
+      const inputFileIdentifier = fileInput instanceof File ? `${fileInput.name}_${fileInput.lastModified}_${fileInput.size}` : null;
 
-      try {
-        let elements = [];
-        let count = 0;
-
-        // Process different types of input data
-        if (Array.isArray(data.inputData)) {
-          // Direct array of elements
-          elements = data.inputData;
-          count = elements.length;
-        } else if (
-          data.inputData.elements &&
-          Array.isArray(data.inputData.elements)
-        ) {
-          // Object with elements array (from model or other nodes)
-          elements = data.inputData.elements;
-          count = elements.length;
-        } else if (data.inputData.model && data.inputData.model.elements) {
-          // It might be a model node with a model object
-          elements = data.inputData.model.elements;
-          count = elements.length;
-        } else {
-          console.warn(
-            "Viewer received unprocessable input data:",
-            data.inputData
-          );
-          return;
-        }
-
-        // Filter out elements without proper type information
-        elements = elements.filter(
-          (el: any) => el && typeof el === "object" && el.type
-        );
-
-        // Update count display
-        setElementCount(elements.length);
-
-        // Only process if we have actual elements
-        if (elements.length === 0) {
-          console.log("No valid elements to display in viewer");
-          return;
-        }
-
-        console.log(`Visualizing ${elements.length} elements in viewer`);
-
-        // Create a model-like structure for the viewer
-        const model = {
-          id: "visualized-model",
-          name: "Visualized Elements",
-          elements: elements,
-        };
-
-        // Clear previous content
-        viewer.clear();
-
-        // Load the model into the viewer
-        viewer.loadFromModel(model);
-
-        // Fit camera to the model
-        viewer.fitCameraToModel();
-      } catch (error) {
-        console.error("Error processing data in viewer node:", error);
+      if (!viewer) {
+        console.log("ViewerNode: Viewer instance not ready yet.");
+        return;
       }
-    }, [data.inputData, viewer]);
+
+      // --- Handle invalid or removed input ---
+      if (!fileInput || !(fileInput instanceof File) || !fileInput.name.toLowerCase().endsWith(".ifc")) {
+        // Only clear and reset state if something *was* loaded previously and input is now invalid/gone
+        if (loadedFileIdentifier !== null) {
+          console.log("ViewerNode: Invalid or missing input, clearing viewer and resetting state.");
+          viewer.clear();
+          setLoadedFileIdentifier(null);
+          setElementCount(0);
+          setIsLoading(false);
+          setErrorMessage("Invalid input: Expected IFC file."); // Show error message
+        } else {
+          // If nothing was loaded and input is invalid/missing, just ensure viewer is clear.
+          // viewer.clear(); // clear() is likely called by previous step already, maybe redundant
+          setErrorMessage(null); // No error if nothing was expected yet
+          setIsLoading(false);
+          setElementCount(0);
+        }
+        return; // Stop processing if input is invalid
+      }
+
+      // --- Input is a valid IFC File object ---
+      const file = fileInput;
+      const newFileIdentifier = inputFileIdentifier; // Already calculated above
+
+      // *** Check if this file is the same as the one already loaded ***
+      if (newFileIdentifier === loadedFileIdentifier) {
+        console.log(`ViewerNode: File ${file.name} (${newFileIdentifier}) is already loaded. Skipping reload.`);
+        // Ensure loading/error states are correct if we skip loading
+        setIsLoading(false);
+        setErrorMessage(null);
+        // Keep elementCount > 0 to show "Model Loaded"
+        setElementCount(e => e > 0 ? e : 1); // Set to 1 if it was 0
+        return; // Don't reload the same file
+      }
+
+      // --- Proceed with loading the new file ---
+      console.log(`ViewerNode: New file detected (${file.name}), initiating load.`);
+      setIsLoading(true);
+      setErrorMessage(null);
+      setElementCount(0); // Reset count indicator during load
+
+      viewer.loadIfc(file)
+        .then(() => {
+          console.log(`IFC loaded successfully in viewer node: ${file.name}`);
+          setElementCount(1); // Indicate model loaded
+          setLoadedFileIdentifier(newFileIdentifier); // Store identifier of the successfully loaded file
+          setErrorMessage(null);
+        })
+        .catch(error => {
+          console.error(`Error loading IFC (${file.name}) in viewer node:`, error);
+          setErrorMessage(`Failed to load ${file.name}. See console.`);
+          setElementCount(0);
+          setLoadedFileIdentifier(null); // Clear identifier on error
+          // viewer.clear() is called within loadIfc's catch block
+        })
+        .finally(() => {
+          setIsLoading(false); // Ensure loading is set to false
+        });
+
+      // Depend on the file object identifier and the viewer instance
+    }, [data.inputData?.file, viewer, loadedFileIdentifier]); // Added loadedFileIdentifier to dependencies
 
     // Used to determine if we should disable dragging - when resizing
     const nodeDraggable = !isResizing;
@@ -200,17 +209,27 @@ export const ViewerNode = memo(
             <Cube className="h-4 w-4 flex-shrink-0" />
             <div className="text-sm font-medium truncate">{data.label}</div>
           </div>
-          <NodeStatusBadge status={status} />
+          <NodeStatusBadge status={isLoading ? "working" : (errorMessage ? "error" : (elementCount > 0 ? "success" : "waiting"))} />
         </div>
         <div className="p-3">
           <div
             ref={viewerRef}
-            className="bg-gray-100 rounded-md flex items-center justify-center overflow-hidden nodrag"
+            className="bg-gray-100 rounded-md flex items-center justify-center overflow-hidden nodrag relative"
             style={{ height: `${viewerHeight}px` }}
           >
-            {!elementCount && (
+            {isLoading && (
+              <div className="absolute inset-0 bg-gray-400 bg-opacity-50 flex items-center justify-center z-10">
+                <div className="text-white text-sm font-medium">Loading...</div>
+              </div>
+            )}
+            {errorMessage && !isLoading && (
+              <div className="absolute inset-0 bg-red-100 bg-opacity-90 flex items-center justify-center z-10 p-2 text-center">
+                <div className="text-red-700 text-xs font-medium">{errorMessage}</div>
+              </div>
+            )}
+            {!elementCount && !isLoading && !errorMessage && (
               <div className="text-xs text-muted-foreground pointer-events-none">
-                Connect to elements
+                Connect IFC File
               </div>
             )}
           </div>
@@ -221,16 +240,21 @@ export const ViewerNode = memo(
                 {data.properties?.viewMode || "Shaded"}
               </span>
             </div>
-            {elementCount > 0 && (
-              <div className="flex justify-between mt-1">
-                <span>Elements:</span>
-                <span className="font-medium">{elementCount}</span>
+            {elementCount > 0 && !isLoading && !errorMessage && (
+              <div className="flex justify-between mt-1 text-green-700">
+                <span>Status:</span>
+                <span className="font-medium">Model Loaded</span>
+              </div>
+            )}
+            {errorMessage && !isLoading && (
+              <div className="flex justify-between mt-1 text-red-700">
+                <span>Status:</span>
+                <span className="font-medium">Load Error</span>
               </div>
             )}
           </div>
         </div>
 
-        {/* Resize handle - nodrag class prevents ReactFlow drag */}
         <div
           className={`absolute bottom-0 right-0 w-6 h-6 cursor-nwse-resize nodrag ${selected ? "text-cyan-600" : "text-gray-400"
             } hover:text-cyan-500`}
