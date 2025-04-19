@@ -1576,6 +1576,7 @@ function FlowWithProvider() {
             snapGrid={[15, 15]}
             minZoom={0.1}
             maxZoom={2}
+            proOptions={{ hideAttribution: true }}
           >
             <Controls />
             {showGrid && <Background color="#aaa" gap={16} />}

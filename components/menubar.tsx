@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTheme } from "next-themes";
 import {
   Menubar,
   MenubarContent,
@@ -15,7 +16,7 @@ import {
   MenubarCheckboxItem,
 } from "@/components/ui/menubar";
 import { Button } from "@/components/ui/button";
-import { Play, Pause } from "lucide-react";
+import { Play, Pause, Check } from "lucide-react";
 import { OpenFileDialog } from "@/components/dialogs/open-file-dialog";
 import { SaveWorkflowDialog } from "@/components/dialogs/save-workflow-dialog";
 import { SettingsDialog } from "@/components/dialogs/settings-dialog";
@@ -86,6 +87,7 @@ export function AppMenubar({
   const [helpDialogOpen, setHelpDialogOpen] = useState(false);
   const { toast } = useToast();
   const { shortcuts } = useKeyboardShortcuts();
+  const { theme, setTheme } = useTheme();
 
   // Find shortcut by ID
   const findShortcut = (id: string) => {
@@ -399,6 +401,24 @@ export function AppMenubar({
                   {getShortcutDisplay("toggle-minimap")}
                 </MenubarShortcut>
               </MenubarCheckboxItem>
+              <MenubarSeparator />
+              <MenubarSub>
+                <MenubarSubTrigger>Theme</MenubarSubTrigger>
+                <MenubarSubContent>
+                  <MenubarItem onClick={() => setTheme('light')}>
+                    Light
+                    {theme === 'light' && <Check className="h-4 w-4 ml-auto" />}
+                  </MenubarItem>
+                  <MenubarItem onClick={() => setTheme('dark')}>
+                    Dark
+                    {theme === 'dark' && <Check className="h-4 w-4 ml-auto" />}
+                  </MenubarItem>
+                  <MenubarItem onClick={() => setTheme('system')}>
+                    System
+                    {theme === 'system' && <Check className="h-4 w-4 ml-auto" />}
+                  </MenubarItem>
+                </MenubarSubContent>
+              </MenubarSub>
             </MenubarContent>
           </MenubarMenu>
 
