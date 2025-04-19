@@ -7,14 +7,12 @@ import {
   useReactFlow,
   NodeProps,
 } from "reactflow";
-import { CuboidIcon as Cube } from "lucide-react";
-import { NodeStatusBadge, NodeStatus } from "../node-status-badge";
+import { CuboidIcon as Cube, Loader2, AlertCircle, CheckCircle } from "lucide-react";
 import { IfcViewer } from "@/lib/ifc/viewer-utils";
 import { ViewerNodeData as BaseViewerNodeData } from "./node-types";
 
 // Extend the base ViewerNodeData with additional properties
 interface ExtendedViewerNodeData extends BaseViewerNodeData {
-  status?: NodeStatus;
   inputData?: any;
   width?: number;
   height?: number;
@@ -209,7 +207,11 @@ export const ViewerNode = memo(
             <Cube className="h-4 w-4 flex-shrink-0" />
             <div className="text-sm font-medium truncate">{data.label}</div>
           </div>
-          <NodeStatusBadge status={isLoading ? "working" : (errorMessage ? "error" : (elementCount > 0 ? "success" : "waiting"))} />
+          <div className="flex-shrink-0">
+            {isLoading && <Loader2 className="h-4 w-4 animate-spin" />}
+            {!isLoading && errorMessage && <AlertCircle className="h-4 w-4 text-red-300" />}
+            {!isLoading && !errorMessage && elementCount > 0 && <CheckCircle className="h-4 w-4 text-green-300" />}
+          </div>
         </div>
         <div className="p-3">
           <div
