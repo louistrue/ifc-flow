@@ -21,6 +21,7 @@ export const IfcNode = memo(({ id, data, isConnectable }: NodeProps<ExtendedIfcN
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const [progress, setProgress] = useState({ percentage: 0, message: "" });
   const { setNodes } = useReactFlow();
+  const [elementsExpanded, setElementsExpanded] = useState(false);
 
   const onDragOver = useCallback((event: React.DragEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -72,8 +73,8 @@ export const IfcNode = memo(({ id, data, isConnectable }: NodeProps<ExtendedIfcN
             })
           );
 
-          // Reset progress for the new file
-          setProgress({ percentage: 0, message: "" });
+          // Reset progress and set initial loading state
+          setProgress({ percentage: 5, message: "Initializing..." }); // Start at 5%
 
           // Use dynamic import for file uploader
           import("@/lib/ifc/file-uploader").then(({ handleFileUpload }) => {
@@ -81,6 +82,8 @@ export const IfcNode = memo(({ id, data, isConnectable }: NodeProps<ExtendedIfcN
               file,
               (model) => {
                 console.log("IFC model loaded:", model);
+                // Briefly set progress to 100% before updating node state
+                setProgress({ percentage: 100, message: "Processing complete" });
                 // Update node with model, clear loading/progress
                 setNodes((nodes) =>
                   nodes.map((node) => {
@@ -98,10 +101,13 @@ export const IfcNode = memo(({ id, data, isConnectable }: NodeProps<ExtendedIfcN
                     return node;
                   })
                 );
-                setProgress({ percentage: 0, message: "" }); // Clear progress state
+                // No need to clear progress here as isLoading: false will hide the indicator
+                // setProgress({ percentage: 0, message: "" }); 
               },
               (error) => {
                 console.error("Error loading IFC file:", error);
+                // Optionally set progress to 100 on error too, or keep last state
+                // setProgress({ percentage: 100, message: "Error occurred" });
                 // Update node with error, clear loading/progress
                 setNodes((nodes) =>
                   nodes.map((node) => {
@@ -118,11 +124,16 @@ export const IfcNode = memo(({ id, data, isConnectable }: NodeProps<ExtendedIfcN
                     return node;
                   })
                 );
-                setProgress({ percentage: 0, message: "" }); // Clear progress state
+                setProgress({ percentage: 0, message: "" }); // Clear progress state on error
               },
               (percentage, message) => {
-                // Update local progress state
-                setProgress({ percentage, message: message || "" });
+                // Map reported percentage (0-100) to a visual range (e.g., 5-90)
+                const visualPercentage = 5 + (percentage * 0.85); // Maps 0-100 -> 5-90
+                setProgress(currentProgress => ({
+                  // Ensure visual percentage is monotonic and capped at 90 during progress updates
+                  percentage: Math.min(90, Math.max(currentProgress.percentage, visualPercentage)),
+                  message: message || currentProgress.message,
+                }));
               }
             );
           });
@@ -131,6 +142,109 @@ export const IfcNode = memo(({ id, data, isConnectable }: NodeProps<ExtendedIfcN
     },
     [id, setNodes]
   );
+
+  const onDoubleClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    // Stop event propagation to prevent the default node selection behavior
+    event.stopPropagation();
+
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.ifc';
+    input.onchange = (event) => {
+      const target = event.target as HTMLInputElement;
+      const file = target.files ? target.files[0] : null;
+      if (file && file.name.toLowerCase().endsWith(".ifc")) {
+        // Update this node with the new file and set loading state
+        setNodes((nodes) =>
+          nodes.map((node) => {
+            if (node.id === id) {
+              return {
+                ...node,
+                data: {
+                  ...node.data,
+                  label: file.name,
+                  properties: {
+                    ...node.data.properties,
+                    file: file.name,
+                  },
+                  isLoading: true,
+                  model: null, // Clear any previous model
+                  error: null, // Clear previous errors
+                },
+              };
+            }
+            return node;
+          })
+        );
+
+        // Reset progress and set initial loading state
+        setProgress({ percentage: 5, message: "Initializing..." }); // Start at 5%
+
+        // Use dynamic import for file uploader
+        import("@/lib/ifc/file-uploader").then(({ handleFileUpload }) => {
+          handleFileUpload(
+            file,
+            (model) => {
+              console.log("IFC model loaded:", model);
+              // Briefly set progress to 100% before updating node state
+              setProgress({ percentage: 100, message: "Processing complete" });
+              // Update node with model, clear loading/progress
+              setNodes((nodes) =>
+                nodes.map((node) => {
+                  if (node.id === id) {
+                    return {
+                      ...node,
+                      data: {
+                        ...node.data,
+                        model: model, // Store the full model object
+                        isLoading: false,
+                        error: null,
+                      },
+                    };
+                  }
+                  return node;
+                })
+              );
+              // No need to clear progress here as isLoading: false will hide the indicator
+              // setProgress({ percentage: 0, message: "" });
+            },
+            (error) => {
+              console.error("Error loading IFC file:", error);
+              // Optionally set progress to 100 on error too, or keep last state
+              // setProgress({ percentage: 100, message: "Error occurred" });
+              // Update node with error, clear loading/progress
+              setNodes((nodes) =>
+                nodes.map((node) => {
+                  if (node.id === id) {
+                    return {
+                      ...node,
+                      data: {
+                        ...node.data,
+                        isLoading: false,
+                        error: error.message || "Failed to load IFC",
+                      },
+                    };
+                  }
+                  return node;
+                })
+              );
+              setProgress({ percentage: 0, message: "" }); // Clear progress state on error
+            },
+            (percentage, message) => {
+              // Map reported percentage (0-100) to a visual range (e.g., 5-90)
+              const visualPercentage = 5 + (percentage * 0.85); // Maps 0-100 -> 5-90
+              setProgress(currentProgress => ({
+                // Ensure visual percentage is monotonic and capped at 90 during progress updates
+                percentage: Math.min(90, Math.max(currentProgress.percentage, visualPercentage)),
+                message: message || currentProgress.message,
+              }));
+            }
+          );
+        });
+      }
+    };
+    input.click();
+  }, [id, setNodes, setProgress]);
 
   // Render model info section if model is loaded
   const renderModelInfo = () => {
@@ -141,43 +255,57 @@ export const IfcNode = memo(({ id, data, isConnectable }: NodeProps<ExtendedIfcN
     return (
       <div className="mt-2 pt-2 border-t border-gray-200">
         <div className="flex items-center gap-1 text-blue-600 font-medium">
-          <Info className="w-3 h-3" />
+          <Info className="w-4 h-4" />
           <span>IFC Info</span>
         </div>
 
-        <div className="mt-1 space-y-1">
-          <div className="flex justify-between">
+        <div className="mt-2 space-y-2">
+          <div className="flex justify-between items-center">
             <span className="text-gray-500">Schema:</span>
             <span className="font-medium">{schema || "Unknown"}</span>
           </div>
 
           {project && (
-            <div className="flex items-start gap-1">
-              <Building className="w-3 h-3 mt-0.5 text-gray-500" />
+            <div className="flex items-center gap-1">
+              <Building className="w-4 h-4 text-gray-500" />
               <span className="flex-1 truncate" title={project.Name}>
                 {project.Name || "Unnamed Project"}
               </span>
             </div>
           )}
 
-          <div className="flex justify-between">
+          <div className="flex justify-between items-center">
             <span className="text-gray-500">Elements:</span>
             <span className="font-medium">{totalElements}</span>
           </div>
 
-          {/* Counts for common element types */}
-          <div className="grid grid-cols-2 gap-x-1 text-xs leading-tight">
-            {elementCounts && Object.entries(elementCounts).map(([type, count]) =>
-              count > 0 ? (
-                <div key={type} className="flex justify-between">
-                  <span className="text-gray-500">
-                    {type.replace("Ifc", "")}:
-                  </span>
-                  <span>{count}</span>
-                </div>
-              ) : null
-            )}
-          </div>
+          {/* Toggle button for element counts */}
+          <button
+            className="text-xs text-blue-500 hover:text-blue-700 font-medium flex items-center"
+            onClick={(e) => {
+              e.stopPropagation(); // Prevent double-click from triggering
+              setElementsExpanded(!elementsExpanded);
+            }}
+          >
+            {elementsExpanded ? "Hide element counts" : "Show element counts"}
+            <span className="ml-1">{elementsExpanded ? "▲" : "▼"}</span>
+          </button>
+
+          {/* Counts for common element types - only show when expanded */}
+          {elementsExpanded && (
+            <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm pt-1">
+              {elementCounts && Object.entries(elementCounts).map(([type, count]) =>
+                count > 0 ? (
+                  <div key={type} className="flex justify-between">
+                    <span className="text-gray-500">
+                      {type.replace("Ifc", "")}:
+                    </span>
+                    <span className="font-medium">{count}</span>
+                  </div>
+                ) : null
+              )}
+            </div>
+          )}
         </div>
       </div>
     );
@@ -186,10 +314,14 @@ export const IfcNode = memo(({ id, data, isConnectable }: NodeProps<ExtendedIfcN
   return (
     <div
       className={`bg-white border-2 ${isDraggingOver ? "border-blue-700 bg-blue-50" : "border-blue-500"
-        } rounded-md w-48 shadow-md transition-colors`}
+        } rounded-md shadow-md transition-colors ${data.isLoading
+          ? "w-64 min-h-[150px]" // Fixed width and min-height during loading
+          : "min-w-[14rem] max-w-[24rem] w-auto" // Dynamic width when not loading
+        }`}
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
+      onDoubleClick={onDoubleClick}
     >
       <div className="bg-blue-500 text-white px-3 py-1 flex items-center gap-2">
         <FileUp className="h-4 w-4 flex-shrink-0" />

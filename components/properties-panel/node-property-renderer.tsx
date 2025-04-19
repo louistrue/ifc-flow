@@ -22,22 +22,12 @@ export function NodePropertyRenderer({
   properties,
   setProperties,
 }: NodePropertyRendererProps) {
-  switch (node.type) {
-    case "ifcNode":
-      return (
-        <div className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="file">IFC File</Label>
-            <div className="flex gap-2">
-              <Input id="file" value={properties.file || ""} readOnly />
-              <Button variant="secondary" size="sm">
-                Browse
-              </Button>
-            </div>
-          </div>
-        </div>
-      );
+  // Return null for ifcNode type to prevent properties panel from rendering anything
+  if (node.type === "ifcNode") {
+    return null;
+  }
 
+  switch (node.type) {
     case "geometryNode":
       return (
         <div className="space-y-4">
