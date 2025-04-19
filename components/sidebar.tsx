@@ -7,6 +7,11 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Input } from "@/components/ui/input";
 import {
+  HoverCard,
+  HoverCardContent,
+  HoverCardTrigger,
+} from "@/components/ui/hover-card";
+import {
   FileUp,
   Box,
   Filter,
@@ -28,6 +33,7 @@ import {
   Clock,
   Plus,
   Database,
+  WorkflowIcon,
 } from "lucide-react";
 import {
   type Workflow as WorkflowType,
@@ -154,6 +160,7 @@ export function Sidebar({ onLoadWorkflow, getFlowObject }: SidebarProps) {
   const [presets, setPresets] = useState<WorkflowType[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [savePresetDialogOpen, setSavePresetDialogOpen] = useState(false);
+  const [openCategory, setOpenCategory] = useState<string | null>(null);
   const { toast } = useToast();
 
   // Load presets from storage
@@ -224,6 +231,22 @@ export function Sidebar({ onLoadWorkflow, getFlowObject }: SidebarProps) {
     });
   };
 
+  // Helper function to render node items, reused in expanded and collapsed views
+  const renderNodeItem = (node: any) => (
+    <div
+      key={node.id}
+      className="flex items-center justify-between rounded-md border border-dashed px-3 py-2 cursor-grab bg-background hover:bg-accent"
+      draggable
+      onDragStart={(event) => onDragStart(event, node.id)}
+    >
+      <div className="flex items-center">
+        {node.icon}
+        <span className="text-sm mr-1">{node.label}</span>
+      </div>
+      <NodeStatusBadge status={node.status as any} />
+    </div>
+  );
+
   return (
     <>
       <div
@@ -245,25 +268,63 @@ export function Sidebar({ onLoadWorkflow, getFlowObject }: SidebarProps) {
 
         {collapsed ? (
           <div className="flex flex-col items-center py-4 gap-4">
-            <Workflow className="h-6 w-6 text-primary" />
+            <WorkflowIcon className="h-6 w-6 text-primary" />
             <Separator />
-            <Button variant="ghost" size="icon" title="Input">
-              <FileUp className="h-5 w-5" />
-            </Button>
-            <Button variant="ghost" size="icon" title="Geometry">
-              <Cube className="h-5 w-5" />
-            </Button>
-            <Button variant="ghost" size="icon" title="Data">
-              <Layers className="h-5 w-5" />
-            </Button>
-            <Button variant="ghost" size="icon" title="Output">
-              <Eye className="h-5 w-5" />
-            </Button>
+            {/* Map over categories to create HoverCards */}
+            {nodeCategories.map((category) => {
+              // Find the icon for the category (use first node's icon or a default)
+              const CategoryIcon = category.nodes[0]?.icon.type || Box; // Default to Box if no nodes/icon
+
+              return (
+                <HoverCard
+                  key={category.name}
+                  openDelay={200}
+                  open={openCategory === category.name}
+                  onOpenChange={(isOpen) => {
+                    if (isOpen) {
+                      setOpenCategory(category.name);
+                    } else {
+                      if (openCategory === category.name) {
+                        setOpenCategory(null);
+                      }
+                    }
+                  }}
+                >
+                  <HoverCardTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="flex items-center justify-center p-0"
+                      title={category.name}
+                    >
+                      {/* Render icon type directly with specific size, no margins */}
+                      <CategoryIcon className="h-5 w-5" />
+                    </Button>
+                  </HoverCardTrigger>
+                  <HoverCardContent
+                    side="right"
+                    align="start"
+                    className="w-60 p-2"
+                    onDragStart={(e) => e.stopPropagation()}
+                  >
+                    <div className="space-y-2">
+                      <h4 className="font-medium text-sm leading-none mb-2 px-1">
+                        {category.name}
+                      </h4>
+                      <div className="space-y-1">
+                        {/* Render draggable nodes inside the palette */}
+                        {category.nodes.map(renderNodeItem)}
+                      </div>
+                    </div>
+                  </HoverCardContent>
+                </HoverCard>
+              );
+            })}
           </div>
         ) : (
           <div className="flex flex-col h-full">
             <div className="flex items-center p-4">
-              <Workflow className="h-6 w-6 mr-2 text-primary" />
+              <WorkflowIcon className="h-6 w-6 mr-2 text-primary" />
               <h2 className="text-lg font-semibold">IFCflow</h2>
             </div>
             <Separator />
