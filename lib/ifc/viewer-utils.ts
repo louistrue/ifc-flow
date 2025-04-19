@@ -199,6 +199,11 @@ export class IfcViewer {
 
   // Helper function to create a THREE.Mesh from web-ifc geometry data handles
   private createThreeMesh(geometryHandle: IfcGeometry, placedGeometry: PlacedGeometry): THREE.Mesh | null {
+    // Add null check for placedGeometry
+    if (!placedGeometry) {
+      console.warn("createThreeMesh called with invalid placedGeometry");
+      return null;
+    }
     try {
       // Use local variable for null check safety
       const ifcAPI = this.ifcAPI;
@@ -227,18 +232,59 @@ export class IfcViewer {
         return null;
       }
 
+      // --- Assume interleaved Vertex Data (Position + Normal) ---
       const bufferGeometry = new THREE.BufferGeometry();
-      if (vertices.length % 3 !== 0) {
-        console.warn("Vertices array length is not a multiple of 3 for geometry ID:", placedGeometry.geometryExpressID);
+      const numFloats = vertices.length;
+      if (numFloats % 6 !== 0) {
+        console.warn(`Interleaved vertices array length (${numFloats}) is not a multiple of 6 for geometry ID: ${placedGeometry.geometryExpressID}`);
+        // Attempt to process as position-only if not multiple of 6?
+        // For now, skip if format seems wrong.
         return null;
       }
-      bufferGeometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
-      bufferGeometry.setIndex(new THREE.Uint32BufferAttribute(indices, 1));
-      try {
-        bufferGeometry.computeVertexNormals();
-      } catch (normError) {
-        console.warn("Could not compute vertex normals for geometry ID:", placedGeometry.geometryExpressID, normError);
+
+      const numVertices = numFloats / 6;
+      const positions = new Float32Array(numVertices * 3);
+      const normals = new Float32Array(numVertices * 3);
+
+      for (let i = 0; i < numVertices; i++) {
+        const vIndex = i * 6;
+        const pIndex = i * 3;
+
+        positions[pIndex] = vertices[vIndex];
+        positions[pIndex + 1] = vertices[vIndex + 1];
+        positions[pIndex + 2] = vertices[vIndex + 2];
+
+        normals[pIndex] = vertices[vIndex + 3];
+        normals[pIndex + 1] = vertices[vIndex + 4];
+        normals[pIndex + 2] = vertices[vIndex + 5];
       }
+
+      bufferGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      bufferGeometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+      // --- End Interleaved Data Handling ---
+
+      // --- Index Validation ---
+      // const numVertices = vertices.length / 3; // Original calculation based on pos-only
+      // Use the calculated numVertices from interleaved data
+      let maxIndex = -1;
+      let invalidIndexFound = false;
+      for (let i = 0; i < indices.length; i++) {
+        if (indices[i] >= numVertices) {
+          console.warn(`Invalid index ${indices[i]} found (max allowed is ${numVertices - 1}) for geometry ID: ${placedGeometry.geometryExpressID}`);
+          invalidIndexFound = true;
+          break;
+        }
+        if (indices[i] > maxIndex) maxIndex = indices[i];
+      }
+
+      if (invalidIndexFound) {
+        console.warn(`Skipping mesh creation due to invalid indices for geometry ID: ${placedGeometry.geometryExpressID}`);
+        return null; // Skip this mesh
+      }
+      // --- End Index Validation ---
+
+      // Restore setIndex
+      bufferGeometry.setIndex(new THREE.Uint32BufferAttribute(indices, 1));
 
       const { color } = placedGeometry;
       if (!color) {
