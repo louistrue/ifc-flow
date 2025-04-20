@@ -70,7 +70,7 @@ interface Shortcut {
 type ShortcutsByCategory = Record<string, Shortcut[]>;
 
 export function HelpDialog({ open, onOpenChange }: HelpDialogProps) {
-  const [activeTab, setActiveTab] = useState("about");
+  const [activeTab, setActiveTab] = useState("shortcuts");
   const [editingShortcut, setEditingShortcut] = useState<string | null>(null);
   const [listeningForKeys, setListeningForKeys] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -94,11 +94,11 @@ export function HelpDialog({ open, onOpenChange }: HelpDialogProps) {
   // Filter shortcuts by search query
   const filteredShortcuts = searchQuery
     ? shortcuts.filter(
-        (s) =>
-          s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          s.keys.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          s.category.toLowerCase().includes(searchQuery.toLowerCase())
-      )
+      (s) =>
+        s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        s.keys.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        s.category.toLowerCase().includes(searchQuery.toLowerCase())
+    )
     : null;
 
   // Handle shortcut edit
@@ -228,14 +228,6 @@ export function HelpDialog({ open, onOpenChange }: HelpDialogProps) {
           <div className="flex justify-between items-center">
             <TabsList className="mb-2">
               <TabsTrigger
-                value="about"
-                data-tab="about"
-                className="flex items-center gap-1"
-              >
-                <Info className="h-4 w-4" />
-                About
-              </TabsTrigger>
-              <TabsTrigger
                 value="shortcuts"
                 data-tab="shortcuts"
                 className="flex items-center gap-1"
@@ -280,116 +272,6 @@ export function HelpDialog({ open, onOpenChange }: HelpDialogProps) {
           </div>
 
           <TabsContent
-            value="about"
-            className="flex-1 overflow-auto mt-0 border rounded-md p-4"
-          >
-            <div className="space-y-6">
-              <div className="flex items-start gap-4">
-                <div className="bg-primary/10 p-3 rounded-full">
-                  <Building className="h-8 w-8 text-primary" />
-                </div>
-                <div className="space-y-2">
-                  <h3 className="text-xl font-medium">Grasshopper for IFC</h3>
-                  <p className="text-muted-foreground">
-                    A visual scripting environment for working with IFC
-                    (Industry Foundation Classes) files. Create, manipulate, and
-                    analyze building information models using a node-based
-                    interface.
-                  </p>
-                </div>
-              </div>
-
-              <div className="grid md:grid-cols-2 gap-6 pt-2">
-                <Card>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-lg">Key Features</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <ul className="space-y-2">
-                      <li className="flex gap-2">
-                        <ChevronRight className="h-5 w-5 text-primary flex-shrink-0" />
-                        <span>Load and visualize IFC models</span>
-                      </li>
-                      <li className="flex gap-2">
-                        <ChevronRight className="h-5 w-5 text-primary flex-shrink-0" />
-                        <span>
-                          Extract geometry, properties, and relationships
-                        </span>
-                      </li>
-                      <li className="flex gap-2">
-                        <ChevronRight className="h-5 w-5 text-primary flex-shrink-0" />
-                        <span>Filter and transform model elements</span>
-                      </li>
-                      <li className="flex gap-2">
-                        <ChevronRight className="h-5 w-5 text-primary flex-shrink-0" />
-                        <span>Perform spatial and geometric analyses</span>
-                      </li>
-                      <li className="flex gap-2">
-                        <ChevronRight className="h-5 w-5 text-primary flex-shrink-0" />
-                        <span>Export results in various formats</span>
-                      </li>
-                      <li className="flex gap-2">
-                        <ChevronRight className="h-5 w-5 text-primary flex-shrink-0" />
-                        <span>Save and share workflows</span>
-                      </li>
-                    </ul>
-                  </CardContent>
-                </Card>
-
-                <Card>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-lg">
-                      System Information
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-3">
-                    <div>
-                      <div className="text-sm font-medium">Version</div>
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">
-                          Grasshopper for IFC
-                        </span>
-                        <Badge variant="outline">v0.1.0</Badge>
-                      </div>
-                    </div>
-
-                    <div>
-                      <div className="text-sm font-medium">Technologies</div>
-                      <div className="grid grid-cols-2 gap-1 text-muted-foreground text-sm">
-                        <div>Next.js Framework</div>
-                        <div>React Flow</div>
-                        <div>IfcOpenShell</div>
-                        <div>Three.js</div>
-                      </div>
-                    </div>
-
-                    <div>
-                      <div className="text-sm font-medium">License</div>
-                      <div className="text-muted-foreground">MIT License</div>
-                    </div>
-                  </CardContent>
-                </Card>
-              </div>
-
-              <div>
-                <h4 className="text-lg font-medium mb-3">Getting Started</h4>
-                <p className="mb-4">
-                  New to Grasshopper for IFC? Check out the tutorial section to
-                  learn how to create your first workflow and process IFC models
-                  effectively.
-                </p>
-                <Button
-                  onClick={() => setActiveTab("tutorial")}
-                  className="gap-2"
-                >
-                  <AlertCircle className="h-4 w-4" />
-                  View Tutorial
-                </Button>
-              </div>
-            </div>
-          </TabsContent>
-
-          <TabsContent
             value="shortcuts"
             className="flex-1 overflow-hidden flex flex-col mt-0 border rounded-md"
             tabIndex={0}
@@ -430,11 +312,10 @@ export function HelpDialog({ open, onOpenChange }: HelpDialogProps) {
                             <Button
                               variant="ghost"
                               size="sm"
-                              className={`font-mono ${
-                                editingShortcut === shortcut.id
-                                  ? "bg-primary/20"
-                                  : ""
-                              }`}
+                              className={`font-mono ${editingShortcut === shortcut.id
+                                ? "bg-primary/20"
+                                : ""
+                                }`}
                               onClick={() => handleShortcutClick(shortcut.id)}
                             >
                               {formatKeyCombination(shortcut.keys)}
@@ -515,11 +396,10 @@ export function HelpDialog({ open, onOpenChange }: HelpDialogProps) {
                                   <Button
                                     variant="ghost"
                                     size="sm"
-                                    className={`font-mono ${
-                                      editingShortcut === shortcut.id
-                                        ? "bg-primary/20"
-                                        : ""
-                                    }`}
+                                    className={`font-mono ${editingShortcut === shortcut.id
+                                      ? "bg-primary/20"
+                                      : ""
+                                      }`}
                                     onClick={() =>
                                       handleShortcutClick(shortcut.id)
                                     }

@@ -71,7 +71,7 @@ export function SaveWorkflowDialog({
       setTags(existingWorkflow?.tags || []);
       setLocalFilename(
         existingWorkflow?.name?.toLowerCase().replace(/\s+/g, "-") ||
-          "untitled-workflow"
+        "untitled-workflow"
       );
       setActiveTab("library");
     }
@@ -140,19 +140,42 @@ export function SaveWorkflowDialog({
     const id = existingWorkflow?.id || crypto.randomUUID();
     const createdAt = existingWorkflow?.createdAt || new Date().toISOString();
 
-    const workflow = {
+    // Use current state for the workflow data being saved locally
+    const workflow: Workflow = {
       id,
-      name: existingWorkflow?.name || "Untitled Workflow",
-      description: existingWorkflow?.description || "",
-      tags: existingWorkflow?.tags || [],
+      name: name.trim() || "Untitled Workflow", // Use current name from state
+      description: description.trim(), // Use current description from state
+      tags: tags, // Use current tags from state
       createdAt,
       updatedAt: new Date().toISOString(),
       flowData,
+      // Note: thumbnail is typically generated for library saves, omitted here
     };
 
-    // Call onSaveLocally with the workflow object
-    onSaveLocally(workflow);
-    handleOpenChange(false);
+    // Directly trigger the download
+    try {
+      const jsonString = JSON.stringify(workflow, null, 2);
+      const blob = new Blob([jsonString], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      // Optional: Still call the original callback if parent needs notification,
+      // but the primary download action is handled above.
+      // console.log("Calling onSaveLocally prop (currently commented out)...");
+      // onSaveLocally(workflow);
+
+      handleOpenChange(false); // Close dialog after successful download
+    } catch (error) {
+      console.error("Failed to save workflow locally:", error);
+      alert("Error saving workflow as file. Check console for details.");
+      // Don't close dialog on error
+    }
   };
 
   return (

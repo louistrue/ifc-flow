@@ -21,6 +21,7 @@ import { OpenFileDialog } from "@/components/dialogs/open-file-dialog";
 import { SaveWorkflowDialog } from "@/components/dialogs/save-workflow-dialog";
 import { SettingsDialog } from "@/components/dialogs/settings-dialog";
 import { HelpDialog } from "@/components/dialogs/help-dialog";
+import { AboutDialog } from "@/components/dialogs/about-dialog";
 import { WorkflowLibrary } from "@/components/workflow-library";
 import { useToast } from "@/hooks/use-toast";
 import type { Workflow } from "@/lib/workflow-storage";
@@ -85,6 +86,7 @@ export function AppMenubar({
   const [workflowLibraryOpen, setWorkflowLibraryOpen] = useState(false);
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
   const [helpDialogOpen, setHelpDialogOpen] = useState(false);
+  const [aboutDialogOpen, setAboutDialogOpen] = useState(false);
   const { toast } = useToast();
   const { shortcuts } = useKeyboardShortcuts();
   const { theme, setTheme } = useTheme();
@@ -450,7 +452,9 @@ export function AppMenubar({
                 </MenubarShortcut>
               </MenubarItem>
               <MenubarSeparator />
-              <MenubarItem>About IFCflow</MenubarItem>
+              <MenubarItem onClick={() => setAboutDialogOpen(true)}>
+                About IFCflow
+              </MenubarItem>
             </MenubarContent>
           </MenubarMenu>
         </Menubar>
@@ -506,6 +510,8 @@ export function AppMenubar({
       />
 
       <HelpDialog open={helpDialogOpen} onOpenChange={setHelpDialogOpen} />
+
+      <AboutDialog open={aboutDialogOpen} onOpenChange={setAboutDialogOpen} />
     </>
   );
 }
