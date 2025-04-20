@@ -64,9 +64,7 @@ export function Toolbar({
   }
 
   const handleSaveWorkflow = (filename: string) => {
-    // Instead of using reactFlowInstance directly, we get the flow object from the parent
-    const flowData = getFlowObject()
-    onSaveWorkflow(filename, flowData)
+    onSaveWorkflow(filename, getFlowObject())
     setSaveFileDialogOpen(false)
     toast({
       title: "Workflow saved",
@@ -75,10 +73,11 @@ export function Toolbar({
   }
 
   const handleSaveToLibrary = (workflow: Workflow) => {
-    toast({
-      title: "Workflow saved to library",
-      description: `${workflow.name} has been saved to your workflow library`,
-    })
+    setSaveWorkflowDialogOpen(false)
+  }
+
+  const handleLocalSaveNotification = (workflow: Workflow) => {
+    setSaveWorkflowDialogOpen(false)
   }
 
   const handleLoadWorkflow = (workflow: Workflow) => {
@@ -264,7 +263,7 @@ export function Toolbar({
         open={saveWorkflowDialogOpen}
         onOpenChange={setSaveWorkflowDialogOpen}
         onSave={handleSaveToLibrary}
-        onSaveLocally={handleSaveToLibrary}
+        onSaveLocally={handleLocalSaveNotification}
         flowData={getFlowObject()}
         existingWorkflow={currentWorkflow}
       />

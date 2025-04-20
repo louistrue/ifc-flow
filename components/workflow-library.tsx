@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import type React from "react";
 
 import {
@@ -66,6 +66,17 @@ export function WorkflowLibrary({
   const refreshWorkflows = () => {
     setWorkflows(workflowStorage.getWorkflows());
   };
+
+  // Effect to refresh workflows when the dialog opens
+  useEffect(() => {
+    if (open) {
+      refreshWorkflows();
+      // Reset import state if coming from import tab
+      setActiveTab("library");
+      setImportError("");
+      setImportSuccess(false);
+    }
+  }, [open]);
 
   // Filter workflows based on search term
   const filteredWorkflows = workflows.filter(

@@ -731,52 +731,33 @@ function FlowWithProvider() {
   // Handle loading a workflow from the library
   const handleLoadWorkflow = (workflow: Workflow) => {
     if (workflow && workflow.flowData) {
-      // Clear current state
-      setNodes([]);
-      setEdges([]);
+      const { nodes = [], edges = [], viewport = { x: 0, y: 0, zoom: 1 } } =
+        workflow.flowData;
 
-      // Set the current workflow
+      setNodes(nodes);
+      setEdges(edges);
       setCurrentWorkflow(workflow);
 
-      // Load the workflow data
+      // Correctly reset undo/redo history
+      setHistory([{ nodes, edges }]); // Initialize history with the loaded state
+      setHistoryIndex(0); // Set index to the first (and only) state
+      setCanUndo(false); // Cannot undo immediately after load
+      setCanRedo(false); // Cannot redo immediately after load
+
+      // Use reactFlowInstance to set the viewport
       if (reactFlowInstance) {
-        // Small delay to ensure the canvas is clear
+        reactFlowInstance.setViewport(viewport);
+
+        // Fit view after a short delay to ensure nodes are rendered
         setTimeout(() => {
-          const { nodes: flowNodes, edges: flowEdges } = workflow.flowData;
-
-          // Apply selection styling to nodes
-          const styledNodes = (flowNodes || []).map((node: Node) => {
-            if (node.selected) {
-              return {
-                ...node,
-                style: { ...node.style, ...nodeStyle.selected },
-              };
-            }
-            return node;
-          });
-
-          // Load nodes and edges
-          setNodes(styledNodes);
-          setEdges(flowEdges || []);
-
-          // Reset history
-          setHistory([{ nodes: styledNodes, edges: flowEdges || [] }]);
-          setHistoryIndex(0);
-
-          // Update selected node
-          const selectedNodes = styledNodes.filter(
-            (node: Node) => node.selected
-          );
-          if (selectedNodes.length === 1) {
-            setSelectedNode(selectedNodes[0]);
-          } else {
-            setSelectedNode(null);
-          }
-
-          // Don't automatically fit view - user can manually fit if needed
-          // reactFlowInstance.fitView()
-        }, 50);
+          reactFlowInstance.fitView({ padding: 0.1, duration: 200 });
+        }, 100); // 100ms delay
       }
+
+      toast({
+        title: "Workflow loaded",
+        description: `Successfully loaded workflow "${workflow.name}"`,
+      });
     }
   };
 
