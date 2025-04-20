@@ -110,6 +110,7 @@ export function AboutDialog({ open, onOpenChange }: AboutDialogProps) {
                                         <div>React Flow</div>
                                         <div>IfcOpenShell</div>
                                         <div>Three.js</div>
+                                        <div>web-ifc engine</div>
                                         <div>Shadcn UI</div>
                                         <div>Tailwind CSS</div>
                                     </div>
