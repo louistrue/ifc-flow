@@ -110,7 +110,6 @@ function FlowWithProvider() {
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [editingNode, setEditingNode] = useState<Node | null>(null);
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
-  const [reactFlowInstance, setReactFlowInstance] = useState<any>(null);
   const { toast } = useToast();
   const { shortcuts } = useKeyboardShortcuts();
   const { settings } = useAppSettings();
@@ -154,7 +153,7 @@ function FlowWithProvider() {
   const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Get the ReactFlow utility functions
-  const reactFlowUtils = useReactFlow();
+  const reactFlowInstance = useReactFlow();
 
   // Reference to worker for IFC operations
   const ifcWorkerRef = useRef<Worker | null>(null);
@@ -1546,7 +1545,6 @@ function FlowWithProvider() {
             onNodesChange={handleNodesChange}
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
-            onInit={setReactFlowInstance as OnInit<any, any>}
             onDrop={onDrop}
             onDragOver={onDragOver}
             onNodeClick={onNodeClick}

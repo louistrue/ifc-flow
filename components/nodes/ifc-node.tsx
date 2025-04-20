@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useState, useCallback } from "react";
+import { memo, useState, useCallback, useRef } from "react";
 import { Handle, Position, useReactFlow, type NodeProps } from "reactflow";
 import { FileUp, Info, Building } from "lucide-react";
 import { NodeLoadingIndicator } from "./node-loading-indicator";
@@ -18,6 +18,7 @@ interface ExtendedIfcNodeData extends BaseIfcNodeData {
 }
 
 export const IfcNode = memo(({ id, data, isConnectable }: NodeProps<ExtendedIfcNodeData>) => {
+  const dropRef = useRef<HTMLDivElement>(null);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const [progress, setProgress] = useState({ percentage: 0, message: "" });
   const { setNodes } = useReactFlow();
@@ -313,11 +314,9 @@ export const IfcNode = memo(({ id, data, isConnectable }: NodeProps<ExtendedIfcN
 
   return (
     <div
-      className={`bg-white border-2 ${isDraggingOver ? "border-blue-700 bg-blue-50" : "border-blue-500"
-        } rounded-md shadow-md transition-colors ${data.isLoading
-          ? "w-64 min-h-[150px]" // Fixed width and min-height during loading
-          : "min-w-[14rem] max-w-[24rem] w-auto" // Dynamic width when not loading
-        }`}
+      ref={dropRef}
+      className={`bg-white dark:bg-gray-800 border-2 ${isDraggingOver ? "border-blue-700 bg-blue-50 dark:bg-blue-900 dark:border-blue-500" : "border-blue-500 dark:border-blue-400"
+        } rounded-md shadow-md w-60 transition-colors duration-200 ease-in-out relative`}
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}

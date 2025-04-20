@@ -13,6 +13,17 @@
 
 </div>
 
+<table>
+<tr>
+<td width="50%">
+<img src="docs/assets/ui_light.png" alt="IFC Flow Map Light Theme" title="Light Theme"/>
+</td>
+<td width="50%">
+<img src="docs/assets/ui_dark.png" alt="IFC Flow Map Dark Theme" title="Dark Theme"/>
+</td>
+</tr>
+</table>
+
 ---
 
 ## 📋 Overview
@@ -107,8 +118,6 @@ To learn more about the technologies used:
 - [IfcOpenShell Documentation](https://blenderbim.org/docs-python/)
 
 ## 🚀 Deployment
-
-Deployed on [Vercel](https://vercel.com/), the platform from the creators of Next.js.
 
 [![Deployed on Vercel](https://img.shields.io/badge/Deployed_on-Vercel-black?logo=vercel)](https://vercel.com/)
 

@@ -4,9 +4,10 @@ import { memo } from "react"
 import { Handle, Position, type NodeProps } from "reactflow"
 import { Calculator } from "lucide-react"
 import { QuantityNodeData } from "./node-types";
+
 export const QuantityNode = memo(({ data, isConnectable }: NodeProps<QuantityNodeData>) => {
   return (
-    <div className="bg-white border-2 border-amber-500 rounded-md w-48 shadow-md">
+    <div className="bg-white dark:bg-gray-800 border-2 border-amber-500 dark:border-amber-400 rounded-md w-48 shadow-md">
       <div className="bg-amber-500 text-white px-3 py-1 flex items-center gap-2">
         <Calculator className="h-4 w-4" />
         <div className="text-sm font-medium truncate">{data.label}</div>

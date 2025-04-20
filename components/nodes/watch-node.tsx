@@ -481,11 +481,9 @@ export const WatchNode = memo(
 
     return (
       <div
-        className={`bg-white border-2 ${
-          selected ? "border-teal-600" : "border-teal-500"
-        } rounded-md shadow-md relative overflow-hidden ${
-          isResizing ? "nodrag" : ""
-        }`}
+        className={`bg-white dark:bg-gray-800 border-2 ${selected ? "border-teal-600 dark:border-teal-400" : "border-teal-500 dark:border-teal-400"
+          } rounded-md shadow-md relative overflow-hidden ${isResizing ? "nodrag" : ""
+          }`}
         style={{ width: `${width}px` }}
         data-nodrag={isResizing ? "true" : undefined}
       >
@@ -503,16 +501,16 @@ export const WatchNode = memo(
                 {displayMode === "raw"
                   ? "JSON"
                   : displayMode === "summary"
-                  ? "Summary"
-                  : "Table"}
+                    ? "Summary"
+                    : "Table"}
               </span>
             </span>
             <span className="text-muted-foreground">
               {inputData.type === "array"
                 ? `${inputData.count || 0} items`
                 : inputData.type !== "unknown"
-                ? inputData.type
-                : "No data"}
+                  ? inputData.type
+                  : "No data"}
             </span>
           </div>
           <div
@@ -525,9 +523,8 @@ export const WatchNode = memo(
 
         {/* Resize handle - nodrag class prevents ReactFlow drag */}
         <div
-          className={`absolute bottom-0 right-0 w-6 h-6 cursor-nwse-resize nodrag ${
-            selected ? "text-teal-600" : "text-gray-400"
-          } hover:text-teal-500`}
+          className={`absolute bottom-0 right-0 w-6 h-6 cursor-nwse-resize nodrag ${selected ? "text-teal-600" : "text-gray-400"
+            } hover:text-teal-500`}
           onMouseDown={startResize}
         >
           <svg

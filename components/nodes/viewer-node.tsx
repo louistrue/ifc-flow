@@ -196,11 +196,10 @@ export const ViewerNode = memo(
 
     return (
       <div
-        className={`bg-white border-2 ${selected ? "border-cyan-600" : "border-cyan-500"
-          } rounded-md shadow-md relative overflow-hidden ${isResizing ? "nodrag" : ""
-          }`}
+        className={`bg-white dark:bg-gray-800 border-2 ${selected ? "border-cyan-600 dark:border-cyan-400" : "border-cyan-500 dark:border-cyan-400"
+          } rounded-md shadow-md relative`}
         style={{ width: `${width}px` }}
-        data-nodrag={isResizing ? "true" : undefined}
+        data-id={id}
       >
         <div className="bg-cyan-500 text-white px-3 py-1 flex items-center justify-between gap-2 nodrag-handle">
           <div className="flex items-center gap-2 min-w-0">
