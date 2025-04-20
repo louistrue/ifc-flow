@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🏗️ IFC Flow Map
+# 🏗️ IFCflow
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![Next.js](https://img.shields.io/badge/Next.js-14.2.0-black?logo=next.js)](https://nextjs.org/)
