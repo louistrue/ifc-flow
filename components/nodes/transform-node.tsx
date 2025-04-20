@@ -100,7 +100,7 @@ function applyTransformation(geometry: Geometry, transform: Transform): Geometry
   return transformedGeometry;
 }
 
-export const TransformNode = memo(({ data, isConnectable }: NodeProps<TransformNodeData>) => {
+export const TransformNode = memo(({ data, isConnectable }: NodeProps<ExtendedTransformNodeData>) => {
   // Apply transformation when data changes
   if (data.geometry) {
     const transform = {
