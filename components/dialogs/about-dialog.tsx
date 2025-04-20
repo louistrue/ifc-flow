@@ -31,7 +31,7 @@ export function AboutDialog({ open, onOpenChange }: AboutDialogProps) {
                 <DialogHeader className="pb-2 border-b">
                     <DialogTitle className="flex items-center gap-2 text-xl">
                         <Info className="h-5 w-5 text-primary" />
-                        About Grasshopper for IFC
+                        About IFCflow
                     </DialogTitle>
                     <DialogDescription>
                         Information about the application, its features, and technology.
@@ -44,7 +44,7 @@ export function AboutDialog({ open, onOpenChange }: AboutDialogProps) {
                             <Building className="h-8 w-8 text-primary" />
                         </div>
                         <div className="space-y-2">
-                            <h3 className="text-xl font-medium">Grasshopper for IFC</h3>
+                            <h3 className="text-xl font-medium">IFCflow</h3>
                             <p className="text-muted-foreground">
                                 A visual scripting environment for working with IFC (Industry
                                 Foundation Classes) files. Create, manipulate, and analyze
@@ -97,7 +97,7 @@ export function AboutDialog({ open, onOpenChange }: AboutDialogProps) {
                                     <div className="text-sm font-medium">Version</div>
                                     <div className="flex justify-between">
                                         <span className="text-muted-foreground">
-                                            Grasshopper for IFC
+                                            IFCflow
                                         </span>
                                         <Badge variant="outline">v0.1.0</Badge>
                                     </div>
@@ -110,6 +110,7 @@ export function AboutDialog({ open, onOpenChange }: AboutDialogProps) {
                                         <div>React Flow</div>
                                         <div>IfcOpenShell</div>
                                         <div>Three.js</div>
+                                        <div>web-ifc engine</div>
                                         <div>Shadcn UI</div>
                                         <div>Tailwind CSS</div>
                                     </div>

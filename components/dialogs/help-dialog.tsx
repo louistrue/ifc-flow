@@ -212,10 +212,10 @@ export function HelpDialog({ open, onOpenChange }: HelpDialogProps) {
         <DialogHeader className="pb-2 border-b">
           <DialogTitle className="flex items-center gap-2 text-xl">
             <Info className="h-5 w-5 text-primary" />
-            Grasshopper for IFC Help
+            IFCflow Help
           </DialogTitle>
           <DialogDescription>
-            Documentation and resources to help you use Grasshopper for IFC
+            Documentation and resources to help you use IFCflow
             effectively
           </DialogDescription>
         </DialogHeader>
@@ -461,11 +461,11 @@ export function HelpDialog({ open, onOpenChange }: HelpDialogProps) {
               <div>
                 <h3 className="text-xl font-medium flex items-center gap-2">
                   <AlertCircle className="h-5 w-5 text-primary" />
-                  Getting Started with Grasshopper for IFC
+                  Getting Started with IFCflow
                 </h3>
                 <p className="text-muted-foreground mt-1">
-                  Follow this step-by-step guide to learn how to use Grasshopper
-                  for IFC effectively.
+                  Follow this step-by-step guide to learn how to use IFCflow
+                  effectively.
                 </p>
               </div>
 
