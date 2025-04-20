@@ -1,6 +1,6 @@
 // Common styling for all node types
 export const nodeBaseStyle = {
-  container: "bg-white rounded-md shadow-md transition-all duration-200 hover:shadow-lg",
+  container: "bg-white dark:bg-gray-800 rounded-md shadow-md transition-all duration-200 hover:shadow-lg",
   header: "px-3 py-1.5 flex items-center gap-2 rounded-t-md",
   content: "p-3 text-xs",
   handle: {

@@ -2,14 +2,14 @@
 
 import { memo } from "react";
 import { Handle, Position, type NodeProps } from "reactflow";
-import { Download } from "lucide-react";
+import { Download, UploadCloud } from "lucide-react";
 import { ExportNodeData } from "./node-types";
 
 export const ExportNode = memo(({ data, isConnectable }: NodeProps<ExportNodeData>) => {
   return (
-    <div className="bg-white border-2 border-sky-500 rounded-md w-48 shadow-md">
+    <div className="bg-white dark:bg-gray-800 border-2 border-sky-500 dark:border-sky-400 rounded-md w-48 shadow-md">
       <div className="bg-sky-500 text-white px-3 py-1 flex items-center gap-2">
-        <Download className="h-4 w-4" />
+        <UploadCloud className="h-4 w-4" />
         <div className="text-sm font-medium truncate">{data.label}</div>
       </div>
       <div className="p-3 text-xs">

@@ -237,7 +237,7 @@ export const PropertyNode = memo(
     };
 
     return (
-      <div className="bg-white border-2 border-pink-500 rounded-md w-48 shadow-md">
+      <div className="bg-white dark:bg-gray-800 border-2 border-pink-500 dark:border-pink-400 rounded-md w-48 shadow-md">
         <div className="bg-pink-500 text-white px-3 py-1 flex items-center gap-2">
           <Edit className="h-4 w-4" />
           <div className="text-sm font-medium truncate">{label}</div>
@@ -267,21 +267,21 @@ export const PropertyNode = memo(
               {/* Show value for set/add operations */}
               {(action.toLowerCase() === "set" ||
                 action.toLowerCase() === "add") && (
-                <div className="flex justify-between">
-                  <span>Value:</span>
-                  <span className="font-medium truncate max-w-24">
-                    {properties?.useValueInput
-                      ? "From Input"
-                      : formatPropertyValue(propertyValue)}
-                  </span>
-                </div>
-              )}
+                  <div className="flex justify-between">
+                    <span>Value:</span>
+                    <span className="font-medium truncate max-w-24">
+                      {properties?.useValueInput
+                        ? "From Input"
+                        : formatPropertyValue(propertyValue)}
+                    </span>
+                  </div>
+                )}
 
               {/* Warning if no results found */}
               {data.results &&
                 data.results.length > 0 &&
                 data.results.filter((e) => e.propertyInfo?.exists).length ===
-                  0 &&
+                0 &&
                 action.toLowerCase() === "get" && (
                   <div className="mt-2 pt-1 border-t border-gray-200 text-amber-600 flex items-center gap-1">
                     <AlertTriangle className="h-3 w-3" />

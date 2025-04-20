@@ -4,9 +4,10 @@ import { memo } from "react"
 import { Handle, Position, type NodeProps } from "reactflow"
 import { GitBranch } from "lucide-react"
 import { RelationshipNodeData } from "./node-types";
+
 export const RelationshipNode = memo(({ data, isConnectable }: NodeProps<RelationshipNodeData>) => {
   return (
-    <div className="bg-white border-2 border-violet-500 rounded-md w-48 shadow-md">
+    <div className="bg-white dark:bg-gray-800 border-2 border-violet-500 dark:border-violet-400 rounded-md w-48 shadow-md">
       <div className="bg-violet-500 text-white px-3 py-1 flex items-center gap-2">
         <GitBranch className="h-4 w-4" />
         <div className="text-sm font-medium truncate">{data.label}</div>

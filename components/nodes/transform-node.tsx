@@ -3,7 +3,7 @@
 import { memo } from "react";
 import { Handle, Position, type NodeProps } from "reactflow";
 import { Move } from "lucide-react";
-import { TransformNodeData as BaseTransformNodeData } from "./node-types";
+import { TransformNodeData } from "./node-types";
 
 interface Geometry {
   vertices: number[][];
@@ -23,7 +23,7 @@ interface Transform {
 }
 
 // Extend the base TransformNodeData with additional properties
-interface ExtendedTransformNodeData extends BaseTransformNodeData {
+interface ExtendedTransformNodeData extends TransformNodeData {
   geometry?: Geometry;
   transformedGeometry?: Geometry;
 }
@@ -120,7 +120,7 @@ export const TransformNode = memo(({ data, isConnectable }: NodeProps<ExtendedTr
   }
 
   return (
-    <div className="bg-white border-2 border-orange-500 rounded-md w-48 shadow-md">
+    <div className="bg-white dark:bg-gray-800 border-2 border-orange-500 dark:border-orange-400 rounded-md w-48 shadow-md">
       <div className="bg-orange-500 text-white px-3 py-1 flex items-center gap-2">
         <Move className="h-4 w-4" />
         <div className="text-sm font-medium truncate">{data.label}</div>
