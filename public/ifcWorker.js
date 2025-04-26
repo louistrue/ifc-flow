@@ -1615,6 +1615,7 @@ async function handleExtractQuantities(data, messageId) {
     const namespace = pyodide.globals.get("dict")();
     namespace.set("element_ids_json", idsJson);
     namespace.set("quantity_type", quantityTypeLower);
+    namespace.set("group_by", groupBy);
 
     // Python code for quantity extraction
     const pythonCode = `
@@ -1627,13 +1628,18 @@ try:
     # Load the IFC file
     if not os.path.exists('model.ifc'):
         raise FileNotFoundError("The 'model.ifc' file does not exist in the virtual filesystem.")
+    
+    # First open the file to make it available for type lookup
     ifc_file = ifcopenshell.open('model.ifc')
-
+    print(f"Loaded IFC file for quantity extraction")
+    
     element_ids = json.loads(element_ids_json)
     quantity_type = quantity_type.lower()
+    group_by_option = group_by.lower()
+    
     results = []
     unit = None
-
+    
     # Helper: get unit for quantity type
     def get_unit_for_quantity(ifc_file, quantity_type):
         unit_type_map = {
@@ -1653,9 +1659,9 @@ try:
             elif u.is_a("IfcConversionBasedUnit") and u.UnitType == unit_type:
                 return u.Name
         return None
-
+    
     unit = get_unit_for_quantity(ifc_file, quantity_type)
-
+    
     # Helper: extract quantity from element
     def extract_quantity(element, quantity_type):
         # Try QTO first
@@ -1674,32 +1680,148 @@ try:
         if quantity_type == "count":
             return 1
         return None
-
+    
+    # Create a type lookup dictionary for faster access
+    type_lookup = {}
+    
+    # Process elements and collect quantities
     processed = 0
+    element_quantities = []
+    
     for eid in element_ids:
-        element = ifc_file.by_id(eid)
-        if not element:
+        try:
+            element = ifc_file.by_id(eid)
+            if not element:
+                continue
+                
+            # Get quantity value
+            value = extract_quantity(element, quantity_type)
+            if value is None:
+                continue  # Skip if no quantity found
+                
+            # Get grouping value based on chosen groupBy option
+            group_value = "All"  # Default group
+            
+            if group_by_option == "type":
+                # Use element type without Ifc prefix for readability
+                element_type = element.is_a()
+                if element_type:
+                    # Remove "Ifc" prefix if present
+                    if element_type.startswith("Ifc"):
+                        element_type = element_type[3:]
+                    group_value = element_type
+                    
+            elif group_by_option == "level":
+                # Try to find the building storey
+                for rel in ifc_file.by_type("IfcRelContainedInSpatialStructure"):
+                    if not hasattr(rel, "RelatedElements") or not rel.RelatedElements:
+                        continue
+                        
+                    if not hasattr(rel, "RelatingStructure") or not rel.RelatingStructure:
+                        continue
+                        
+                    is_in_relation = False
+                    for related_element in rel.RelatedElements:
+                        if related_element.id() == eid:
+                            is_in_relation = True
+                            break
+                            
+                    if is_in_relation and rel.RelatingStructure.is_a("IfcBuildingStorey"):
+                        storey_name = getattr(rel.RelatingStructure, "Name", None) or f"Level {rel.RelatingStructure.id()}"
+                        group_value = storey_name
+                        break
+                        
+            elif group_by_option == "material":
+                # Try to find material information
+                material_name = "Unknown"
+                
+                # Try relationships
+                for rel in ifc_file.by_type("IfcRelAssociatesMaterial"):
+                    if not hasattr(rel, "RelatedObjects") or not rel.RelatedObjects:
+                        continue
+                        
+                    is_related = False
+                    for related_obj in rel.RelatedObjects:
+                        if related_obj.id() == eid:
+                            is_related = True
+                            break
+                            
+                    if is_related and hasattr(rel, "RelatingMaterial"):
+                        material = rel.RelatingMaterial
+                        if material.is_a("IfcMaterial"):
+                            material_name = getattr(material, "Name", "Unknown Material")
+                        elif material.is_a("IfcMaterialList"):
+                            # Take the first material in the list
+                            if material.Materials and len(material.Materials) > 0:
+                                material_name = getattr(material.Materials[0], "Name", "Unknown Material")
+                        elif material.is_a("IfcMaterialLayerSetUsage") and hasattr(material, "ForLayerSet"):
+                            # Get first layer material name
+                            layer_set = material.ForLayerSet
+                            if hasattr(layer_set, "MaterialLayers") and layer_set.MaterialLayers:
+                                first_layer = layer_set.MaterialLayers[0]
+                                if hasattr(first_layer, "Material") and first_layer.Material:
+                                    material_name = getattr(first_layer.Material, "Name", "Unknown Material")
+                        group_value = material_name
+                        break
+            
+            # Add to results array
+            element_quantities.append({
+                "expressId": eid,
+                "quantity": value,
+                "group": group_value
+            })
+            
+            processed += 1
+            if processed % 20 == 0:
+                progress = int(10 + 80 * processed / max(1, len(element_ids)))
+                # Progress update via namespace
+                globals()["progress_info"] = {"processed": processed, "total": len(element_ids), "percentage": progress}
+        except Exception as elem_err:
+            print(f"Error processing element {eid}: {elem_err}")
             continue
-        value = extract_quantity(element, quantity_type)
-        results.append({
-            "expressId": eid,
-            "quantity": value
-        })
-        processed += 1
-        if processed % 20 == 0:
-            progress = int(10 + 80 * processed / max(1, len(element_ids)))
-            # Progress update via namespace
-            globals()["progress_info"] = {"processed": processed, "total": len(element_ids), "percentage": progress}
-
+    
+    # Group the results by the selected groupBy option
+    grouped_quantities = {}
+    
+    for item in element_quantities:
+        group = item["group"]
+        quantity = item["quantity"]
+        
+        if group not in grouped_quantities:
+            grouped_quantities[group] = 0
+            
+        grouped_quantities[group] += quantity
+    
+    # Ensure we always have at least one group
+    if not grouped_quantities:
+        grouped_quantities["All"] = 0
+    
+    # Calculate total
+    total_quantity = sum(grouped_quantities.values())
+    
     # Final progress
     globals()["progress_info"] = {"processed": processed, "total": len(element_ids), "percentage": 90}
-    result_json = json.dumps(results)
+    
+    # Create the result object
+    result = {
+        "groups": grouped_quantities,
+        "unit": unit or "",
+        "total": total_quantity,
+        "groupBy": group_by_option  # Include the groupBy option in results
+    }
+    
+    result_json = json.dumps(result)
     success = True
     error_msg = None
     error_trace = None
 except Exception as e:
-    result_json = json.dumps([])
-    unit = None
+    result = {
+        "groups": {"Error": 0},
+        "unit": "",
+        "total": 0,
+        "error": str(e)
+    }
+    result_json = json.dumps(result)
     success = False
     error_msg = str(e)
     error_trace = traceback.format_exc()
@@ -1734,70 +1856,9 @@ except Exception as e:
     }
 
     const resultJson = namespace.get("result_json");
-    const unit = namespace.get("unit");
     const results = JSON.parse(resultJson);
 
     namespace.destroy();
-
-    // --- Structure the results into QuantityResults format ---
-    const quantityResultsData = {
-      groups: results.reduce((acc, curr) => {
-        // Group based on the requested groupBy parameter
-        let key = 'All'; // Default for 'none' grouping
-
-        if (groupBy === 'type') {
-          // For 'type' grouping, use the element's type (IfcWall, IfcBeam, etc.)
-          // Get the element by ID from the loaded model
-          try {
-            const element = ifc_file.by_id(curr.expressId);
-            if (element && element.is_a) {
-              key = element.is_a();
-            }
-          } catch (e) {
-            console.error(`Error getting element type for expressId ${curr.expressId}:`, e);
-          }
-        }
-        else if (groupBy === 'level') {
-          // For 'level' grouping, try to find the building storey
-          try {
-            const element = ifc_file.by_id(curr.expressId);
-            let levelName = 'Unknown';
-
-            // Check for building storey relationship
-            if (element && element.id) {
-              // Try to find the container/storey for this element
-              for (const rel of ifc_file.by_type('IfcRelContainedInSpatialStructure')) {
-                if (rel.RelatedElements && Array.isArray(rel.RelatedElements)) {
-                  const isElementInRel = rel.RelatedElements.some(
-                    relElement => relElement.id() === element.id()
-                  );
-
-                  if (isElementInRel && rel.RelatingStructure && rel.RelatingStructure.is_a('IfcBuildingStorey')) {
-                    levelName = rel.RelatingStructure.Name || 'Unnamed Level';
-                    break;
-                  }
-                }
-              }
-            }
-            key = levelName;
-          } catch (e) {
-            console.error(`Error getting level for expressId ${curr.expressId}:`, e);
-          }
-        }
-
-        // Ensure quantity is a number before adding
-        const quantityValue = typeof curr.quantity === 'number' ? curr.quantity : 0;
-        acc[key] = (acc[key] || 0) + quantityValue;
-        return acc;
-      }, {}),
-      unit: unit || '', // Default unit if none found
-      total: results.reduce((sum, curr) => {
-        // Ensure quantity is a number before adding
-        const quantityValue = typeof curr.quantity === 'number' ? curr.quantity : 0;
-        return sum + quantityValue;
-      }, 0)
-    };
-    // ------------------------------------------------------
 
     self.postMessage({
       type: "progress",
@@ -1809,7 +1870,7 @@ except Exception as e:
     self.postMessage({
       type: "quantityResults",
       messageId,
-      data: quantityResultsData,
+      data: results,
     });
   } catch (error) {
     self.postMessage({

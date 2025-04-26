@@ -658,11 +658,13 @@ export function transformElements(
   }));
 }
 
-// Define a new return type for quantities
+// Define the interface for quantity extraction results
 export interface QuantityResults {
   groups: Record<string, number>;
   unit: string;
   total: number;
+  groupBy?: string;
+  error?: string;
 }
 
 // Quantity extraction functions - NOW ASYNC and interacts with worker

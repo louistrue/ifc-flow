@@ -369,6 +369,11 @@ export class WorkflowExecutor {
                 }
                 // ---------------------------------------------------------
               );
+
+              // Add the groupBy property to the result
+              if (result && typeof result === 'object') {
+                (result as any).groupBy = groupBy;
+              }
             } catch (error) {
               console.error(`Error during quantity extraction for node ${nodeId}:`, error);
               // Return a properly structured error result that won't crash the UI

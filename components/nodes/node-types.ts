@@ -85,10 +85,12 @@ export interface PropertyNodeData extends BaseNodeData {
 // Quantity node data
 export interface QuantityNodeData extends BaseNodeData {
     properties?: {
-        quantity?: string;
+        quantityType?: 'area' | 'volume' | 'length' | 'count';
+        groupBy?: 'none' | 'type' | 'level' | 'material';
         unit?: string;
         [key: string]: any;
     };
+    messageId?: string;
 }
 
 // Relationship node data

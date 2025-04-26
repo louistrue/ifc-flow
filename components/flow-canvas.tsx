@@ -181,6 +181,16 @@ export function FlowCanvas({
       if (type === "quantityResults") {
         // Find the node that requested this extraction (by messageId)
         reactFlowInstance.setNodes((nds: any[]) => {
+          // First find the quantity node to get its groupBy property
+          let groupByValue = "none";
+          const sourceNode = nds.find(node =>
+            node.data && (node.data.messageId === messageId || node.id === messageId)
+          );
+
+          if (sourceNode && sourceNode.data?.properties?.groupBy) {
+            groupByValue = sourceNode.data.properties.groupBy;
+          }
+
           // First find and update the quantity node
           const updatedNodes = nds.map((node) => {
             // We'll assume the node's data has a messageId or you can match by node.id
@@ -188,6 +198,12 @@ export function FlowCanvas({
               node.data &&
               (node.data.messageId === messageId || node.id === messageId)
             ) {
+              // Add the groupBy to the quantity data
+              const enhancedQuantityData = {
+                ...quantityData,
+                groupBy: groupByValue
+              };
+
               // Update the quantity node
               return {
                 ...node,
@@ -195,7 +211,7 @@ export function FlowCanvas({
                   ...node.data,
                   inputData: {
                     type: "quantityResults",
-                    value: quantityData, // Use the structured data directly
+                    value: enhancedQuantityData, // Use the enhanced data with groupBy
                   },
                 },
               };
@@ -207,13 +223,24 @@ export function FlowCanvas({
           // This ensures they re-render even if React doesn't detect the change
           return updatedNodes.map(node => {
             if (node.type === 'watchNode') {
-              return {
-                ...node,
-                data: {
-                  ...node.data,
-                  _forceUpdate: Date.now() // Add a timestamp to force re-render
-                }
-              };
+              // Check if this watch node might be affected by the quantity node update
+              // by looking for connections in the edges
+              const mightBeConnected = edges.some(edge =>
+                (edge.source === sourceNode?.id && edge.target === node.id) ||
+                (node.data?.inputData?.type === 'quantityResults')
+              );
+
+              if (mightBeConnected) {
+                // For potentially affected nodes, force an update
+                return {
+                  ...node,
+                  data: {
+                    ...node.data,
+                    _forceUpdate: Date.now(), // Add a timestamp to force re-render
+                    _watchUpdateKey: `watch-update-${Date.now()}-${Math.random()}` // Add a unique key that changes
+                  }
+                };
+              }
             }
             return node;
           });
@@ -227,7 +254,7 @@ export function FlowCanvas({
     };
     worker.addEventListener("message", handler);
     return () => worker.removeEventListener("message", handler);
-  }, [reactFlowInstance, toast]);
+  }, [reactFlowInstance, toast, edges]);
 
   return (
     <div className="flex-1 h-full relative" ref={reactFlowWrapper}>
