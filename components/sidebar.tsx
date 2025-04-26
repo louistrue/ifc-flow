@@ -12,6 +12,12 @@ import {
   HoverCardTrigger,
 } from "@/components/ui/hover-card";
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
   FileUp,
   Box,
   Filter,
@@ -91,25 +97,25 @@ export const nodeCategories = [
         id: "filterNode",
         label: "Filter Elements",
         icon: <Filter className="h-4 w-4 mr-2" />,
-        status: "experimental",
+        status: "new",
       },
       {
         id: "propertyNode",
         label: "Property Editor",
         icon: <Edit className="h-4 w-4 mr-2" />,
-        status: "experimental",
+        status: "new",
       },
       {
         id: "quantityNode",
         label: "Quantity Takeoff",
         icon: <Calculator className="h-4 w-4 mr-2" />,
-        status: "wip",
+        status: "new",
       },
       {
         id: "classificationNode",
         label: "Classification",
         icon: <FileText className="h-4 w-4 mr-2" />,
-        status: "experimental",
+        status: "new",
       },
       {
         id: "relationshipNode",
@@ -144,7 +150,7 @@ export const nodeCategories = [
         id: "exportNode",
         label: "Export",
         icon: <Download className="h-4 w-4 mr-2" />,
-        status: "experimental",
+        status: "new",
       },
     ],
   },
@@ -231,21 +237,52 @@ export function Sidebar({ onLoadWorkflow, getFlowObject }: SidebarProps) {
     });
   };
 
+  // Helper function to get tooltip content for node status
+  const getStatusTooltipContent = (status: string): string | null => {
+    switch (status) {
+      case "wip":
+        return "WIP: This node is under active development and may be unstable or change significantly.";
+      case "new":
+        return "New: This node was recently added and is considered stable, but feedback is welcome.";
+      default:
+        return null;
+    }
+  };
+
   // Helper function to render node items, reused in expanded and collapsed views
-  const renderNodeItem = (node: any) => (
-    <div
-      key={node.id}
-      className="flex items-center justify-between rounded-md border border-dashed px-3 py-2 cursor-grab bg-background hover:bg-accent"
-      draggable
-      onDragStart={(event) => onDragStart(event, node.id)}
-    >
-      <div className="flex items-center">
-        {node.icon}
-        <span className="text-sm mr-1">{node.label}</span>
+  const renderNodeItem = (node: any) => {
+    const tooltipContent = getStatusTooltipContent(node.status);
+
+    return (
+      <div
+        key={node.id}
+        className="flex items-center justify-between rounded-md border border-dashed px-3 py-2 cursor-grab bg-background hover:bg-accent"
+        draggable
+        onDragStart={(event) => onDragStart(event, node.id)}
+      >
+        <div className="flex items-center">
+          {node.icon}
+          <span className="text-sm mr-1">{node.label}</span>
+        </div>
+        {tooltipContent ? (
+          <TooltipProvider delayDuration={100}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div> {/* Extra div to prevent TooltipTrigger interfering with flex layout */}
+                  <NodeStatusBadge status={node.status as any} />
+                </div>
+              </TooltipTrigger>
+              <TooltipContent side="top" align="center">
+                <p className="max-w-xs text-xs">{tooltipContent}</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        ) : (
+          <NodeStatusBadge status={node.status as any} />
+        )}
       </div>
-      <NodeStatusBadge status={node.status as any} />
-    </div>
-  );
+    );
+  };
 
   return (
     <>
@@ -342,24 +379,7 @@ export function Sidebar({ onLoadWorkflow, getFlowObject }: SidebarProps) {
                           {category.name}
                         </h3>
                         <div className="space-y-1">
-                          {category.nodes.map((node) => (
-                            <div
-                              key={node.id}
-                              className="flex items-center justify-between rounded-md border border-dashed px-3 py-2 cursor-grab bg-background hover:bg-accent"
-                              draggable
-                              onDragStart={(event) =>
-                                onDragStart(event, node.id)
-                              }
-                            >
-                              <div className="flex items-center">
-                                {node.icon}
-                                <span className="text-sm mr-1">
-                                  {node.label}
-                                </span>
-                              </div>
-                              <NodeStatusBadge status={node.status as any} />
-                            </div>
-                          ))}
+                          {category.nodes.map((node) => renderNodeItem(node))}
                         </div>
                       </div>
                     ))}

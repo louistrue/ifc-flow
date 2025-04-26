@@ -768,22 +768,45 @@ function FlowWithProvider() {
       const results = await executor.execute();
       setExecutionResults(results);
 
-      // Update node data with results
-      setNodes((nds) => {
-        const updatedNodes = nds.map((node) => {
-          if (results.has(node.id)) {
+      // Update node data using the executor's updated node list
+      const updatedNodesFromExecutor = executor.getUpdatedNodes();
+
+      // Apply updates to the nodes
+      setNodes(prev => {
+        // Create a completely new array to ensure React detects the changes
+        const newNodes = updatedNodesFromExecutor.map(executorNode => {
+          // Find the corresponding node in the current state
+          const currentNode = prev.find(n => n.id === executorNode.id);
+
+          // Special handling for watch nodes - they need to be forced to update
+          if (executorNode.type === 'watchNode') {
             return {
-              ...node,
+              ...executorNode,
+              // Add a timestamp to force React to see this as a new object
               data: {
-                ...node.data,
-                result: results.get(node.id),
-              },
+                ...executorNode.data,
+                // This ensures the data is treated as new even if content is the same
+                _forceUpdate: Date.now()
+              }
             };
           }
-          return node;
+
+          // For other nodes, preserve any UI state from the current node that isn't in the executor node
+          if (currentNode) {
+            return {
+              ...currentNode, // Keep position, etc.
+              data: {
+                ...currentNode.data, // Keep existing node data
+                ...executorNode.data, // Override with executor's updated data
+              }
+            };
+          }
+
+          // Fall back to the executor node data for any nodes we couldn't find in current state
+          return executorNode;
         });
 
-        return updatedNodes;
+        return newNodes;
       });
 
       setIsRunning(false);
@@ -959,7 +982,8 @@ function FlowWithProvider() {
     // Add to history
     const newNodes = nodes.filter((node) => !nodeIds.includes(node.id));
     const newEdges = edges.filter(
-      (edge) => !nodeIds.includes(edge.source) && !nodeIds.includes(edge.target)
+      (edge) =>
+        !nodeIds.includes(edge.source) && !nodeIds.includes(edge.target)
     );
 
     setHistory((prev) => [

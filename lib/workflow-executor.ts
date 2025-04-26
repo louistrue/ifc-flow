@@ -83,6 +83,11 @@ export class WorkflowExecutor {
     this.edges = edges;
   }
 
+  // Add getter for the final nodes list
+  public getUpdatedNodes(): any[] {
+    return this.nodes;
+  }
+
   public async execute(): Promise<Map<string, any>> {
     if (this.isRunning) {
       throw new Error("Workflow is already running");
@@ -170,8 +175,7 @@ export class WorkflowExecutor {
           } catch (err) {
             console.error("Error loading IFC file:", err);
             throw new Error(
-              `Failed to load IFC file: ${
-                err instanceof Error ? err.message : String(err)
+              `Failed to load IFC file: ${err instanceof Error ? err.message : String(err)
               }`
             );
           }
@@ -207,20 +211,40 @@ export class WorkflowExecutor {
         }
 
         // Make sure result is properly formatted with an elements array
+        // Preserve original metadata if we have to wrap an array
+        const originalModelData = result && typeof result === 'object' && !Array.isArray(result)
+          ? { id: result.id, name: result.name, schema: result.schema, project: result.project }
+          : { id: `model-${Date.now()}`, name: "Unknown IFC Model", schema: undefined, project: undefined };
+
         if (result && !result.elements && Array.isArray(result)) {
-          // If result is just an array of elements, wrap it in a model object
+          // If result is just an array of elements, wrap it in a model object, preserving name etc.
+          console.warn("IFC node result was an array, wrapping it in a model object.");
           result = {
-            id: `model-${Date.now()}`,
-            name: "IFC Model",
-            elements: result,
+            ...originalModelData, // Spread original metadata
+            elements: result, // The array is the elements
+            elementCounts: { unknown: result.length }, // Provide basic count
+            totalElements: result.length,
           };
-        } else if (result && !Array.isArray(result.elements)) {
+        } else if (result && typeof result === 'object' && !Array.isArray(result.elements)) {
           // If elements is not an array, initialize it as empty array
           result.elements = result.elements || [];
+          // Ensure other metadata is present from originalModelData if missing in result
+          result.name = result.name || originalModelData.name;
+          result.id = result.id || originalModelData.id;
+          result.schema = result.schema || originalModelData.schema;
+          result.project = result.project || originalModelData.project;
+        } else if (!result) {
+          // Handle cases where result might be null/undefined
+          result = {
+            ...originalModelData,
+            name: "No IFC Data",
+            elements: [],
+            errorMessage: "No IFC data processed."
+          };
         }
 
         console.log(
-          `IFC node processed with ${result.elements?.length || 0} elements`
+          `IFC node processed with ${result.elements?.length || 0} elements named '${result.name}'` // Log name too
         );
         break;
 
@@ -282,17 +306,85 @@ export class WorkflowExecutor {
         break;
 
       case "quantityNode":
-        // Extract quantities
+        // Extract quantities via worker
         if (!inputValues.input) {
           console.warn(`No input provided to quantity node ${nodeId}`);
-          result = { Total: 0 };
+          // Return a properly structured empty result that the watchNode can display safely
+          result = {
+            groups: { "Error": 0 },
+            unit: "",
+            total: 0,
+            error: "No input data available"
+          };
         } else {
-          result = extractQuantities(
-            inputValues.input,
-            node.data.properties?.quantityType || "area",
-            node.data.properties?.groupBy || "none",
-            node.data.properties?.unit || ""
-          );
+          // The input should be the IfcModel object from the previous node
+          const modelInput = inputValues.input as IfcModel;
+
+          // Validate input has necessary properties for the worker call
+          if (!modelInput || !modelInput.elements || !modelInput.name) {
+            console.error("Invalid input to quantityNode: Missing model, elements, or name.", modelInput);
+            // Return a properly structured empty result with error message
+            result = {
+              groups: { "Invalid Model": 0 },
+              unit: "",
+              total: 0,
+              error: "Invalid input model"
+            };
+          } else {
+            try {
+              // Get quantityType and groupBy from node properties with defaults
+              const quantityType = node.data.properties?.quantityType || "area";
+              const groupBy = node.data.properties?.groupBy || "none";
+
+              // Store the current settings back to the node data to ensure they persist
+              // This is the key fix - we persist these values by updating the node data
+              this.updateNodeDataInList(nodeId, {
+                ...node.data,
+                properties: {
+                  ...node.data.properties,
+                  quantityType: quantityType,
+                  groupBy: groupBy
+                }
+              });
+
+              // Await the async call to the worker via extractQuantities
+              result = await extractQuantities(
+                modelInput, // Pass the full model object
+                quantityType,
+                groupBy,
+                undefined, // Placeholder for onProgress callback (optional)
+                // --- Pass the callback to update node data with messageId ---
+                (messageId: string) => {
+                  // Update the node data, but keep our property settings
+                  this.updateNodeDataInList(nodeId, {
+                    ...node.data,
+                    messageId: messageId,
+                    properties: {
+                      ...node.data.properties,
+                      quantityType: quantityType,
+                      groupBy: groupBy
+                    }
+                  });
+                  console.log(`Stored messageId ${messageId} for quantity node ${nodeId}`);
+                }
+                // ---------------------------------------------------------
+              );
+
+              // Add the groupBy property to the result
+              if (result && typeof result === 'object') {
+                (result as any).groupBy = groupBy;
+              }
+            } catch (error) {
+              console.error(`Error during quantity extraction for node ${nodeId}:`, error);
+              // Return a properly structured error result that won't crash the UI
+              result = {
+                groups: { "Error": 0 },
+                unit: "",
+                total: 0,
+                error: error instanceof Error ? error.message : String(error)
+              };
+            }
+          }
         }
         break;
 
@@ -551,7 +643,14 @@ export class WorkflowExecutor {
               inputType = "propertyResults";
               itemCount = elementsWithProperty.length;
             }
-          } else {
+          }
+          // ADD CHECK: Check if this is coming from a quantity node
+          else if (processedData.groups && typeof processedData.unit === 'string' && typeof processedData.total === 'number') {
+            inputType = "quantityResults";
+            itemCount = Object.keys(processedData.groups).length; // Count the number of groups
+          }
+          // Fallback for generic objects
+          else {
             inputType = "object";
             itemCount = Object.keys(processedData).length;
           }

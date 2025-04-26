@@ -2,7 +2,7 @@
 
 import type React from "react";
 
-import { useCallback, useRef } from "react";
+import { useCallback, useRef, useEffect } from "react";
 import ReactFlow, {
   Background,
   Controls,
@@ -166,6 +166,95 @@ export function FlowCanvas({
     },
     [onConnect]
   );
+
+  // --- Listen for quantitiesExtracted messages from the worker and update nodes ---
+  useEffect(() => {
+    // You may need to import or access your worker instance here
+    // For this example, we'll assume a global window.ifcWorker exists
+    const worker = (window as any).ifcWorker;
+    if (!worker) return;
+
+    const handler = (event: MessageEvent) => {
+      // Worker now sends { type: "quantityResults", messageId, data: { groups, unit, total } }
+      const { type, messageId, data: quantityData } = event.data;
+
+      if (type === "quantityResults") {
+        // Find the node that requested this extraction (by messageId)
+        reactFlowInstance.setNodes((nds: any[]) => {
+          // First find the quantity node to get its groupBy property
+          let groupByValue = "none";
+          const sourceNode = nds.find(node =>
+            node.data && (node.data.messageId === messageId || node.id === messageId)
+          );
+
+          if (sourceNode && sourceNode.data?.properties?.groupBy) {
+            groupByValue = sourceNode.data.properties.groupBy;
+          }
+
+          // First find and update the quantity node
+          const updatedNodes = nds.map((node) => {
+            // We'll assume the node's data has a messageId or you can match by node.id
+            if (
+              node.data &&
+              (node.data.messageId === messageId || node.id === messageId)
+            ) {
+              // Add the groupBy to the quantity data
+              const enhancedQuantityData = {
+                ...quantityData,
+                groupBy: groupByValue
+              };
+
+              // Update the quantity node
+              return {
+                ...node,
+                data: {
+                  ...node.data,
+                  inputData: {
+                    type: "quantityResults",
+                    value: enhancedQuantityData, // Use the enhanced data with groupBy
+                  },
+                },
+              };
+            }
+            return node;
+          });
+
+          // Now find ALL watch nodes and update them with a forceUpdate flag
+          // This ensures they re-render even if React doesn't detect the change
+          return updatedNodes.map(node => {
+            if (node.type === 'watchNode') {
+              // Check if this watch node might be affected by the quantity node update
+              // by looking for connections in the edges
+              const mightBeConnected = edges.some(edge =>
+                (edge.source === sourceNode?.id && edge.target === node.id) ||
+                (node.data?.inputData?.type === 'quantityResults')
+              );
+
+              if (mightBeConnected) {
+                // For potentially affected nodes, force an update
+                return {
+                  ...node,
+                  data: {
+                    ...node.data,
+                    _forceUpdate: Date.now(), // Add a timestamp to force re-render
+                    _watchUpdateKey: `watch-update-${Date.now()}-${Math.random()}` // Add a unique key that changes
+                  }
+                };
+              }
+            }
+            return node;
+          });
+        });
+
+        toast({
+          title: "Quantities extracted",
+          description: `Received ${Object.keys(quantityData.groups).length} groups (Unit: ${quantityData.unit || 'N/A'})`,
+        });
+      }
+    };
+    worker.addEventListener("message", handler);
+    return () => worker.removeEventListener("message", handler);
+  }, [reactFlowInstance, toast, edges]);
 
   return (
     <div className="flex-1 h-full relative" ref={reactFlowWrapper}>
