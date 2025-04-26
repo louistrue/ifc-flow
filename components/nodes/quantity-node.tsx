@@ -10,7 +10,7 @@ export const QuantityNode = memo(({ data, isConnectable }: NodeProps<QuantityNod
     <div className="bg-white dark:bg-gray-800 border-2 border-amber-500 dark:border-amber-400 rounded-md w-48 shadow-md">
       <div className="bg-amber-500 text-white px-3 py-1 flex items-center gap-2">
         <Calculator className="h-4 w-4" />
-        <div className="text-sm font-medium truncate">{data.label}</div>
+        <div className="text-sm font-medium truncate">{data.label || "Quantity Take-Off"}</div>
       </div>
       <div className="p-3 text-xs">
         <div className="space-y-1">
@@ -24,7 +24,7 @@ export const QuantityNode = memo(({ data, isConnectable }: NodeProps<QuantityNod
           </div>
           <div className="flex justify-between">
             <span>Unit:</span>
-            <span className="font-medium">{data.properties?.unit || "m²"}</span>
+            <span className="font-medium text-gray-500 italic">Auto (from IFC)</span>
           </div>
         </div>
       </div>

@@ -2,7 +2,7 @@
 
 import type React from "react";
 
-import { useCallback, useRef } from "react";
+import { useCallback, useRef, useEffect } from "react";
 import ReactFlow, {
   Background,
   Controls,
@@ -166,6 +166,68 @@ export function FlowCanvas({
     },
     [onConnect]
   );
+
+  // --- Listen for quantitiesExtracted messages from the worker and update nodes ---
+  useEffect(() => {
+    // You may need to import or access your worker instance here
+    // For this example, we'll assume a global window.ifcWorker exists
+    const worker = (window as any).ifcWorker;
+    if (!worker) return;
+
+    const handler = (event: MessageEvent) => {
+      // Worker now sends { type: "quantityResults", messageId, data: { groups, unit, total } }
+      const { type, messageId, data: quantityData } = event.data;
+
+      if (type === "quantityResults") {
+        // Find the node that requested this extraction (by messageId)
+        reactFlowInstance.setNodes((nds: any[]) => {
+          // First find and update the quantity node
+          const updatedNodes = nds.map((node) => {
+            // We'll assume the node's data has a messageId or you can match by node.id
+            if (
+              node.data &&
+              (node.data.messageId === messageId || node.id === messageId)
+            ) {
+              // Update the quantity node
+              return {
+                ...node,
+                data: {
+                  ...node.data,
+                  inputData: {
+                    type: "quantityResults",
+                    value: quantityData, // Use the structured data directly
+                  },
+                },
+              };
+            }
+            return node;
+          });
+
+          // Now find ALL watch nodes and update them with a forceUpdate flag
+          // This ensures they re-render even if React doesn't detect the change
+          return updatedNodes.map(node => {
+            if (node.type === 'watchNode') {
+              return {
+                ...node,
+                data: {
+                  ...node.data,
+                  _forceUpdate: Date.now() // Add a timestamp to force re-render
+                }
+              };
+            }
+            return node;
+          });
+        });
+
+        toast({
+          title: "Quantities extracted",
+          description: `Received ${Object.keys(quantityData.groups).length} groups (Unit: ${quantityData.unit || 'N/A'})`,
+        });
+      }
+    };
+    worker.addEventListener("message", handler);
+    return () => worker.removeEventListener("message", handler);
+  }, [reactFlowInstance, toast]);
 
   return (
     <div className="flex-1 h-full relative" ref={reactFlowWrapper}>

@@ -140,6 +140,18 @@ export async function initializeWorker(): Promise<void> {
           workerPromiseResolvers.get(messageId)!.resolve(data.elements || []);
           workerPromiseResolvers.delete(messageId);
         }
+      } else if (type === "extractQuantities") {
+        console.log("Received extractQuantities message");
+        if (messageId && workerPromiseResolvers.has(messageId)) {
+          workerPromiseResolvers.get(messageId)!.resolve(data);
+          workerPromiseResolvers.delete(messageId);
+        }
+      } else if (type === "quantityResults") {
+        console.log("Received quantity results:", data);
+        if (messageId && workerPromiseResolvers.has(messageId)) {
+          workerPromiseResolvers.get(messageId)!.resolve(data.data);
+          workerPromiseResolvers.delete(messageId);
+        }
       }
       // Progress messages don't resolve promises
     };
@@ -168,8 +180,7 @@ export async function initializeWorker(): Promise<void> {
   } catch (err) {
     console.error("Error initializing worker:", err);
     throw new Error(
-      `Failed to initialize worker: ${
-        err instanceof Error ? err.message : String(err)
+      `Failed to initialize worker: ${err instanceof Error ? err.message : String(err)
       }`
     );
   }
@@ -348,8 +359,7 @@ export async function loadIfcFile(
   } catch (err) {
     console.error("Error loading IFC file:", err);
     throw new Error(
-      `Failed to load IFC file: ${
-        err instanceof Error ? err.message : String(err)
+      `Failed to load IFC file: ${err instanceof Error ? err.message : String(err)
       }`
     );
   }
@@ -362,8 +372,7 @@ export function extractGeometry(
   includeOpenings = true
 ): IfcElement[] {
   console.log(
-    `Extracting geometry (Standard): Type=${elementType}, Openings=${includeOpenings}, Input Elements=${
-      model?.elements?.length || 0
+    `Extracting geometry (Standard): Type=${elementType}, Openings=${includeOpenings}, Input Elements=${model?.elements?.length || 0
     }`
   );
 
@@ -543,8 +552,7 @@ export async function extractGeometryWithGeom(
   } catch (error) {
     console.error("Error extracting geometry with GEOM:", error);
     throw new Error(
-      `Failed to extract geometry: ${
-        error instanceof Error ? error.message : String(error)
+      `Failed to extract geometry: ${error instanceof Error ? error.message : String(error)
       }`
     );
   }
@@ -650,193 +658,156 @@ export function transformElements(
   }));
 }
 
-// Quantity extraction functions
-export function extractQuantities(
-  elements: IfcElement[],
+// Define a new return type for quantities
+export interface QuantityResults {
+  groups: Record<string, number>;
+  unit: string;
+  total: number;
+}
+
+// Quantity extraction functions - NOW ASYNC and interacts with worker
+export async function extractQuantities(
+  model: IfcModel, // Pass the full model to get filename and elements
   quantityType = "area",
   groupBy = "none",
-  unit = ""
-): Record<string, number> {
-  console.log("Extracting quantities:", quantityType, groupBy);
+  // unit parameter is removed, worker will determine it
+  onProgress?: (progress: number, message?: string) => void,
+  // ADDED: Callback to update the node with the messageId
+  updateNodeCallback?: (messageId: string) => void
+): Promise<QuantityResults> {
+  console.log("Requesting quantity extraction from worker:", quantityType, groupBy, model.name);
 
-  // Add a check for undefined or empty elements
-  if (!elements || elements.length === 0) {
-    console.warn("No elements for quantity extraction");
-    return { Total: 0 };
+  // Ensure we have elements and a filename
+  if (!model || !model.elements || model.elements.length === 0 || !model.name) {
+    console.warn(
+      "No elements or model name provided for quantity extraction by worker"
+    );
+    // Return default empty structure
+    return { groups: { Total: 0 }, unit: "", total: 0 };
   }
 
-  // Default units by quantity type
-  const defaultUnits: Record<string, string> = {
-    length: "m",
-    area: "m²",
-    volume: "m³",
-    count: "",
-    weight: "kg",
-  };
-
-  const finalUnit =
-    unit || defaultUnits[quantityType as keyof typeof defaultUnits] || "";
-
-  // Create groups for the results
-  const groups: Record<string, number> = {};
-
-  // If not grouping, just calculate total
-  if (groupBy === "none") {
-    let total = 0;
-
-    elements.forEach((element) => {
-      // Look for this quantity in the element's quantity sets
-      if (element.qtos) {
-        for (const qtoSet in element.qtos) {
-          const qto = element.qtos[qtoSet];
-
-          // Look for quantity properties based on quantityType
-          let quantityValue = 0;
-
-          switch (quantityType) {
-            case "length":
-              quantityValue =
-                qto.Length || qto.Height || qto.Width || qto.Depth || 0;
-              break;
-            case "area":
-              quantityValue =
-                qto.Area ||
-                qto.NetArea ||
-                qto.GrossArea ||
-                qto.NetFloorArea ||
-                qto.GrossFloorArea ||
-                0;
-              break;
-            case "volume":
-              quantityValue =
-                qto.Volume || qto.NetVolume || qto.GrossVolume || 0;
-              break;
-            case "weight":
-              quantityValue =
-                qto.Weight || qto.NetWeight || qto.GrossWeight || 0;
-              break;
-            case "count":
-              quantityValue = 1; // Just count the elements
-              break;
-          }
-
-          if (quantityValue) {
-            total += Number(quantityValue);
-            break; // Found a value, no need to check other qto sets
-          }
-        }
-      } else {
-        // If no quantity sets found, use default values
-        const defaultValues: Record<string, number> = {
-          length: 3.0,
-          area: 10.0,
-          volume: 8.0,
-          weight: 500,
-          count: 1,
-        };
-
-        total += defaultValues[quantityType as keyof typeof defaultValues] || 0;
-      }
-    });
-
-    return { Total: parseFloat(total.toFixed(2)) };
+  // Ensure worker is initialized
+  await initializeWorker();
+  if (!ifcWorker) {
+    throw new Error("IFC worker is not available for quantity extraction");
   }
 
-  // If grouping, calculate per group
-  elements.forEach((element) => {
-    let groupKey = "";
+  // Prepare data for the worker
+  // Sending expressIds is more efficient than sending potentially large element objects
+  const elementIds = model.elements.map((el) => el.expressId);
 
-    // Determine group key based on groupBy parameter
-    switch (groupBy) {
-      case "type":
-        groupKey = element.type.replace("IFC", "");
-        break;
-      case "material":
-        // Look for material information in properties or psets
-        if (element.properties.Material) {
-          groupKey = element.properties.Material;
-        } else if (element.psets && element.psets["Pset_MaterialCommon"]) {
-          groupKey = element.psets["Pset_MaterialCommon"].Name || "Unknown";
-        } else {
-          groupKey = "Unknown Material";
-        }
-        break;
-      case "level":
-        // Look for level information
-        if (element.properties.Level) {
-          groupKey = element.properties.Level;
-        } else if (element.properties.BuildingStorey) {
-          groupKey = element.properties.BuildingStorey;
-        } else {
-          groupKey = "Unknown Level";
-        }
-        break;
-      default:
-        groupKey = "Unknown";
-    }
+  // --- Get the ArrayBuffer for the file ---
+  // Get the cached File object
+  const file = getIfcFile(model.name);
+  if (!file) {
+    throw new Error(`Could not retrieve cached file object for ${model.name}`);
+  }
 
-    // Initialize group if not exists
-    if (!groups[groupKey]) {
-      groups[groupKey] = 0;
-    }
+  // Read the ArrayBuffer from the File
+  const arrayBuffer = await file.arrayBuffer();
+  console.log(`Got arrayBuffer for quantity extraction: ${arrayBuffer.byteLength} bytes`);
+  // ----------------------------------------
 
-    // Add to group total
-    let quantityValue = 0;
+  try {
+    // Create unique message ID
+    const messageId = `quantity_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 
-    // Look for this quantity in the element's quantity sets
-    if (element.qtos) {
-      for (const qtoSet in element.qtos) {
-        const qto = element.qtos[qtoSet];
-
-        // Look for quantity properties based on quantityType
-        switch (quantityType) {
-          case "length":
-            quantityValue =
-              qto.Length || qto.Height || qto.Width || qto.Depth || 0;
-            break;
-          case "area":
-            quantityValue = qto.Area || qto.NetArea || qto.GrossArea || 0;
-            break;
-          case "volume":
-            quantityValue = qto.Volume || qto.NetVolume || qto.GrossVolume || 0;
-            break;
-          case "weight":
-            quantityValue = qto.Weight || qto.NetWeight || qto.GrossWeight || 0;
-            break;
-          case "count":
-            quantityValue = 1; // Just count the elements
-            break;
-        }
-
-        if (quantityValue) {
-          break; // Found a value, no need to check other qto sets
-        }
+    // --- Call the callback to update the node data BEFORE sending the message ---
+    if (updateNodeCallback) {
+      try {
+        updateNodeCallback(messageId);
+      } catch (e) {
+        console.error("Error in updateNodeCallback:", e);
       }
     }
+    // -----------------------------------------------------------------------
 
-    // If no quantity found, use defaults
-    if (!quantityValue) {
-      const defaultValues: Record<string, number> = {
-        length: 3.0,
-        area: 10.0,
-        volume: 8.0,
-        weight: 500,
-        count: 1,
+    // Setup promise for worker response
+    const resultPromise = new Promise<QuantityResults>((resolve, reject) => {
+      workerPromiseResolvers.set(messageId, { resolve, reject });
+
+      // Optional progress handler integration if worker sends progress for quantities
+      const progressHandler = (event: MessageEvent) => {
+        const data = event.data;
+        if (
+          data.type === "progress" &&
+          data.messageId === messageId &&
+          onProgress
+        ) {
+          onProgress(data.percentage, data.message);
+        }
+      };
+      if (onProgress) ifcWorker!.addEventListener("message", progressHandler);
+
+      // Timeout for the worker response
+      const timeout = setTimeout(() => {
+        if (workerPromiseResolvers.has(messageId)) {
+          console.error(
+            "Worker did not respond to quantity extraction within timeout period"
+          );
+          reject(
+            new Error(
+              "Worker timeout during quantity extraction"
+            )
+          );
+          workerPromiseResolvers.delete(messageId);
+          if (onProgress) ifcWorker!.removeEventListener("message", progressHandler);
+        }
+      }, 60000); // 60 second timeout
+
+      // Define cleanup actions
+      const cleanup = () => {
+        clearTimeout(timeout);
+        if (onProgress) ifcWorker!.removeEventListener("message", progressHandler);
+        workerPromiseResolvers.delete(messageId);
       };
 
-      quantityValue =
-        defaultValues[quantityType as keyof typeof defaultValues] || 0;
-    }
+      // Update resolver to include cleanup
+      workerPromiseResolvers.set(messageId, {
+        resolve: (data: QuantityResults) => {
+          cleanup();
+          resolve(data);
+        },
+        reject: (error: any) => {
+          cleanup();
+          reject(error);
+        },
+      });
 
-    groups[groupKey] += Number(quantityValue);
-  });
+      console.log("Sending quantity extraction request to worker", {
+        messageId,
+        filename: model.name, // Worker needs filename to use correct file context
+        elementIds,
+        quantityType,
+        groupBy,
+        arrayBuffer: "ArrayBuffer" // Log without stringify
+      });
 
-  // Round all values
-  Object.keys(groups).forEach((key) => {
-    groups[key] = parseFloat(groups[key].toFixed(2));
-  });
+      // Send the request to the worker
+      ifcWorker!.postMessage({
+        action: "extractQuantities", // New action type
+        messageId,
+        data: {
+          filename: model.name,
+          elementIds,
+          quantityType,
+          groupBy,
+          arrayBuffer, // ADDED: Send the buffer
+        },
+      }, [arrayBuffer]); // ADDED: Mark buffer as transferable
+    });
 
-  return groups;
+    // Await the actual results from the worker
+    const results = await resultPromise;
+    console.log("Received quantity results from worker:", results);
+    return results;
+
+  } catch (error) {
+    console.error("Error during quantity extraction via worker:", error);
+    throw new Error(
+      `Quantity extraction failed: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
 }
 
 // Function to manage properties on elements

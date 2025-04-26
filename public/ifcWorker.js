@@ -119,6 +119,11 @@ self.onmessage = async (event) => {
         await handleExtractGeometry({ ...data, messageId });
         break;
 
+      case "extractQuantities":
+        console.log("Starting quantity extraction...", data);
+        await handleExtractQuantities(data, messageId);
+        break;
+
       default:
         throw new Error(`Unknown action: ${action}`);
     }
@@ -1538,7 +1543,7 @@ except Exception as e:
       if (mountSuccessful) {
         try {
           pyodide.FS.unlink(VFS_FULL_PATH);
-        } catch (e) {}
+        } catch (e) { }
       }
 
       // Clear any progress interval that might be running
@@ -1559,7 +1564,7 @@ except Exception as e:
     if (typeof mountSuccessful !== "undefined" && mountSuccessful) {
       try {
         if (pyodide) pyodide.FS.unlink(VFS_FULL_PATH);
-      } catch (e) {}
+      } catch (e) { }
     }
 
     // Clear any progress interval that might be running
@@ -1570,6 +1575,246 @@ except Exception as e:
     self.postMessage({
       type: "error",
       message: `Geometry extraction failed: ${errorMessage}`,
+      messageId,
+    });
+  }
+}
+
+// Add the new function
+async function handleExtractQuantities(data, messageId) {
+  try {
+    self.postMessage({
+      type: "progress",
+      message: "Starting quantity extraction...",
+      percentage: 10,
+      messageId,
+    });
+
+    await initPyodide();
+
+    // Prepare parameters
+    const { elementIds = [], quantityType = "area", groupBy = "none", arrayBuffer } = data;
+    const quantityTypeLower = quantityType.toLowerCase();
+    const idsJson = JSON.stringify(elementIds);
+
+    // --- Write the file buffer to VFS --- 
+    if (!arrayBuffer || !(arrayBuffer instanceof ArrayBuffer)) {
+      throw new Error("ArrayBuffer for IFC file was not provided or is invalid.");
+    }
+    try {
+      console.log("Writing provided IFC data to model.ifc for quantity extraction...");
+      pyodide.FS.writeFile("model.ifc", new Uint8Array(arrayBuffer));
+      console.log("Successfully wrote model.ifc for quantity extraction.");
+    } catch (fsError) {
+      console.error("Error writing model.ifc to Pyodide filesystem:", fsError);
+      throw new Error(`Failed to prepare IFC file in VFS: ${fsError.message}`);
+    }
+    // -------------------------------------
+
+    // Create a namespace for Python execution
+    const namespace = pyodide.globals.get("dict")();
+    namespace.set("element_ids_json", idsJson);
+    namespace.set("quantity_type", quantityTypeLower);
+
+    // Python code for quantity extraction
+    const pythonCode = `
+import ifcopenshell
+import json
+import traceback
+import os
+
+try:
+    # Load the IFC file
+    if not os.path.exists('model.ifc'):
+        raise FileNotFoundError("The 'model.ifc' file does not exist in the virtual filesystem.")
+    ifc_file = ifcopenshell.open('model.ifc')
+
+    element_ids = json.loads(element_ids_json)
+    quantity_type = quantity_type.lower()
+    results = []
+    unit = None
+
+    # Helper: get unit for quantity type
+    def get_unit_for_quantity(ifc_file, quantity_type):
+        unit_type_map = {
+            "area": "AREAUNIT",
+            "volume": "VOLUMEUNIT",
+            "length": "LENGTHUNIT",
+            "count": "COUNTUNIT",
+        }
+        unit_type = unit_type_map.get(quantity_type)
+        project = ifc_file.by_type("IfcProject")[0]
+        units = getattr(getattr(project, "UnitsInContext", None), "Units", [])
+        for u in units:
+            if u.is_a("IfcSIUnit") and u.UnitType == unit_type:
+                prefix = getattr(u, "Prefix", None)
+                name = u.Name
+                return f"{prefix}{name}" if prefix else name
+            elif u.is_a("IfcConversionBasedUnit") and u.UnitType == unit_type:
+                return u.Name
+        return None
+
+    unit = get_unit_for_quantity(ifc_file, quantity_type)
+
+    # Helper: extract quantity from element
+    def extract_quantity(element, quantity_type):
+        # Try QTO first
+        for rel in getattr(element, "IsDefinedBy", []):
+            if rel.is_a("IfcRelDefinesByProperties"):
+                prop_def = rel.RelatingPropertyDefinition
+                if prop_def.is_a("IfcElementQuantity"):
+                    for q in getattr(prop_def, "Quantities", []):
+                        if quantity_type == "area" and q.is_a("IfcQuantityArea"):
+                            return getattr(q, "AreaValue", None)
+                        elif quantity_type == "volume" and q.is_a("IfcQuantityVolume"):
+                            return getattr(q, "VolumeValue", None)
+                        elif quantity_type == "length" and q.is_a("IfcQuantityLength"):
+                            return getattr(q, "LengthValue", None)
+        # Fallback: count as 1 if type is count
+        if quantity_type == "count":
+            return 1
+        return None
+
+    processed = 0
+    for eid in element_ids:
+        element = ifc_file.by_id(eid)
+        if not element:
+            continue
+        value = extract_quantity(element, quantity_type)
+        results.append({
+            "expressId": eid,
+            "quantity": value
+        })
+        processed += 1
+        if processed % 20 == 0:
+            progress = int(10 + 80 * processed / max(1, len(element_ids)))
+            # Progress update via namespace
+            globals()["progress_info"] = {"processed": processed, "total": len(element_ids), "percentage": progress}
+
+    # Final progress
+    globals()["progress_info"] = {"processed": processed, "total": len(element_ids), "percentage": 90}
+    result_json = json.dumps(results)
+    success = True
+    error_msg = None
+    error_trace = None
+except Exception as e:
+    result_json = json.dumps([])
+    unit = None
+    success = False
+    error_msg = str(e)
+    error_trace = traceback.format_exc()
+`;
+
+    // Progress updater
+    const progressUpdater = setInterval(() => {
+      try {
+        if (namespace.has("progress_info")) {
+          const progressInfo = namespace.get("progress_info");
+          if (progressInfo) {
+            self.postMessage({
+              type: "progress",
+              message: `Extracted ${progressInfo.processed}/${progressInfo.total} elements...`,
+              percentage: progressInfo.percentage,
+              messageId,
+            });
+          }
+        }
+      } catch (e) { }
+    }, 500);
+
+    // Run the Python code
+    await pyodide.runPythonAsync(pythonCode, { globals: namespace });
+    clearInterval(progressUpdater);
+
+    const success = namespace.get("success");
+    if (!success) {
+      const errorMsg = namespace.get("error_msg");
+      const errorTrace = namespace.get("error_trace");
+      throw new Error(`Python error: ${errorMsg}\n${errorTrace}`);
+    }
+
+    const resultJson = namespace.get("result_json");
+    const unit = namespace.get("unit");
+    const results = JSON.parse(resultJson);
+
+    namespace.destroy();
+
+    // --- Structure the results into QuantityResults format ---
+    const quantityResultsData = {
+      groups: results.reduce((acc, curr) => {
+        // Group based on the requested groupBy parameter
+        let key = 'All'; // Default for 'none' grouping
+
+        if (groupBy === 'type') {
+          // For 'type' grouping, use the element's type (IfcWall, IfcBeam, etc.)
+          // Get the element by ID from the loaded model
+          try {
+            const element = ifc_file.by_id(curr.expressId);
+            if (element && element.is_a) {
+              key = element.is_a();
+            }
+          } catch (e) {
+            console.error(`Error getting element type for expressId ${curr.expressId}:`, e);
+          }
+        }
+        else if (groupBy === 'level') {
+          // For 'level' grouping, try to find the building storey
+          try {
+            const element = ifc_file.by_id(curr.expressId);
+            let levelName = 'Unknown';
+
+            // Check for building storey relationship
+            if (element && element.id) {
+              // Try to find the container/storey for this element
+              for (const rel of ifc_file.by_type('IfcRelContainedInSpatialStructure')) {
+                if (rel.RelatedElements && Array.isArray(rel.RelatedElements)) {
+                  const isElementInRel = rel.RelatedElements.some(
+                    relElement => relElement.id() === element.id()
+                  );
+
+                  if (isElementInRel && rel.RelatingStructure && rel.RelatingStructure.is_a('IfcBuildingStorey')) {
+                    levelName = rel.RelatingStructure.Name || 'Unnamed Level';
+                    break;
+                  }
+                }
+              }
+            }
+            key = levelName;
+          } catch (e) {
+            console.error(`Error getting level for expressId ${curr.expressId}:`, e);
+          }
+        }
+
+        // Ensure quantity is a number before adding
+        const quantityValue = typeof curr.quantity === 'number' ? curr.quantity : 0;
+        acc[key] = (acc[key] || 0) + quantityValue;
+        return acc;
+      }, {}),
+      unit: unit || '', // Default unit if none found
+      total: results.reduce((sum, curr) => {
+        // Ensure quantity is a number before adding
+        const quantityValue = typeof curr.quantity === 'number' ? curr.quantity : 0;
+        return sum + quantityValue;
+      }, 0)
+    };
+    // ------------------------------------------------------
+
+    self.postMessage({
+      type: "progress",
+      message: "Quantity extraction complete!",
+      percentage: 100,
+      messageId,
+    });
+
+    self.postMessage({
+      type: "quantityResults",
+      messageId,
+      data: quantityResultsData,
+    });
+  } catch (error) {
+    self.postMessage({
+      type: "error",
+      message: `Error extracting quantities: ${error.message}`,
       messageId,
     });
   }
