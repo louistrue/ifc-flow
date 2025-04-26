@@ -1620,6 +1620,7 @@ async function handleExtractQuantities(data, messageId) {
     // Python code for quantity extraction
     const pythonCode = `
 import ifcopenshell
+import ifcopenshell.util.unit
 import json
 import traceback
 import os
@@ -1629,7 +1630,6 @@ try:
     if not os.path.exists('model.ifc'):
         raise FileNotFoundError("The 'model.ifc' file does not exist in the virtual filesystem.")
     
-    # First open the file to make it available for type lookup
     ifc_file = ifcopenshell.open('model.ifc')
     print(f"Loaded IFC file for quantity extraction")
     
@@ -1637,30 +1637,34 @@ try:
     quantity_type = quantity_type.lower()
     group_by_option = group_by.lower()
     
-    results = []
-    unit = None
+    unit_symbol = ""
     
-    # Helper: get unit for quantity type
-    def get_unit_for_quantity(ifc_file, quantity_type):
+    # Helper: get unit symbol for quantity type
+    def get_unit_symbol_for_quantity(ifc_file, quantity_type):
         unit_type_map = {
             "area": "AREAUNIT",
             "volume": "VOLUMEUNIT",
             "length": "LENGTHUNIT",
-            "count": "COUNTUNIT",
+            # No standard unit type for count
         }
         unit_type = unit_type_map.get(quantity_type)
-        project = ifc_file.by_type("IfcProject")[0]
-        units = getattr(getattr(project, "UnitsInContext", None), "Units", [])
-        for u in units:
-            if u.is_a("IfcSIUnit") and u.UnitType == unit_type:
-                prefix = getattr(u, "Prefix", None)
-                name = u.Name
-                return f"{prefix}{name}" if prefix else name
-            elif u.is_a("IfcConversionBasedUnit") and u.UnitType == unit_type:
-                return u.Name
-        return None
-    
-    unit = get_unit_for_quantity(ifc_file, quantity_type)
+        if not unit_type:
+            return "" # Return empty string for count or unknown types
+            
+        # Get the project unit entity
+        unit_entity = ifcopenshell.util.unit.get_project_unit(ifc_file, unit_type)
+        
+        if unit_entity:
+            # Get the symbol from the unit entity
+            return ifcopenshell.util.unit.get_unit_symbol(unit_entity)
+        else:
+            # Fallback if no project unit is defined
+            print(f"Warning: No default project unit found for {unit_type}")
+            return unit_type # Return the type name as fallback
+            
+    # Determine the unit symbol
+    unit_symbol = get_unit_symbol_for_quantity(ifc_file, quantity_type)
+    print(f"Determined unit symbol: {unit_symbol}")
     
     # Helper: extract quantity from element
     def extract_quantity(element, quantity_type):
@@ -1680,10 +1684,7 @@ try:
         if quantity_type == "count":
             return 1
         return None
-    
-    # Create a type lookup dictionary for faster access
-    type_lookup = {}
-    
+
     # Process elements and collect quantities
     processed = 0
     element_quantities = []
@@ -1694,14 +1695,12 @@ try:
             if not element:
                 continue
                 
-            # Get quantity value
             value = extract_quantity(element, quantity_type)
             if value is None:
-                continue  # Skip if no quantity found
-                
+                continue
+
             # Get grouping value based on chosen groupBy option
-            group_value = "All"  # Default group
-            
+            group_value = "All" 
             if group_by_option == "type":
                 # Use element type without Ifc prefix for readability
                 element_type = element.is_a()
@@ -1735,27 +1734,22 @@ try:
                 # Try to find material information
                 material_name = "Unknown"
                 
-                # Try relationships
                 for rel in ifc_file.by_type("IfcRelAssociatesMaterial"):
                     if not hasattr(rel, "RelatedObjects") or not rel.RelatedObjects:
                         continue
-                        
                     is_related = False
                     for related_obj in rel.RelatedObjects:
                         if related_obj.id() == eid:
                             is_related = True
                             break
-                            
                     if is_related and hasattr(rel, "RelatingMaterial"):
                         material = rel.RelatingMaterial
                         if material.is_a("IfcMaterial"):
                             material_name = getattr(material, "Name", "Unknown Material")
                         elif material.is_a("IfcMaterialList"):
-                            # Take the first material in the list
                             if material.Materials and len(material.Materials) > 0:
                                 material_name = getattr(material.Materials[0], "Name", "Unknown Material")
                         elif material.is_a("IfcMaterialLayerSetUsage") and hasattr(material, "ForLayerSet"):
-                            # Get first layer material name
                             layer_set = material.ForLayerSet
                             if hasattr(layer_set, "MaterialLayers") and layer_set.MaterialLayers:
                                 first_layer = layer_set.MaterialLayers[0]
@@ -1764,7 +1758,6 @@ try:
                         group_value = material_name
                         break
             
-            # Add to results array
             element_quantities.append({
                 "expressId": eid,
                 "quantity": value,
@@ -1774,7 +1767,6 @@ try:
             processed += 1
             if processed % 20 == 0:
                 progress = int(10 + 80 * processed / max(1, len(element_ids)))
-                # Progress update via namespace
                 globals()["progress_info"] = {"processed": processed, "total": len(element_ids), "percentage": progress}
         except Exception as elem_err:
             print(f"Error processing element {eid}: {elem_err}")
@@ -1782,32 +1774,24 @@ try:
     
     # Group the results by the selected groupBy option
     grouped_quantities = {}
-    
     for item in element_quantities:
         group = item["group"]
         quantity = item["quantity"]
-        
         if group not in grouped_quantities:
             grouped_quantities[group] = 0
-            
         grouped_quantities[group] += quantity
-    
-    # Ensure we always have at least one group
     if not grouped_quantities:
         grouped_quantities["All"] = 0
     
-    # Calculate total
     total_quantity = sum(grouped_quantities.values())
-    
-    # Final progress
     globals()["progress_info"] = {"processed": processed, "total": len(element_ids), "percentage": 90}
     
-    # Create the result object
+    # Create the result object using the unit_symbol
     result = {
         "groups": grouped_quantities,
-        "unit": unit or "",
+        "unit": unit_symbol,  # Use the determined symbol here
         "total": total_quantity,
-        "groupBy": group_by_option  # Include the groupBy option in results
+        "groupBy": group_by_option
     }
     
     result_json = json.dumps(result)

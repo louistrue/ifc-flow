@@ -68,3 +68,30 @@ function getMockQuantity(factor: number, type: string): number {
   return Number((base[type] * factor * randomFactor).toFixed(2))
 }
 
+/**
+ * Formats common unit symbols for display.
+ * E.g., converts "m2" to "m²", "m3" to "m³", etc.
+ * 
+ * @param unitSymbol The raw unit symbol string.
+ * @returns A formatted unit symbol string.
+ */
+export function formatUnitSymbol(unitSymbol: string | null | undefined): string {
+  if (!unitSymbol) {
+    return "";
+  }
+
+  // Handle common cases with superscripts
+  let formatted = unitSymbol
+    .replace(/m2/gi, "m²") // Square meters
+    .replace(/m3/gi, "m³") // Cubic meters
+    .replace(/ft2/gi, "ft²") // Square feet
+    .replace(/ft3/gi, "ft³") // Cubic feet
+    .replace(/sq.?ft/gi, "ft²") // Alternative square feet
+    .replace(/cu.?ft/gi, "ft³") // Alternative cubic feet
+    .replace(/deg/gi, "°");   // Degrees
+
+  // Add more replacements as needed based on common IFC units
+
+  return formatted;
+}
+

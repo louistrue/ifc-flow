@@ -422,8 +422,14 @@ export const WatchNode = memo(
 
       const groupEntries = Object.entries(groups || {});
 
-      // Helper to format quantity values nicely
-      const formatQuantity = (value: number): string => {
+      // Helper to format quantity values nicely, considering the type
+      const formatQuantity = (value: number, type: string | undefined): string => {
+        // Handle count separately - always show as integer
+        if (type === "count") {
+          return value.toFixed(0);
+        }
+
+        // Existing formatting for other types
         if (value >= 1000000) {
           return `${(value / 1000000).toFixed(2)}M`;
         } else if (value >= 1000) {
@@ -431,6 +437,12 @@ export const WatchNode = memo(
         } else {
           return value.toFixed(2);
         }
+      };
+
+      // Helper function to format unit symbols with superscripts
+      const formatUnitSymbol = (symbol: string | null | undefined): string => {
+        if (!symbol) return "";
+        return symbol.replace('2', '²').replace('3', '³');
       };
 
       // Helper to get color based on group value percentage of total
@@ -480,7 +492,7 @@ export const WatchNode = memo(
             </div>
             <div className="flex justify-between gap-4">
               <span className="text-gray-500 dark:text-gray-400">Value:</span>
-              <span>{value.toFixed(2)} {unit}</span>
+              <span>{inputData?.value?.quantityType === 'count' ? value.toFixed(0) : value.toFixed(2)} {formatUnitSymbol(unit)}</span>
             </div>
             <div className="flex justify-between gap-4">
               <span className="text-gray-500 dark:text-gray-400">Percentage:</span>
@@ -546,7 +558,7 @@ export const WatchNode = memo(
               )}
             </span>
             <span className="text-xs font-medium">
-              {unit}
+              {formatUnitSymbol(unit)}
             </span>
           </div>
 
@@ -613,7 +625,7 @@ export const WatchNode = memo(
                 <div key={i} className="space-y-0.5">
                   <div className="flex justify-between text-xs">
                     <span className="truncate max-w-[150px]" title={key}>{key}</span>
-                    <span className="font-medium">{formatQuantity(value)} {unit}</span>
+                    <span className="font-medium">{formatQuantity(value, inputData.type)} {formatUnitSymbol(unit)}</span>
                   </div>
                   <div className="w-full bg-gray-100 dark:bg-gray-700 rounded-full h-1.5">
                     <div
@@ -642,7 +654,7 @@ export const WatchNode = memo(
                     <tr key={i} className={`${i % 2 === 0 ? 'bg-gray-50 dark:bg-gray-700' : ''}`}>
                       <td className="p-1 border-t border-gray-200 dark:border-gray-600">{key}</td>
                       <td className="p-1 border-t border-gray-200 dark:border-gray-600 text-right">
-                        {value.toFixed(2)} {unit}
+                        {inputData?.value?.quantityType === 'count' ? value.toFixed(0) : value.toFixed(2)} {formatUnitSymbol(unit)}
                       </td>
                       <td className="p-1 border-t border-gray-200 dark:border-gray-600 text-right">
                         {((value / total) * 100).toFixed(1)}%
@@ -654,7 +666,7 @@ export const WatchNode = memo(
                   <tr className="border-t-2 border-gray-300 dark:border-gray-500 font-medium">
                     <td className="p-1">Total</td>
                     <td className="p-1 text-right" colSpan={2}>
-                      {total.toFixed(2)} {unit}
+                      {inputData?.value?.quantityType === 'count' ? total.toFixed(0) : total.toFixed(2)} {formatUnitSymbol(unit)}
                     </td>
                   </tr>
                 </tfoot>
@@ -665,7 +677,7 @@ export const WatchNode = memo(
           {/* Total value as a large number */}
           <div className="flex justify-between items-end pt-1 border-t border-gray-200 dark:border-gray-600">
             <span className="text-xs text-gray-500 dark:text-gray-400">Total</span>
-            <span className="text-xl font-bold">{formatQuantity(total)} <span className="text-xs">{unit}</span></span>
+            <span className="text-xl font-bold">{formatQuantity(total, inputData.type)} <span className="text-xs">{formatUnitSymbol(unit)}</span></span>
           </div>
         </div>
       );
