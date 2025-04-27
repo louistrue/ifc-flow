@@ -14,6 +14,7 @@ import {
 import { formatPropertyValue } from "@/lib/ifc/property-utils";
 import React from "react";
 import { PieChart, Pie, Cell, Legend, Tooltip, ResponsiveContainer } from "recharts";
+import { ClashResults } from "@/components/clash-results";
 
 // Define proper types
 interface WatchNodeData {
@@ -683,6 +684,25 @@ export const WatchNode = memo(
       );
     };
 
+    const renderClashResults = () => {
+      if (inputData.type !== "clashResults" || !inputData.value) {
+        return null;
+      }
+
+      // Use the ClashResults component to display clash detection results
+      return (
+        <div className="space-y-2">
+          <ClashResults
+            results={inputData.value}
+            onHighlightClash={(clash) => {
+              console.log("Highlight clash:", clash);
+              // In a full implementation, this would focus the camera on the clash
+            }}
+          />
+        </div>
+      );
+    };
+
     // Render the data content based on input type and display mode
     const renderData = (): JSX.Element | null => {
       if (!inputData.value) {
@@ -691,6 +711,11 @@ export const WatchNode = memo(
             No data available
           </div>
         );
+      }
+
+      // Special handling for clash results
+      if (inputData.type === "clashResults") {
+        return renderClashResults();
       }
 
       // Special handling for property results

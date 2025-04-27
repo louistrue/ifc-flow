@@ -11,6 +11,20 @@ export interface ViewerOptions {
   highlightColor?: string;
 }
 
+// Interface for clash results
+interface ClashResultDetail {
+  id: string;
+  element1Id: number;
+  element2Id: number;
+  boxIntersection?: boolean; // Indicate if it's just a box clash
+  // Add intersection points/volume later if needed
+}
+
+interface ClashResults {
+  clashes: number;
+  details: ClashResultDetail[];
+}
+
 // The main viewer class that handles 3D rendering
 export class IfcViewer {
   private scene: THREE.Scene;
@@ -26,6 +40,9 @@ export class IfcViewer {
   private animationFrameId: number | null = null;
   // Material cache
   private materials: Record<string, THREE.Material> = {};
+
+  // New map to store meshes by expressID
+  private elementMeshMap: Map<number, THREE.Object3D> = new Map();
 
   constructor(
     private container: HTMLElement,
@@ -96,6 +113,11 @@ export class IfcViewer {
     window.addEventListener("resize", this.handleResize);
   }
 
+  // Public method to access the scene
+  public getScene(): THREE.Scene {
+    return this.scene;
+  }
+
   // Initialize IfcAPI for web-ifc
   async initIfcAPI(): Promise<IfcAPI> {
     if (!this.ifcAPI) {
@@ -141,8 +163,13 @@ export class IfcViewer {
 
       for (let i = 0; i < numFlatMeshes; i++) {
         const flatMesh: FlatMesh = flatMeshVector.get(i); // Get FlatMesh handle
+        const elementExpressId = flatMesh.expressID; // Get the ID of the element this mesh belongs to
         const placedGeometryVector: Vector<PlacedGeometry> = flatMesh.geometries;
         const numPlacedGeometries = placedGeometryVector.size();
+
+        // Create a group for this element if it has multiple geometries
+        const elementGroup = new THREE.Group();
+        elementGroup.userData = { expressID: elementExpressId }; // Store ID on the group
 
         for (let j = 0; j < numPlacedGeometries; j++) {
           const placedGeometry: PlacedGeometry = placedGeometryVector.get(j); // Get PlacedGeometry handle
@@ -154,7 +181,7 @@ export class IfcViewer {
             if (threeMesh) {
               // Associate the mesh with the original product ID if needed for picking/highlighting later
               // threeMesh.userData = { expressID: flatMesh.expressID };
-              this.ifcModelGroup.add(threeMesh);
+              elementGroup.add(threeMesh);
             }
             geometryHandle.delete(); // Clean up geometry handle
           } else {
@@ -162,6 +189,12 @@ export class IfcViewer {
           }
           // PlacedGeometry might not have a delete method, check API if needed
           // placedGeometry.delete();
+        }
+
+        if (elementGroup.children.length > 0) {
+          this.ifcModelGroup.add(elementGroup);
+          // Map the element's expressID to its group
+          this.elementMeshMap.set(elementExpressId, elementGroup);
         }
       }
 
@@ -171,7 +204,7 @@ export class IfcViewer {
 
       if (this.ifcModelGroup.children.length > 0) {
         this.scene.add(this.ifcModelGroup);
-        console.log(`IFC model group with ${this.ifcModelGroup.children.length} meshes added to scene.`);
+        console.log(`IFC model group with ${this.ifcModelGroup.children.length} element groups added.`);
       } else {
         console.warn("No valid meshes were generated from the IFC geometry data.");
         this.ifcModelGroup = null;
@@ -464,6 +497,9 @@ export class IfcViewer {
 
     this.selectedElements.clear(); // Clear selection set
     console.log("Viewer scene cleared.");
+
+    // Clear the mesh map
+    this.elementMeshMap.clear();
   }
 
   // Clean up resources when done
@@ -496,5 +532,64 @@ export class IfcViewer {
   // Public method to resize the viewer
   resize(): void {
     this.handleResize();
+  }
+
+  // *** NEW: Clash Detection Method ***
+  public performGeometricClashDetection(
+    elementIdsA: number[],
+    elementIdsB: number[],
+    toleranceMm: number
+  ): ClashResults {
+    console.log(`Viewer: Performing geometric clash detection. Tolerance: ${toleranceMm}mm`);
+    const clashes: ClashResultDetail[] = [];
+    const toleranceMeters = toleranceMm / 1000;
+    const checkedPairs = new Set<string>(); // Prevent checking A-B and B-A
+
+    const boxA = new THREE.Box3();
+    const boxB = new THREE.Box3();
+
+    for (const idA of elementIdsA) {
+      const meshA = this.elementMeshMap.get(idA);
+      if (!meshA) continue;
+
+      // Update bounding box for object A (including children)
+      meshA.updateMatrixWorld(true); // Ensure world matrix is up-to-date
+      boxA.setFromObject(meshA, true); // Precise bounding box
+
+      for (const idB of elementIdsB) {
+        // Don't clash element with itself or elements from the same group
+        if (idA === idB) continue;
+
+        // Check if this pair (A-B or B-A) has already been checked
+        const pairKey = idA < idB ? `${idA}-${idB}` : `${idB}-${idA}`;
+        if (checkedPairs.has(pairKey)) continue;
+        checkedPairs.add(pairKey);
+
+        const meshB = this.elementMeshMap.get(idB);
+        if (!meshB) continue;
+
+        // Update bounding box for object B (including children)
+        meshB.updateMatrixWorld(true); // Ensure world matrix is up-to-date
+        boxB.setFromObject(meshB, true); // Precise bounding box
+
+        // Check for intersection with tolerance
+        const distance = boxA.distanceToPoint(boxB.getCenter(new THREE.Vector3())); // Approximate distance
+        const intersects = boxA.intersectsBox(boxB);
+
+        // Consider it a clash if boxes intersect OR are closer than tolerance
+        if (intersects || distance < toleranceMeters) {
+          console.log(`   Clash found: ${idA} vs ${idB} (Intersects: ${intersects}, Dist: ${distance.toFixed(4)}m, Tol: ${toleranceMeters}m)`);
+          clashes.push({
+            id: `clash-${idA}-${idB}`,
+            element1Id: idA,
+            element2Id: idB,
+            boxIntersection: true // Mark as bounding box clash
+          });
+        }
+      }
+    }
+
+    console.log(`Viewer: Clash detection complete. Found ${clashes.length} clashes.`);
+    return { clashes: clashes.length, details: clashes };
   }
 }

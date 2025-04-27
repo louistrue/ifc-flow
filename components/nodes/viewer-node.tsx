@@ -1,6 +1,7 @@
 "use client";
 
 import { memo, useRef, useEffect, useState, useCallback } from "react";
+import * as THREE from "three";
 import {
   Handle,
   Position,
@@ -10,6 +11,7 @@ import {
 import { CuboidIcon as Cube, Loader2, AlertCircle, CheckCircle } from "lucide-react";
 import { IfcViewer } from "@/lib/ifc/viewer-utils";
 import { ViewerNodeData as BaseViewerNodeData } from "./node-types";
+import { ClashVisualizer } from "../clash-visualizer";
 
 // Extend the base ViewerNodeData with additional properties
 interface ExtendedViewerNodeData extends BaseViewerNodeData {
@@ -26,6 +28,7 @@ export const ViewerNode = memo(
     const [isLoading, setIsLoading] = useState(false);
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const [loadedFileIdentifier, setLoadedFileIdentifier] = useState<string | null>(null);
+    const [clashResults, setClashResults] = useState<any>(null);
     const [isResizing, setIsResizing] = useState(false);
     const { setNodes } = useReactFlow();
 
@@ -83,7 +86,6 @@ export const ViewerNode = memo(
     useEffect(() => {
       if (!viewerRef.current) return;
 
-      // Create a new viewer instance
       const newViewer = new IfcViewer(viewerRef.current, {
         backgroundColor: "#f5f5f5",
         showGrid: true,
@@ -92,7 +94,6 @@ export const ViewerNode = memo(
 
       setViewer(newViewer);
 
-      // Clean up on unmount
       return () => {
         if (newViewer) {
           newViewer.dispose();
@@ -104,10 +105,7 @@ export const ViewerNode = memo(
     // Update viewer when size changes
     useEffect(() => {
       if (viewer && viewerRef.current) {
-        // Update the container size
         viewer.resize();
-
-        // Give a small delay to ensure the resize is completed before fitting
         const timer = setTimeout(() => {
           if (viewer) {
             viewer.fitCameraToModel();
@@ -117,79 +115,86 @@ export const ViewerNode = memo(
       }
     }, [width, height, viewer]);
 
-    // Handle input data changes - Expecting File object
+    // Handle input data changes - Could be File OR clash results
     useEffect(() => {
       console.log("ViewerNode: Input data effect triggered.", { hasViewer: !!viewer, inputData: data.inputData });
-      const fileInput = data.inputData?.file;
-      // Create an identifier for the potential new file (or null if no valid file)
-      const inputFileIdentifier = fileInput instanceof File ? `${fileInput.name}_${fileInput.lastModified}_${fileInput.size}` : null;
 
       if (!viewer) {
         console.log("ViewerNode: Viewer instance not ready yet.");
         return;
       }
 
-      // --- Handle invalid or removed input ---
+      const input = data.inputData;
+      const fileInput = input?.file; // Potential file object
+      const potentialClashResults = input?.type === 'clashResults' ? input.value : null;
+
+      // --- Handle Clash Results Input --- 
+      if (potentialClashResults) {
+        console.log("ViewerNode: Received clash results, updating state.", potentialClashResults);
+        setClashResults(potentialClashResults); // Update clash results state
+        // Keep existing model loaded, don't clear viewer
+        // Reset error/loading related to file loading if necessary
+        setErrorMessage(null);
+        setIsLoading(false);
+        return; // Stop processing, handled clash results
+      } else {
+        // If input is not clash results, clear previous clash results state
+        setClashResults(null);
+      }
+
+      // --- Handle File Input (IFC) --- 
+      const inputFileIdentifier = fileInput instanceof File ? `${fileInput.name}_${fileInput.lastModified}_${fileInput.size}` : null;
+
       if (!fileInput || !(fileInput instanceof File) || !fileInput.name.toLowerCase().endsWith(".ifc")) {
-        // Only clear and reset state if something *was* loaded previously and input is now invalid/gone
         if (loadedFileIdentifier !== null) {
-          console.log("ViewerNode: Invalid or missing input, clearing viewer and resetting state.");
+          console.log("ViewerNode: Invalid/missing file input, clearing viewer & state.");
           viewer.clear();
           setLoadedFileIdentifier(null);
           setElementCount(0);
           setIsLoading(false);
-          setErrorMessage("Invalid input: Expected IFC file."); // Show error message
+          setErrorMessage("Invalid input: Expected IFC file.");
         } else {
-          // If nothing was loaded and input is invalid/missing, just ensure viewer is clear.
-          // viewer.clear(); // clear() is likely called by previous step already, maybe redundant
-          setErrorMessage(null); // No error if nothing was expected yet
+          setErrorMessage(null);
           setIsLoading(false);
           setElementCount(0);
         }
-        return; // Stop processing if input is invalid
+        return;
       }
 
-      // --- Input is a valid IFC File object ---
       const file = fileInput;
-      const newFileIdentifier = inputFileIdentifier; // Already calculated above
+      const newFileIdentifier = inputFileIdentifier;
 
-      // *** Check if this file is the same as the one already loaded ***
       if (newFileIdentifier === loadedFileIdentifier) {
-        console.log(`ViewerNode: File ${file.name} (${newFileIdentifier}) is already loaded. Skipping reload.`);
-        // Ensure loading/error states are correct if we skip loading
+        console.log(`ViewerNode: File ${file.name} (${newFileIdentifier}) already loaded.`);
         setIsLoading(false);
         setErrorMessage(null);
-        // Keep elementCount > 0 to show "Model Loaded"
-        setElementCount(e => e > 0 ? e : 1); // Set to 1 if it was 0
-        return; // Don't reload the same file
+        setElementCount(e => e > 0 ? e : 1);
+        return;
       }
 
-      // --- Proceed with loading the new file ---
       console.log(`ViewerNode: New file detected (${file.name}), initiating load.`);
       setIsLoading(true);
       setErrorMessage(null);
-      setElementCount(0); // Reset count indicator during load
+      setElementCount(0);
 
       viewer.loadIfc(file)
         .then(() => {
           console.log(`IFC loaded successfully in viewer node: ${file.name}`);
-          setElementCount(1); // Indicate model loaded
-          setLoadedFileIdentifier(newFileIdentifier); // Store identifier of the successfully loaded file
+          setElementCount(1);
+          setLoadedFileIdentifier(newFileIdentifier);
           setErrorMessage(null);
         })
         .catch(error => {
           console.error(`Error loading IFC (${file.name}) in viewer node:`, error);
           setErrorMessage(`Failed to load ${file.name}. See console.`);
           setElementCount(0);
-          setLoadedFileIdentifier(null); // Clear identifier on error
-          // viewer.clear() is called within loadIfc's catch block
+          setLoadedFileIdentifier(null);
         })
         .finally(() => {
-          setIsLoading(false); // Ensure loading is set to false
+          setIsLoading(false);
         });
 
-      // Depend on the file object identifier and the viewer instance
-    }, [data.inputData?.file, viewer, loadedFileIdentifier]); // Added loadedFileIdentifier to dependencies
+    }, [data.inputData, viewer, loadedFileIdentifier]);
 
     // Used to determine if we should disable dragging - when resizing
     const nodeDraggable = !isResizing;
@@ -201,6 +206,8 @@ export const ViewerNode = memo(
         style={{ width: `${width}px` }}
         data-id={id}
       >
+        <ClashVisualizer viewer={viewer} clashResults={clashResults} />
+
         <div className="bg-cyan-500 text-white px-3 py-1 flex items-center justify-between gap-2 nodrag-handle">
           <div className="flex items-center gap-2 min-w-0">
             <Cube className="h-4 w-4 flex-shrink-0" />
@@ -230,7 +237,7 @@ export const ViewerNode = memo(
             )}
             {!elementCount && !isLoading && !errorMessage && (
               <div className="text-xs text-muted-foreground pointer-events-none">
-                Connect IFC File
+                Connect IFC File or Clash Results
               </div>
             )}
           </div>
@@ -250,7 +257,13 @@ export const ViewerNode = memo(
             {errorMessage && !isLoading && (
               <div className="flex justify-between mt-1 text-red-700">
                 <span>Status:</span>
-                <span className="font-medium">Load Error</span>
+                <span className="font-medium">Error</span>
+              </div>
+            )}
+            {clashResults && !isLoading && !errorMessage && (
+              <div className="flex justify-between mt-1 text-blue-700">
+                <span>Clashes:</span>
+                <span className="font-medium">{clashResults.clashes || 0} detected</span>
               </div>
             )}
           </div>
@@ -260,6 +273,7 @@ export const ViewerNode = memo(
           className={`absolute bottom-0 right-0 w-6 h-6 cursor-nwse-resize nodrag ${selected ? "text-cyan-600" : "text-gray-400"
             } hover:text-cyan-500`}
           onMouseDown={startResize}
+          draggable={false}
         >
           <svg
             width="16"

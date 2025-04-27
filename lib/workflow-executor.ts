@@ -1,6 +1,6 @@
 import {
   extractGeometry,
-  filterElements,
+  filterElements as filterElementsByProperty,
   transformElements,
   extractQuantities,
   manageProperties,
@@ -14,6 +14,10 @@ import {
   getLastLoadedModel,
   extractGeometryWithGeom,
 } from "@/lib/ifc-utils";
+
+// Import the detailed filter function from its correct location
+import { filterElements } from "@/lib/ifc/filter-utils";
+import type { IfcElement } from "@/lib/ifc/ifc-loader";
 
 // Add TypeScript interfaces at the top of the file
 interface PropertyInfo {
@@ -264,18 +268,52 @@ export class WorkflowExecutor {
         break;
 
       case "filterNode":
-        // Filter elements
-        if (!inputValues.input) {
-          console.warn(`No input provided to filter node ${nodeId}`);
-          result = [];
-        } else {
-          result = filterElements(
-            inputValues.input,
-            node.data.properties?.property || "",
-            node.data.properties?.operator || "equals",
-            node.data.properties?.value || ""
-          );
+        console.log("Processing filterNode", { node, inputValues });
+
+        // Correctly extract the elements array from the input
+        let elementsToFilter: IfcElement[] | undefined;
+        const rawInput = inputValues.input;
+        if (Array.isArray(rawInput)) {
+          // Input is directly an array of elements
+          elementsToFilter = rawInput;
+        } else if (rawInput && typeof rawInput === 'object' && Array.isArray(rawInput.elements)) {
+          // Input is an object containing an 'elements' array (e.g., from ifcNode)
+          elementsToFilter = rawInput.elements;
+        } else if (rawInput && typeof rawInput === 'object' && Array.isArray(rawInput.value) && rawInput.type === 'elements') {
+          // Input is an object containing a 'value' array (e.g., from another filterNode)
+          elementsToFilter = rawInput.value;
+        } // Add more checks if other nodes output elements differently
+
+        const filterProps = node.data?.properties;
+
+        // Validate the extracted elements array
+        if (!elementsToFilter || !Array.isArray(elementsToFilter)) { // Check the extracted array
+          console.warn(`Filter node ${node.id} could not find a valid elements array in its input.`);
+          result = { type: "error", value: "Invalid input elements structure" }; // More specific error
+          break;
         }
+
+        if (!filterProps?.filterType || !filterProps?.operator) {
+          console.warn(`Filter node ${node.id} is not configured.`);
+          result = { type: "error", value: "Filter not configured" };
+          break;
+        }
+
+        // Call the detailed filterElements function with the extracted elements
+        const filteredElements = filterElements(
+          elementsToFilter, // Use the correctly extracted array
+          filterProps.filterType,
+          filterProps.operator,
+          filterProps.value || "",
+          filterProps.propertySet
+        );
+
+        console.log(`Filter node ${node.id} produced ${filteredElements.length} elements`);
+        result = {
+          type: "elements", // Ensure the output type is consistent
+          value: filteredElements,
+          count: filteredElements.length
+        };
         break;
 
       case "transformNode":
