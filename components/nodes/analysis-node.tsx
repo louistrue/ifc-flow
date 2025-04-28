@@ -68,13 +68,27 @@ export const AnalysisNode = memo(({ data, id, isConnectable }: NodeProps<Analysi
         const inputEdge = edges.find(edge => edge.target === id && edge.targetHandle === "input")
         const referenceEdge = edges.find(edge => edge.target === id && edge.targetHandle === "reference")
 
-        if (!inputEdge || !referenceEdge) {
+        // Determine if inputs are connected
+        const isInputConnected = !!inputEdge;
+        const isReferenceConnected = !!referenceEdge;
+
+        if (!isInputConnected || !isReferenceConnected) {
           setResults({ error: "Connect both primary and reference elements" })
-          return
+          setLoading(false); // Stop loading if not connected
+          return;
         }
 
+        // Inputs seem connected, now try to get node data
         const inputNode = getNode(inputEdge.source)
         const referenceNode = getNode(referenceEdge.source)
+
+        // It's possible getNode returns null if the node isn't fully ready yet
+        if (!inputNode || !referenceNode) {
+          console.warn(`AnalysisNode: Could not get node objects for inputs (Input: ${inputEdge.source}, Ref: ${referenceEdge.source})`);
+          setResults({ error: "Input nodes not found" });
+          setLoading(false);
+          return;
+        }
 
         // Log the raw input values before validation
         console.log("AnalysisNode Input Debug: Primary Raw Input:", inputNode?.data.outputData);
@@ -87,25 +101,40 @@ export const AnalysisNode = memo(({ data, id, isConnectable }: NodeProps<Analysi
         console.log("AnalysisNode Input Debug: Primary Elements Extracted:", primaryElements);
         console.log("AnalysisNode Input Debug: Reference Elements Extracted:", referenceElements);
 
+        // Add specific checks for undefined before Array.isArray
+        if (primaryElements === undefined) {
+          console.error("AnalysisNode Validation Failed: Primary input data is undefined.");
+          setResults({ error: "Primary input data is missing" });
+          setLoading(false);
+          return;
+        }
         if (!Array.isArray(primaryElements) || primaryElements.length === 0) {
-          console.error("AnalysisNode Validation Failed: Primary input is not a valid array or is empty."); // Use console.error
-          setResults({ error: "Primary input elements are missing or invalid" })
-          return
+          console.error("AnalysisNode Validation Failed: Primary input is not a valid array or is empty.");
+          setResults({ error: "Primary input elements are invalid or empty" });
+          setLoading(false);
+          return;
         }
 
+        if (referenceElements === undefined) {
+          console.error("AnalysisNode Validation Failed: Reference input data is undefined.");
+          setResults({ error: "Reference input data is missing" });
+          setLoading(false);
+          return;
+        }
         if (!Array.isArray(referenceElements) || referenceElements.length === 0) {
-          console.error("AnalysisNode Validation Failed: Reference input is not a valid array or is empty."); // Use console.error
-          setResults({ error: "Reference input elements are missing or invalid" })
-          return
+          console.error("AnalysisNode Validation Failed: Reference input is not a valid array or is empty.");
+          setResults({ error: "Reference input elements are invalid or empty" });
+          setLoading(false);
+          return;
         }
 
-        console.log(`AnalysisNode: Running clash with tolerance ${localTolerance}mm`); // Log used tolerance
+        console.log(`AnalysisNode: Running clash with tolerance ${localTolerance}mm`);
 
         // Perform clash detection using localTolerance state
         const analysisResults = await performClashDetection(
           primaryElements,
           referenceElements,
-          { tolerance: localTolerance, showIn3DViewer: true } // Use localTolerance state
+          { tolerance: localTolerance, showIn3DViewer: true }
         )
 
         setResults(analysisResults)
@@ -117,9 +146,17 @@ export const AnalysisNode = memo(({ data, id, isConnectable }: NodeProps<Analysi
       }
     }
 
-    // Trigger analysis when connections or tolerance change
+    // Trigger analysis primarily based on connections changing
+    // We rely on the overall workflow re-running when tolerance *property* changes,
+    // which should provide updated input data to this node.
     performAnalysis()
-  }, [getEdges, getNode, id, localTolerance]) // Add localTolerance as a dependency
+    // IMPORTANT: Removing localTolerance from dependencies.
+    // We add placeholders for the input data values themselves if possible, 
+    // but React Flow doesn't easily provide direct dependency on upstream data values.
+    // Relying on edge changes and node graph structure changes is more typical.
+    // For simplicity now, let's just use getEdges and getNode references. A more robust
+    // solution might involve passing a 'version' number through data or context.
+  }, [getEdges, getNode, id]) // Removed localTolerance
 
   // Propagate results to the appropriate output handles
   useEffect(() => {

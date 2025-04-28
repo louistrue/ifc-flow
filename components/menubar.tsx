@@ -111,15 +111,18 @@ export function AppMenubar({
     });
   };
 
-  const handleSaveToLibrary = (workflow: Workflow) => {
-    onSaveWorkflow(workflow);
+  const notifyLibrarySave = (workflow: Workflow) => {
     toast({
       title: "Workflow saved to library",
       description: `${workflow.name} has been saved to your workflow library`,
     });
   };
 
-  const handleSaveLocally = (workflow: Workflow) => {
+  const notifyLocalSave = (workflow: Workflow) => {
+    console.log("notifyLocalSave called (from menubar) - Workflow:", workflow.name);
+  };
+
+  const handleSaveLocallyMenuItem = (workflow: Workflow) => {
     // Save workflow to local file
     const json = JSON.stringify(workflow, null, 2);
     const blob = new Blob([json], { type: "application/json" });
@@ -294,7 +297,7 @@ export function AppMenubar({
                         updatedAt: new Date().toISOString(),
                         flowData,
                       };
-                      handleSaveLocally(tempWorkflow);
+                      handleSaveLocallyMenuItem(tempWorkflow);
                     }}
                     data-save-locally-trigger
                   >
@@ -492,8 +495,8 @@ export function AppMenubar({
       <SaveWorkflowDialog
         open={saveWorkflowDialogOpen}
         onOpenChange={setSaveWorkflowDialogOpen}
-        onSave={handleSaveToLibrary}
-        onSaveLocally={handleSaveLocally}
+        onSave={notifyLibrarySave}
+        onSaveLocally={notifyLocalSave}
         flowData={getFlowObject()}
         existingWorkflow={currentWorkflow}
       />

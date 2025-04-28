@@ -534,7 +534,7 @@ export class IfcViewer {
     this.handleResize();
   }
 
-  // *** NEW: Clash Detection Method ***
+  // *** Clash Detection Method - Updated ***
   public performGeometricClashDetection(
     elementIdsA: number[],
     elementIdsB: number[],
@@ -543,53 +543,152 @@ export class IfcViewer {
     console.log(`Viewer: Performing geometric clash detection. Tolerance: ${toleranceMm}mm`);
     const clashes: ClashResultDetail[] = [];
     const toleranceMeters = toleranceMm / 1000;
-    const checkedPairs = new Set<string>(); // Prevent checking A-B and B-A
+    const checkedPairs = new Set<string>();
 
     const boxA = new THREE.Box3();
     const boxB = new THREE.Box3();
+    const centerA = new THREE.Vector3();
+    const centerB = new THREE.Vector3();
 
     for (const idA of elementIdsA) {
       const meshA = this.elementMeshMap.get(idA);
       if (!meshA) continue;
-
-      // Update bounding box for object A (including children)
-      meshA.updateMatrixWorld(true); // Ensure world matrix is up-to-date
-      boxA.setFromObject(meshA, true); // Precise bounding box
+      meshA.updateMatrixWorld(true);
+      boxA.setFromObject(meshA, true);
+      if (boxA.isEmpty()) {
+        // console.log(`Skipping ID ${idA} - Empty BBox`); // Optional: Log skipped empty boxes
+        continue;
+      }
+      boxA.getCenter(centerA);
 
       for (const idB of elementIdsB) {
-        // Don't clash element with itself or elements from the same group
         if (idA === idB) continue;
-
-        // Check if this pair (A-B or B-A) has already been checked
         const pairKey = idA < idB ? `${idA}-${idB}` : `${idB}-${idA}`;
         if (checkedPairs.has(pairKey)) continue;
         checkedPairs.add(pairKey);
 
         const meshB = this.elementMeshMap.get(idB);
         if (!meshB) continue;
+        meshB.updateMatrixWorld(true);
+        boxB.setFromObject(meshB, true);
+        if (boxB.isEmpty()) {
+          // console.log(`Skipping ID ${idB} - Empty BBox`); // Optional: Log skipped empty boxes
+          continue;
+        }
+        boxB.getCenter(centerB);
 
-        // Update bounding box for object B (including children)
-        meshB.updateMatrixWorld(true); // Ensure world matrix is up-to-date
-        boxB.setFromObject(meshB, true); // Precise bounding box
+        const intersectsBBox = boxA.intersectsBox(boxB);
+        const centerDistance = centerA.distanceTo(centerB);
+        let potentialClash = false;
+        let preCheckReason = "";
 
-        // Check for intersection with tolerance
-        const distance = boxA.distanceToPoint(boxB.getCenter(new THREE.Vector3())); // Approximate distance
-        const intersects = boxA.intersectsBox(boxB);
+        // --- DETAILED LOGGING --- 
+        console.log(`  Check: ${idA} vs ${idB} | BoxA: [${boxA.min.x.toFixed(2)},${boxA.max.x.toFixed(2)}],[${boxA.min.y.toFixed(2)},${boxA.max.y.toFixed(2)}],[${boxA.min.z.toFixed(2)},${boxA.max.z.toFixed(2)}] | BoxB: [${boxB.min.x.toFixed(2)},${boxB.max.x.toFixed(2)}],[${boxB.min.y.toFixed(2)},${boxB.max.y.toFixed(2)}],[${boxB.min.z.toFixed(2)},${boxB.max.z.toFixed(2)}] | CenterDist: ${centerDistance.toFixed(3)}m | Intersects: ${intersectsBBox} | Tol: ${toleranceMeters}m`);
+        // --- END LOGGING --- 
 
-        // Consider it a clash if boxes intersect OR are closer than tolerance
-        if (intersects || distance < toleranceMeters) {
-          console.log(`   Clash found: ${idA} vs ${idB} (Intersects: ${intersects}, Dist: ${distance.toFixed(4)}m, Tol: ${toleranceMeters}m)`);
-          clashes.push({
-            id: `clash-${idA}-${idB}`,
-            element1Id: idA,
-            element2Id: idB,
-            boxIntersection: true // Mark as bounding box clash
-          });
+        if (intersectsBBox) {
+          potentialClash = true;
+          preCheckReason = "Boxes Intersect";
+        } else if (centerDistance < toleranceMeters) {
+          potentialClash = true;
+          preCheckReason = `Centers Near (Dist: ${centerDistance.toFixed(4)}m < Tol: ${toleranceMeters}m)`;
+        }
+
+        if (potentialClash) {
+          // ... existing potential clash logic + raycasting call ...
+          console.log(`   Potential Clash Pre-Check Passed: ${idA} vs ${idB} (${preCheckReason})`);
+          const confirmedByRaycast = this._raycastMeshIntersection(
+            meshA,
+            meshB,
+            toleranceMeters
+          );
+          if (confirmedByRaycast) {
+            console.log(`      => Confirmed Clash by Raycast: ${idA} vs ${idB}`);
+            clashes.push({
+              id: `clash-${idA}-${idB}`,
+              element1Id: idA,
+              element2Id: idB,
+              boxIntersection: intersectsBBox
+            });
+          } else {
+            console.log(`      => Pre-Check Clash NOT Confirmed by Raycast: ${idA} vs ${idB}`);
+          }
         }
       }
     }
 
-    console.log(`Viewer: Clash detection complete. Found ${clashes.length} clashes.`);
+    console.log(`Viewer: Clash detection complete. Found ${clashes.length} confirmed clashes.`);
     return { clashes: clashes.length, details: clashes };
+  }
+
+  // *** NEW: Raycasting Helper Method ***
+  private _raycastMeshIntersection(
+    objectA: THREE.Object3D,
+    objectB: THREE.Object3D,
+    tolerance: number
+  ): boolean {
+    const meshesA: THREE.Mesh[] = [];
+    const meshesB: THREE.Mesh[] = [];
+
+    // Collect all meshes from the input objects (could be Groups)
+    objectA.traverse((child) => {
+      // Check if it's a Mesh and has geometry before pushing
+      if ((child as THREE.Mesh).isMesh && (child as THREE.Mesh).geometry) {
+        meshesA.push(child as THREE.Mesh);
+      }
+    });
+    objectB.traverse((child) => {
+      // Check if it's a Mesh and has geometry before pushing
+      if ((child as THREE.Mesh).isMesh && (child as THREE.Mesh).geometry) {
+        meshesB.push(child as THREE.Mesh);
+      }
+    });
+
+    if (meshesA.length === 0 || meshesB.length === 0) {
+      return false;
+    }
+
+    const raycaster = new THREE.Raycaster();
+    raycaster.far = tolerance;
+
+    const directions = [
+      new THREE.Vector3(1, 0, 0),
+      new THREE.Vector3(-1, 0, 0),
+      new THREE.Vector3(0, 1, 0),
+      new THREE.Vector3(0, -1, 0),
+      new THREE.Vector3(0, 0, 1),
+      new THREE.Vector3(0, 0, -1),
+    ];
+
+    const vertex = new THREE.Vector3();
+
+    for (const meshA of meshesA) {
+      const geometryA = meshA.geometry; // Safe now due to check above
+      const positionA = geometryA.attributes.position;
+      if (!positionA) continue;
+
+      meshA.updateMatrixWorld(true);
+
+      const stride = Math.max(1, Math.floor(positionA.count / 500));
+
+      for (let i = 0; i < positionA.count; i += stride) {
+        vertex.fromBufferAttribute(positionA, i);
+        vertex.applyMatrix4(meshA.matrixWorld);
+
+        for (const direction of directions) {
+          raycaster.set(vertex, direction);
+
+          const intersects = raycaster.intersectObjects(meshesB, false);
+
+          // Check length for first hit only effect
+          if (intersects.length > 0) {
+            console.log(`    Raycast Hit: Vertex ${i} on mesh from element ${objectA.userData?.expressID} intersected mesh from element ${objectB.userData?.expressID}`); // Improved log
+            return true;
+          }
+        }
+      }
+    }
+
+    return false;
   }
 }

@@ -7,9 +7,9 @@ import {
   manageClassifications,
   spatialQuery,
   queryRelationships,
-  performAnalysis,
   exportData,
   loadIfcFile,
+  getIfcFile,
   IfcModel,
   getLastLoadedModel,
   extractGeometryWithGeom,
@@ -17,6 +17,8 @@ import {
 
 // Import the detailed filter function from its correct location
 import { filterElements } from "@/lib/ifc/filter-utils";
+// Import the specific clash detection function
+import { performClashDetection } from "@/lib/ifc/analysis-utils";
 import type { IfcElement } from "@/lib/ifc/ifc-loader";
 
 // Add TypeScript interfaces at the top of the file
@@ -160,96 +162,33 @@ export class WorkflowExecutor {
     let result;
     switch (node.type) {
       case "ifcNode":
-        // Log the request
         console.log("Processing ifcNode", { node });
 
-        if (node.data.modelInfo) {
-          // If we already have model info, use it
-          console.log("Using modelInfo from node data", node.data.modelInfo);
-          result = node.data.modelInfo;
-        } else if (node.data.file) {
-          try {
-            // If there's a file in the node data, load it
-            const file = node.data.file;
-            console.log("Loading IFC file from node data", file.name);
-            result = await loadIfcFile(file);
-
-            // Store the result in the node data for future reference
-            node.data.modelInfo = result;
-          } catch (err) {
-            console.error("Error loading IFC file:", err);
-            throw new Error(
-              `Failed to load IFC file: ${err instanceof Error ? err.message : String(err)
-              }`
-            );
-          }
+        // *** PRIORITIZE already loaded model data ***
+        if (node.data?.model && node.data.model.elements && node.data.model.id?.startsWith('model-')) {
+          console.log(`ifcNode ${node.id}: Using model data already present in the node.`);
+          result = node.data.model; // Use the model object directly
         } else {
-          // Try to get the last loaded model
-          const lastLoaded = getLastLoadedModel();
-          if (lastLoaded) {
-            // Use the last loaded model if available
-            console.log(
-              "Using last loaded model:",
-              lastLoaded.id,
-              "with",
-              lastLoaded.elements.length,
-              "elements"
-            );
-            result = lastLoaded;
-
-            // Store it in the node data for future reference
-            node.data.modelInfo = lastLoaded;
-          } else {
-            // No model info or file available - return empty structure
-            console.warn(
-              "No IFC model data available. Please load an IFC file first."
-            );
-            result = {
-              id: `empty-model-${Date.now()}`,
-              name: "No IFC Data",
-              elements: [],
-              errorMessage:
-                "No IFC file loaded. Please load an IFC file first.",
-            };
+          // Fallback: Try loading via filename (if model isn't in node data yet)
+          console.log(`ifcNode ${node.id}: Model data not found in node, attempting load via filename.`);
+          const filename = node.data?.properties?.filename;
+          if (!filename) {
+            console.error(`ifcNode ${node.id} has no filename property.`);
+            result = { type: "error", value: "No filename specified and no model data available" };
+            break; // Break here if no filename either
           }
+
+          const fileObject = getIfcFile(filename);
+          if (!fileObject) {
+            console.error(`File not found in cache for ifcNode ${node.id}: ${filename}`);
+            result = { type: "error", value: `File not found: ${filename}` };
+            break;
+          }
+
+          console.log(`ifcNode ${node.id}: Found file ${filename} in cache. Loading model...`);
+          result = await loadIfcFile(fileObject);
+          console.log(`ifcNode ${node.id}: Model loaded/retrieved for ${filename}`);
         }
-
-        // Make sure result is properly formatted with an elements array
-        // Preserve original metadata if we have to wrap an array
-        const originalModelData = result && typeof result === 'object' && !Array.isArray(result)
-          ? { id: result.id, name: result.name, schema: result.schema, project: result.project }
-          : { id: `model-${Date.now()}`, name: "Unknown IFC Model", schema: undefined, project: undefined };
-
-        if (result && !result.elements && Array.isArray(result)) {
-          // If result is just an array of elements, wrap it in a model object, preserving name etc.
-          console.warn("IFC node result was an array, wrapping it in a model object.");
-          result = {
-            ...originalModelData, // Spread original metadata
-            elements: result, // The array is the elements
-            elementCounts: { unknown: result.length }, // Provide basic count
-            totalElements: result.length,
-          };
-        } else if (result && typeof result === 'object' && !Array.isArray(result.elements)) {
-          // If elements is not an array, initialize it as empty array
-          result.elements = result.elements || [];
-          // Ensure other metadata is present from originalModelData if missing in result
-          result.name = result.name || originalModelData.name;
-          result.id = result.id || originalModelData.id;
-          result.schema = result.schema || originalModelData.schema;
-          result.project = result.project || originalModelData.project;
-        } else if (!result) {
-          // Handle cases where result might be null/undefined
-          result = {
-            ...originalModelData,
-            name: "No IFC Data",
-            elements: [],
-            errorMessage: "No IFC data processed."
-          };
-        }
-
-        console.log(
-          `IFC node processed with ${result.elements?.length || 0} elements named '${result.name}'` // Log name too
-        );
         break;
 
       case "geometryNode":
@@ -269,27 +208,28 @@ export class WorkflowExecutor {
 
       case "filterNode":
         console.log("Processing filterNode", { node, inputValues });
-
-        // Correctly extract the elements array from the input
         let elementsToFilter: IfcElement[] | undefined;
-        const rawInput = inputValues.input;
-        if (Array.isArray(rawInput)) {
-          // Input is directly an array of elements
-          elementsToFilter = rawInput;
-        } else if (rawInput && typeof rawInput === 'object' && Array.isArray(rawInput.elements)) {
-          // Input is an object containing an 'elements' array (e.g., from ifcNode)
-          elementsToFilter = rawInput.elements;
-        } else if (rawInput && typeof rawInput === 'object' && Array.isArray(rawInput.value) && rawInput.type === 'elements') {
-          // Input is an object containing a 'value' array (e.g., from another filterNode)
-          elementsToFilter = rawInput.value;
-        } // Add more checks if other nodes output elements differently
+        const rawFilterInput = inputValues.input; // Get the raw input value from the previous node's result
+
+        // Check if the input is the IfcModel object from ifcNode
+        if (rawFilterInput && typeof rawFilterInput === 'object' && rawFilterInput.elements && Array.isArray(rawFilterInput.elements) && rawFilterInput.id?.startsWith('model-')) {
+          console.log(`FilterNode ${node.id} received IfcModel object.`);
+          elementsToFilter = rawFilterInput.elements;
+        }
+        // Check if input is from another node outputting { type: 'elements', value: [...] }
+        else if (rawFilterInput && typeof rawFilterInput === 'object' && rawFilterInput.type === 'elements' && Array.isArray(rawFilterInput.value)) {
+          console.log(`FilterNode ${node.id} received elements array directly.`);
+          elementsToFilter = rawFilterInput.value;
+        } else {
+          console.warn(`Filter node ${node.id} received unexpected input structure:`, rawFilterInput);
+          elementsToFilter = undefined; // Ensure it's undefined if structure is wrong
+        }
 
         const filterProps = node.data?.properties;
 
-        // Validate the extracted elements array
-        if (!elementsToFilter || !Array.isArray(elementsToFilter)) { // Check the extracted array
-          console.warn(`Filter node ${node.id} could not find a valid elements array in its input.`);
-          result = { type: "error", value: "Invalid input elements structure" }; // More specific error
+        if (!elementsToFilter) { // Check if we successfully extracted elements
+          console.error(`Filter node ${node.id} could not extract valid elements array from input.`);
+          result = { type: "error", value: "Invalid input elements structure for filter" };
           break;
         }
 
@@ -299,9 +239,8 @@ export class WorkflowExecutor {
           break;
         }
 
-        // Call the detailed filterElements function with the extracted elements
         const filteredElements = filterElements(
-          elementsToFilter, // Use the correctly extracted array
+          elementsToFilter,
           filterProps.filterType,
           filterProps.operator,
           filterProps.value || "",
@@ -310,7 +249,7 @@ export class WorkflowExecutor {
 
         console.log(`Filter node ${node.id} produced ${filteredElements.length} elements`);
         result = {
-          type: "elements", // Ensure the output type is consistent
+          type: "elements",
           value: filteredElements,
           count: filteredElements.length
         };
@@ -752,23 +691,36 @@ export class WorkflowExecutor {
         break;
 
       case "analysisNode":
-        // Analysis
-        if (!inputValues.input) {
-          console.warn(`No input provided to analysis node ${nodeId}`);
-          result = {};
-        } else {
-          result = performAnalysis(
-            inputValues.input,
-            inputValues.reference || [],
-            node.data.properties?.analysisType || "clash",
-            {
-              tolerance: Number.parseFloat(
-                node.data.properties?.tolerance || 10
-              ),
-              metric: node.data.properties?.metric || "area",
-            }
-          );
+        console.log("Processing analysisNode", { node, inputValues });
+        // Get primary and reference inputs correctly
+        const primaryInputAnalysis = inputValues.input; // Result from upstream node (Filter/IFC)
+        const referenceInputAnalysis = inputValues.reference; // Result from upstream node (Filter/IFC)
+        const analysisProps = node.data?.properties;
+
+        // Extract element arrays from inputs
+        const primaryElementsAnalysis = primaryInputAnalysis?.type === 'elements' ? primaryInputAnalysis.value : undefined;
+        const referenceElementsAnalysis = referenceInputAnalysis?.type === 'elements' ? referenceInputAnalysis.value : undefined;
+
+        if (!primaryElementsAnalysis || !Array.isArray(primaryElementsAnalysis)) {
+          console.error(`Analysis node ${node.id} missing or invalid primary element array. Input received:`, primaryInputAnalysis);
+          result = { type: "error", value: "Invalid primary elements for analysis" };
+          break;
         }
+        if (!referenceElementsAnalysis || !Array.isArray(referenceElementsAnalysis)) {
+          console.error(`Analysis node ${node.id} missing or invalid reference element array. Input received:`, referenceInputAnalysis);
+          result = { type: "error", value: "Invalid reference elements for analysis" };
+          break;
+        }
+
+        const tolerance = analysisProps?.tolerance ?? 10;
+        console.log(`AnalysisNode: Calling performClashDetection with tolerance: ${tolerance}mm`);
+
+        result = await performClashDetection(
+          primaryElementsAnalysis, // Pass the extracted array
+          referenceElementsAnalysis, // Pass the extracted array
+          { tolerance, showIn3DViewer: true }
+        );
+        console.log(`AnalysisNode ${node.id} completed clash detection. Clashes found: ${result?.clashes ?? 'Error'}`);
         break;
 
       case "exportNode":
@@ -792,20 +744,18 @@ export class WorkflowExecutor {
         break;
 
       case "viewerNode":
-        // Process data for viewer node
         console.log("Processing viewerNode", { node, inputValues });
-
-        if (!inputValues || !inputValues.input) {
-          console.log("No input provided to viewer node");
-          result = null;
-          break;
+        // Prioritize visualization data, then IFC model, then elements array
+        let viewerInputData = inputValues.visualization; // From Analysis Node
+        if (!viewerInputData) {
+          viewerInputData = inputValues.input; // From IFC Node or Filter Node
         }
 
-        // Store input data in the node for rendering
-        node.data.inputData = inputValues.input;
-
-        // Viewer nodes pass through their input
-        result = inputValues.input;
+        result = {
+          type: "viewerState", // Type indicates intent to update viewer
+          // Pass the relevant data structure (could be IFC model OR clash results)
+          value: viewerInputData
+        };
         break;
 
       default:

@@ -63,6 +63,48 @@ export function SaveWorkflowDialog({
     existingWorkflow?.name || "untitled-workflow"
   );
 
+  // Helper function to remove runtime data from nodes before saving
+  const cleanFlowDataForSave = (flowData: any) => {
+    if (!flowData || !flowData.nodes || !Array.isArray(flowData.nodes)) {
+      return flowData; // Return original if structure is unexpected
+    }
+
+    // Define properties to remove from node.data
+    const propertiesToRemove = [
+      'inputData',
+      'results',
+      'elements',
+      'model',
+      'isLoading',
+      'progress',
+      'error',
+      'messageId', // Added from quantityNode processing
+      // Add any other large/runtime properties here
+    ];
+
+    const cleanedNodes = flowData.nodes.map((node: any) => {
+      if (!node.data) {
+        return node; // Return node as-is if no data property
+      }
+
+      const cleanedData = { ...node.data };
+      propertiesToRemove.forEach(prop => {
+        delete cleanedData[prop];
+      });
+
+      // Special handling for propertyNode results if stored directly on data
+      // (ensure results array is cleaned or removed if large)
+      if (cleanedData.results && Array.isArray(cleanedData.results)) {
+        console.warn(`Node ${node.id} still has 'results' property after initial clean. Removing.`);
+        delete cleanedData.results;
+      }
+
+      return { ...node, data: cleanedData };
+    });
+
+    return { ...flowData, nodes: cleanedNodes };
+  };
+
   // Reset form when dialog opens
   const handleOpenChange = (open: boolean) => {
     if (open) {
@@ -101,6 +143,7 @@ export function SaveWorkflowDialog({
 
   // Handle save to library
   const handleSaveToLibrary = () => {
+    console.log("handleSaveToLibrary called");
     if (!name.trim()) {
       alert("Please enter a name for your workflow");
       return;
@@ -110,6 +153,9 @@ export function SaveWorkflowDialog({
     const createdAt = existingWorkflow?.createdAt || new Date().toISOString();
     const thumbnail = workflowStorage.generateThumbnail(flowData);
 
+    // Clean the flow data before saving
+    const cleanedFlowData = cleanFlowDataForSave(flowData);
+
     const workflow = {
       id,
       name: name.trim(),
@@ -118,16 +164,28 @@ export function SaveWorkflowDialog({
       createdAt,
       updatedAt: new Date().toISOString(),
       thumbnail,
-      flowData,
+      flowData: cleanedFlowData,
     };
 
-    workflowStorage.saveWorkflow(workflow);
-    onSave(workflow);
-    handleOpenChange(false);
+    try {
+      workflowStorage.saveWorkflow(workflow);
+      onSave(workflow);
+      handleOpenChange(false);
+    } catch (error) {
+      console.error("Error saving workflow to library:", error);
+      // Provide more specific feedback for quota errors
+      if (error instanceof DOMException && error.name === 'QuotaExceededError') {
+        alert("Failed to save workflow: Browser storage quota exceeded. The workflow might still be too large even after cleaning.");
+      } else {
+        alert("An unexpected error occurred while saving the workflow.");
+      }
+      // Don't close the dialog on error
+    }
   };
 
   // Handle local save
   const handleSaveLocally = () => {
+    console.log("handleSaveLocally called");
     if (!localFilename.trim()) {
       alert("Please enter a filename");
       return;
@@ -331,7 +389,13 @@ export function SaveWorkflowDialog({
             Cancel
           </Button>
           {activeTab === "library" ? (
-            <Button onClick={handleSaveToLibrary} disabled={!name.trim()}>
+            <Button
+              onClick={() => {
+                console.log('"Save to Library" button clicked');
+                handleSaveToLibrary();
+              }}
+              disabled={!name.trim()}
+            >
               Save to Library
             </Button>
           ) : (

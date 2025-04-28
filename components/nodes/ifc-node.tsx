@@ -83,9 +83,8 @@ export const IfcNode = memo(({ id, data, isConnectable }: NodeProps<ExtendedIfcN
               file,
               (model) => {
                 console.log("IFC model loaded:", model);
-                // Briefly set progress to 100% before updating node state
                 setProgress({ percentage: 100, message: "Processing complete" });
-                // Update node with model, clear loading/progress
+
                 setNodes((nodes) =>
                   nodes.map((node) => {
                     if (node.id === id) {
@@ -93,7 +92,16 @@ export const IfcNode = memo(({ id, data, isConnectable }: NodeProps<ExtendedIfcN
                         ...node,
                         data: {
                           ...node.data,
-                          model: model, // Store the full model object
+                          label: model.name || file.name,
+                          properties: {
+                            ...node.data.properties,
+                            filename: file.name,
+                            filesize: file.size,
+                            elementCount: model.totalElements,
+                            schema: model.schema,
+                            projectName: model.project?.Name
+                          },
+                          model: model,
                           isLoading: false,
                           error: null,
                         },
@@ -102,14 +110,10 @@ export const IfcNode = memo(({ id, data, isConnectable }: NodeProps<ExtendedIfcN
                     return node;
                   })
                 );
-                // No need to clear progress here as isLoading: false will hide the indicator
-                // setProgress({ percentage: 0, message: "" }); 
               },
               (error) => {
                 console.error("Error loading IFC file:", error);
-                // Optionally set progress to 100 on error too, or keep last state
-                // setProgress({ percentage: 100, message: "Error occurred" });
-                // Update node with error, clear loading/progress
+                setProgress({ percentage: 0, message: "" });
                 setNodes((nodes) =>
                   nodes.map((node) => {
                     if (node.id === id) {
@@ -119,19 +123,20 @@ export const IfcNode = memo(({ id, data, isConnectable }: NodeProps<ExtendedIfcN
                           ...node.data,
                           isLoading: false,
                           error: error.message || "Failed to load IFC",
+                          properties: {
+                            ...node.data.properties,
+                            filename: file.name
+                          }
                         },
                       };
                     }
                     return node;
                   })
                 );
-                setProgress({ percentage: 0, message: "" }); // Clear progress state on error
               },
               (percentage, message) => {
-                // Map reported percentage (0-100) to a visual range (e.g., 5-90)
-                const visualPercentage = 5 + (percentage * 0.85); // Maps 0-100 -> 5-90
+                const visualPercentage = 5 + (percentage * 0.85);
                 setProgress(currentProgress => ({
-                  // Ensure visual percentage is monotonic and capped at 90 during progress updates
                   percentage: Math.min(90, Math.max(currentProgress.percentage, visualPercentage)),
                   message: message || currentProgress.message,
                 }));
@@ -187,9 +192,8 @@ export const IfcNode = memo(({ id, data, isConnectable }: NodeProps<ExtendedIfcN
             file,
             (model) => {
               console.log("IFC model loaded:", model);
-              // Briefly set progress to 100% before updating node state
               setProgress({ percentage: 100, message: "Processing complete" });
-              // Update node with model, clear loading/progress
+
               setNodes((nodes) =>
                 nodes.map((node) => {
                   if (node.id === id) {
@@ -197,7 +201,16 @@ export const IfcNode = memo(({ id, data, isConnectable }: NodeProps<ExtendedIfcN
                       ...node,
                       data: {
                         ...node.data,
-                        model: model, // Store the full model object
+                        label: model.name || file.name,
+                        properties: {
+                          ...node.data.properties,
+                          filename: file.name,
+                          filesize: file.size,
+                          elementCount: model.totalElements,
+                          schema: model.schema,
+                          projectName: model.project?.Name
+                        },
+                        model: model,
                         isLoading: false,
                         error: null,
                       },
@@ -206,14 +219,10 @@ export const IfcNode = memo(({ id, data, isConnectable }: NodeProps<ExtendedIfcN
                   return node;
                 })
               );
-              // No need to clear progress here as isLoading: false will hide the indicator
-              // setProgress({ percentage: 0, message: "" });
             },
             (error) => {
               console.error("Error loading IFC file:", error);
-              // Optionally set progress to 100 on error too, or keep last state
-              // setProgress({ percentage: 100, message: "Error occurred" });
-              // Update node with error, clear loading/progress
+              setProgress({ percentage: 0, message: "" });
               setNodes((nodes) =>
                 nodes.map((node) => {
                   if (node.id === id) {
@@ -223,19 +232,20 @@ export const IfcNode = memo(({ id, data, isConnectable }: NodeProps<ExtendedIfcN
                         ...node.data,
                         isLoading: false,
                         error: error.message || "Failed to load IFC",
+                        properties: {
+                          ...node.data.properties,
+                          filename: file.name
+                        }
                       },
                     };
                   }
                   return node;
                 })
               );
-              setProgress({ percentage: 0, message: "" }); // Clear progress state on error
             },
             (percentage, message) => {
-              // Map reported percentage (0-100) to a visual range (e.g., 5-90)
-              const visualPercentage = 5 + (percentage * 0.85); // Maps 0-100 -> 5-90
+              const visualPercentage = 5 + (percentage * 0.85);
               setProgress(currentProgress => ({
-                // Ensure visual percentage is monotonic and capped at 90 during progress updates
                 percentage: Math.min(90, Math.max(currentProgress.percentage, visualPercentage)),
                 message: message || currentProgress.message,
               }));
