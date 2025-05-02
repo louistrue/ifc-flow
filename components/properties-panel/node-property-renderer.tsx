@@ -973,30 +973,57 @@ export function NodePropertyRenderer({
                   placeholder="Item1, Item2, Item3"
                 />
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="selectedItem">Selected Item</Label>
-                <Select
-                  value={properties.value || ""}
-                  onValueChange={(value) =>
-                    setProperties({ ...properties, value })
-                  }
-                >
-                  <SelectTrigger id="selectedItem">
-                    <SelectValue placeholder="Select an item" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(properties.listItems || "")
-                      .split(",")
-                      .map((item, index) => (
-                        <SelectItem key={index} value={item.trim()}>
-                          {item.trim()}
-                        </SelectItem>
-                      ))}
-                  </SelectContent>
-                </Select>
-              </div>
+              {properties.listItems && (
+                <div className="text-xs text-muted-foreground">
+                  Current items:{" "}
+                  {properties.listItems
+                    .split(",")
+                    .map((item: string) => item.trim())
+                    .filter((item: string) => item)
+                    .join(", ")}
+                </div>
+              )}
             </>
           )}
+        </div>
+      );
+
+    case "spatialHierarchyNode":
+      return (
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="outputType">Output Type</Label>
+            <Select
+              value={properties.spatialType || "IFCBUILDINGSTOREY"}
+              onValueChange={(value) =>
+                setProperties({ ...properties, spatialType: value })
+              }
+            >
+              <SelectTrigger id="outputType">
+                <SelectValue placeholder="Select output type" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="IFCPROJECT">Project</SelectItem>
+                <SelectItem value="IFCSITE">Site</SelectItem>
+                <SelectItem value="IFCBUILDING">Building</SelectItem>
+                <SelectItem value="IFCBUILDINGSTOREY">
+                  Building Storey
+                </SelectItem>
+                <SelectItem value="IFCSPACE">Space</SelectItem>
+              </SelectContent>
+            </Select>
+            <div className="text-xs text-muted-foreground">
+              Select which type of spatial element to output
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <div className="text-sm font-medium">Spatial Elements</div>
+            <div className="text-xs text-muted-foreground">
+              Connect an IFC file to the node to select specific spatial
+              elements
+            </div>
+          </div>
         </div>
       );
 

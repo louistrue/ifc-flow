@@ -13,9 +13,34 @@ import {
   IfcModel,
   getLastLoadedModel,
   extractGeometryWithGeom,
+  getRawIfcContent,
 } from "@/lib/ifc-utils";
+import type { IfcElement } from "@/lib/ifc-utils";
 
 // Add TypeScript interfaces at the top of the file
+
+// Define an interface for the properties added by spatial hierarchy processing
+interface SpatialHierarchyProperties {
+  isSpatial?: boolean;
+  spatialLevel?: number;
+  spatialChildren?: string[];
+  containedIn?: string;
+  containmentStructure?: {
+    building?: any;
+    storey?: any;
+    space?: any;
+  };
+}
+
+// Combine IfcElement with our spatial properties
+type EnhancedIfcElement = IfcElement & SpatialHierarchyProperties;
+
+// Define NodePair interface
+interface NodePair {
+  node: any;
+  inputValues: any;
+}
+
 interface PropertyInfo {
   name: string;
   exists: boolean;
@@ -23,17 +48,28 @@ interface PropertyInfo {
   psetName: string;
 }
 
-interface PropertyNodeElement {
+interface PropertyNodeElement extends IfcElement {
   id: string;
-  expressId?: number;
+  expressId: number;
   type: string;
-  properties?: {
+  properties: {
     GlobalId?: string;
     Name?: string;
     [key: string]: any;
   };
   propertyInfo?: PropertyInfo;
   [key: string]: any;
+}
+
+interface Classification {
+  system: string;
+  code: string;
+  description: string;
+}
+
+interface EnhancedElement extends IfcElement {
+  psets: Record<string, any>;
+  classifications?: Classification[];
 }
 
 // Helper function to safely convert values to JSON strings, avoiding cyclic references
@@ -245,12 +281,32 @@ export class WorkflowExecutor {
           console.warn(`No input provided to filter node ${nodeId}`);
           result = [];
         } else {
-          result = filterElements(
-            inputValues.input,
-            node.data.properties?.property || "",
-            node.data.properties?.operator || "equals",
-            node.data.properties?.value || ""
-          );
+          // Get elements from input, handling both array and object formats
+          let elementsToFilter = inputValues.input;
+
+          // If the input is an object with elements array, use that
+          if (
+            !Array.isArray(elementsToFilter) &&
+            elementsToFilter.elements &&
+            Array.isArray(elementsToFilter.elements)
+          ) {
+            elementsToFilter = elementsToFilter.elements;
+          }
+
+          // Ensure we have an array before calling filter
+          if (!Array.isArray(elementsToFilter)) {
+            console.warn(
+              `Input to filter node ${nodeId} is not an array or object with elements array`
+            );
+            result = [];
+          } else {
+            result = filterElements(
+              elementsToFilter,
+              node.data.properties?.property || "",
+              node.data.properties?.operator || "equals",
+              node.data.properties?.value || ""
+            );
+          }
         }
         break;
 
@@ -572,16 +628,284 @@ export class WorkflowExecutor {
 
       case "classificationNode":
         // Manage classifications
-        if (!inputValues.input) {
+        console.log("Processing classificationNode", {
+          nodeId,
+          system: node.data.properties?.system || "custom",
+          action: node.data.properties?.action || "get",
+          code: node.data.properties?.code || "",
+          useInputValues: node.data.properties?.useInputValues || false,
+          inputCodes: inputValues["input-codes"],
+          inputNames: inputValues["input-names"],
+        });
+
+        if (!inputValues || !inputValues.input) {
           console.warn(`No input provided to classification node ${nodeId}`);
-          result = [];
+          result = {
+            elements: [],
+            error: "No input provided. Connect an IFC node to this node.",
+          };
         } else {
-          result = manageClassifications(
-            inputValues.input,
-            node.data.properties?.system || "uniclass",
-            node.data.properties?.action || "get",
-            node.data.properties?.code || ""
-          );
+          try {
+            // Handle different input types to ensure we pass a valid array of elements
+            let elementsToProcess;
+            let originalModel = null;
+
+            // Keep track of the original model object if available
+            if (Array.isArray(inputValues.input)) {
+              elementsToProcess = inputValues.input;
+            } else if (
+              inputValues.input.elements &&
+              Array.isArray(inputValues.input.elements)
+            ) {
+              elementsToProcess = inputValues.input.elements;
+              originalModel = inputValues.input;
+            } else {
+              console.warn(
+                `Invalid input format for classification node ${nodeId}`
+              );
+              elementsToProcess = [];
+            }
+
+            // Process with cleaned input - but only for "set" action
+            // For "get" action, we use our enhanced detection directly
+            const action = (
+              node.data.properties?.action || "get"
+            ).toLowerCase();
+            let processedElements;
+
+            if (action === "set") {
+              // For set mode, use the standard function
+              // Check for input values first
+              const codes = inputValues["input-codes"];
+              const names = inputValues["input-names"];
+
+              // If we have input values, process each code-name pair
+              if (codes || names) {
+                // Convert input values to arrays
+                const codesArray = Array.isArray(codes)
+                  ? codes
+                  : typeof codes === "string"
+                  ? codes
+                      .split(",")
+                      .map((c) => c.trim())
+                      .filter((c) => c.length > 0)
+                  : [];
+                const namesArray = Array.isArray(names)
+                  ? names
+                  : typeof names === "string"
+                  ? names
+                      .split(",")
+                      .map((n) => n.trim())
+                      .filter((n) => n.length > 0)
+                  : [];
+
+                console.log("Processing classifications with input values:", {
+                  codes: codesArray,
+                  names: namesArray,
+                });
+
+                // Process each code-name pair
+                processedElements = elementsToProcess.map(
+                  (element: IfcElement) => {
+                    const enhancedElement: EnhancedElement = {
+                      ...element,
+                      psets: element.psets || {},
+                      classifications: [],
+                    };
+
+                    // Create or update classifications for each code
+                    const classifications: Classification[] = codesArray.map(
+                      (code, index) => ({
+                        system: (
+                          node.data.properties?.system || "custom"
+                        ).toLowerCase(),
+                      code: code,
+                        description: namesArray[index] || code,
+                      })
+                    );
+
+                    // Store classifications in the element
+                    enhancedElement.classifications = classifications;
+
+                    // Also store in psets for IFC export
+                    classifications.forEach((cls) => {
+                      const psetName = `Pset_ClassificationReference_${cls.code}`;
+                      enhancedElement.psets[psetName] = {
+                        System: cls.system,
+                        Code: cls.code,
+                        Name: cls.description,
+                        ItemReference: cls.code,
+                        Description: `${cls.system} classification ${cls.code}`,
+                      };
+                    });
+
+                    return enhancedElement;
+                  }
+                );
+
+                // Log the number of elements processed
+              console.log(
+                  `Applied classifications to ${processedElements.length} elements`
+                );
+
+                // Log a sample of the processed elements
+                if (processedElements.length > 0) {
+                  console.log(
+                    "Sample processed element:",
+                    JSON.stringify(
+                      {
+                        id: processedElements[0].id,
+                        type: processedElements[0].type,
+                        classifications: processedElements[0].classifications,
+                        psets: processedElements[0].psets,
+                      },
+                      null,
+                      2
+                    )
+                  );
+                }
+              } else {
+                // Fallback to using node properties if no input values
+              processedElements = manageClassifications(
+                elementsToProcess,
+                (node.data.properties?.system || "custom").toLowerCase(),
+                action,
+                node.data.properties?.code || ""
+              );
+              }
+            } else {
+              // For get mode, use our already processed elements with classifications
+              processedElements = elementsToProcess;
+            }
+
+            // Return result in standard format with proper typing
+            const classificationResult: {
+              elements: IfcElement[];
+              count: number;
+              uniqueClassifications?: Array<{
+                system: string;
+                code: string;
+                description: string;
+              }>;
+              classificationCount?: number;
+              modelClassifications?: Array<{
+                name: string;
+                references: Array<{
+                  id: string;
+                  name: string;
+                }>;
+              }>;
+              systemsFound?: string[];
+              type: string;
+            } = {
+              elements: processedElements,
+              count: processedElements.length,
+              type: "classifications", // Set a default type for all classification results
+            };
+
+            // For 'get' action, extract unique classifications for display
+            if (
+              (node.data.properties?.action || "get").toLowerCase() === "get"
+            ) {
+              const allClassifications = [];
+
+              // Collect all classifications from all elements
+              for (const element of processedElements) {
+                if (
+                  element.classifications &&
+                  element.classifications.length > 0
+                ) {
+                  console.log(
+                    `Adding ${element.classifications.length} classifications from element ${element.id} to result`
+                  );
+                  allClassifications.push(...element.classifications);
+                }
+              }
+
+              // Extract unique classification systems and codes
+              const uniqueClassifications = [];
+              const seenCodes = new Set();
+
+              for (const cls of allClassifications) {
+                const key = `${cls.system}:${cls.code}`;
+                if (!seenCodes.has(key) && cls.code) {
+                  seenCodes.add(key);
+                  uniqueClassifications.push(cls);
+                }
+              }
+
+              // Log all classifications found for debugging
+              console.log(
+                `Found ${uniqueClassifications.length} unique classifications`
+              );
+              uniqueClassifications.forEach((cls) => {
+                console.log(
+                  `- ${cls.system}: ${cls.code} - ${cls.description || ""}`
+                );
+              });
+
+              // Add to the result
+              classificationResult.uniqueClassifications =
+                uniqueClassifications;
+              classificationResult.classificationCount =
+                uniqueClassifications.length;
+
+              // Group classifications by system for UI display
+              const systemsMap = new Map();
+              for (const cls of uniqueClassifications) {
+                if (!systemsMap.has(cls.system)) {
+                  systemsMap.set(cls.system, {
+                    name: cls.system,
+                    references: [],
+                  });
+                }
+
+                systemsMap.get(cls.system).references.push({
+                  id: cls.code,
+                  name: cls.description || cls.code,
+                });
+              }
+
+              // Update node data with classifications for display
+              this.updateNodeDataInList(nodeId, {
+                ...node.data,
+                modelClassifications: Array.from(systemsMap.values()),
+              });
+
+              // Also add the full classification information to the result
+              // for better display in watch nodes
+              classificationResult.modelClassifications = Array.from(
+                systemsMap.values()
+              );
+              classificationResult.systemsFound = Array.from(systemsMap.keys());
+
+              // Format classifications in a descriptive way for display
+              const formattedClassifications = uniqueClassifications.map(
+                (cls) => ({
+                  system: cls.system,
+                  code: cls.code,
+                  description: cls.description || cls.code,
+                })
+              );
+
+              classificationResult.uniqueClassifications =
+                formattedClassifications;
+              classificationResult.type = "classifications";
+            }
+
+            result = classificationResult;
+          } catch (error: any) {
+            console.error(
+              `Error processing classification node ${nodeId}:`,
+              error
+            );
+            result = {
+              elements: [],
+              error: `Error processing classifications: ${
+                error?.message || "Unknown error"
+              }`,
+            };
+          }
         }
         break;
 
@@ -669,6 +993,385 @@ export class WorkflowExecutor {
 
         // Viewer nodes pass through their input
         result = inputValues.input;
+        break;
+
+      case "spatialHierarchyNode":
+        // Process spatial hierarchy node
+        console.log("Processing spatialHierarchyNode", { node, inputValues });
+
+        // If no input, create empty output
+        if (!inputValues.input) {
+          console.warn(`No input provided to spatial hierarchy node ${nodeId}`);
+          result = {
+            elements: [],
+            spatialStructure: null,
+            error: "No input provided. Connect an IFC node to this node.",
+          };
+          break;
+        }
+
+        // Extract elements from the input
+        let elements = [];
+
+        if (Array.isArray(inputValues.input)) {
+          // Input is an array of elements
+          elements = inputValues.input;
+        } else if (
+          inputValues.input.elements &&
+          Array.isArray(inputValues.input.elements)
+        ) {
+          // Input is a model with elements array
+          elements = inputValues.input.elements;
+
+          // Store the model data
+          node.data.inputData = {
+            model: inputValues.input,
+            elements: elements,
+          };
+        } else {
+          console.warn(`Invalid input to spatial hierarchy node ${nodeId}`);
+          result = {
+            elements: [],
+            spatialStructure: null,
+            error: "Invalid input format. Make sure the input is an IFC model.",
+          };
+          break;
+        }
+
+        console.log(
+          `SpatialHierarchyNode: Processing ${elements.length} elements`
+        );
+
+        // Extract proper containment structure
+        const containmentStructures = extractContainmentStructure(elements);
+
+        // Add containment information to elements
+        containmentStructures.forEach((structure) => {
+          const element = elements.find(
+            (el: EnhancedIfcElement) =>
+              el.properties?.GlobalId === structure.elementId
+          );
+
+          if (element) {
+            element.containmentStructure = {
+              building: structure.building,
+              storey: structure.storey,
+              space: structure.space,
+            };
+
+            // Set containedIn property for backward compatibility
+            if (structure.storey) {
+              element.containedIn = structure.storey.id;
+            } else if (structure.building) {
+              element.containedIn = structure.building.id;
+            } else if (structure.space) {
+              element.containedIn = structure.space.id;
+            }
+          }
+        });
+
+        // Find spatial elements
+        const spatialTypes = [
+          "IFCPROJECT",
+          "IFCSITE",
+          "IFCBUILDING",
+          "IFCBUILDINGSTOREY",
+          "IFCSPACE",
+        ];
+
+        const spatialElements = elements.filter((el: EnhancedIfcElement) =>
+          spatialTypes.includes(el.type.toUpperCase())
+        );
+
+        // Mark spatial elements and set up hierarchy
+        spatialElements.forEach((element: EnhancedIfcElement) => {
+          element.isSpatial = true;
+
+          // Set spatial level
+          switch (element.type.toUpperCase()) {
+            case "IFCPROJECT":
+              element.spatialLevel = 0;
+              break;
+            case "IFCSITE":
+              element.spatialLevel = 1;
+              break;
+            case "IFCBUILDING":
+              element.spatialLevel = 2;
+              break;
+            case "IFCBUILDINGSTOREY":
+              element.spatialLevel = 3;
+              break;
+            case "IFCSPACE":
+              element.spatialLevel = 4;
+              break;
+          }
+        });
+
+        // Create spatial relationships using containment information
+        const buildingSpatialMap: Record<string, string[]> = {};
+        const storeySpatialMap: Record<string, string[]> = {};
+
+        containmentStructures.forEach((structure) => {
+          if (structure.building && structure.storey) {
+            const buildingId = structure.building.id;
+            const storeyId = structure.storey.id;
+
+            // Add storey to building's children
+            if (!buildingSpatialMap[buildingId]) {
+              buildingSpatialMap[buildingId] = [];
+            }
+            if (!buildingSpatialMap[buildingId].includes(storeyId)) {
+              buildingSpatialMap[buildingId].push(storeyId);
+            }
+          }
+
+          if (structure.storey && structure.elementId) {
+            const storeyId = structure.storey.id;
+
+            // Add element to storey's children
+            if (!storeySpatialMap[storeyId]) {
+              storeySpatialMap[storeyId] = [];
+            }
+            if (!storeySpatialMap[storeyId].includes(structure.elementId)) {
+              storeySpatialMap[storeyId].push(structure.elementId);
+            }
+          }
+        });
+
+        // Set spatial children
+        for (const [buildingId, storeyIds] of Object.entries(
+          buildingSpatialMap
+        )) {
+          const building = elements.find(
+            (el: EnhancedIfcElement) => el.properties?.GlobalId === buildingId
+          );
+
+          if (building) {
+            building.spatialChildren = storeyIds;
+          }
+        }
+
+        for (const [storeyId, elementIds] of Object.entries(storeySpatialMap)) {
+          const storey = elements.find(
+            (el: EnhancedIfcElement) => el.properties?.GlobalId === storeyId
+          );
+
+          if (storey) {
+            storey.spatialChildren = elementIds;
+          }
+        }
+
+        // Gather statistics about the model
+        const modelStructure = analyzeModelStructure(elements);
+
+        console.log(
+          "SpatialHierarchyNode processor: Model structure report",
+          modelStructure
+        );
+
+        // Get node configuration
+        const spatialType =
+          node.data.properties?.spatialType || "IFCBUILDINGSTOREY";
+        const spatialId = node.data.properties?.[spatialType.toLowerCase()];
+        const elementType = node.data.properties?.elementType;
+
+        console.log("SpatialHierarchyNode processor: Configuration", {
+          spatialType,
+          spatialId,
+          elementType,
+        });
+
+        // Process according to configuration
+        let outputElements: any[] = [];
+
+        if (spatialId) {
+          // If a specific spatial element is selected
+          const selectedSpatial = elements.find(
+            (el: EnhancedIfcElement) => el.id === spatialId
+          );
+
+          if (selectedSpatial && selectedSpatial.spatialChildren) {
+            console.log(
+              `SpatialHierarchyNode processor: Found selected ${spatialType} with ID ${spatialId}`
+            );
+
+            // Get all child elements
+            outputElements = elements.filter(
+              (el: EnhancedIfcElement) =>
+                selectedSpatial.spatialChildren?.includes(el.id) ||
+                selectedSpatial.spatialChildren?.includes(
+                  el.properties?.GlobalId
+                )
+            );
+
+            console.log(
+              `SpatialHierarchyNode processor: Selected spatial element has ${outputElements.length} contained elements`
+            );
+          } else {
+            console.log(
+              `SpatialHierarchyNode processor: Selected spatial element not found or has no children`
+            );
+          }
+        } else if (elementType) {
+          // If an element type is selected
+          console.log(
+            `SpatialHierarchyNode processor: Using element type filter: ${elementType}`
+          );
+          outputElements = elements.filter(
+            (el: EnhancedIfcElement) => el.type.toUpperCase() === elementType
+          );
+          console.log(
+            `SpatialHierarchyNode processor: Found ${outputElements.length} elements of type ${elementType}`
+          );
+        } else {
+          // No selection made, analyze model structure and make a best guess
+          console.log(
+            "SpatialHierarchyNode processor: No selection made - analyzing model structure"
+          );
+
+          if (
+            modelStructure.spatialElements &&
+            Object.keys(modelStructure.spatialElements).length > 0
+          ) {
+            // Model has spatial structure, use storeys by default
+            const storeys = elements.filter(
+              (el: EnhancedIfcElement) =>
+                el.type.toUpperCase() === "IFCBUILDINGSTOREY"
+            );
+
+            if (storeys.length > 0) {
+              console.log(
+                `SpatialHierarchyNode processor: Found ${storeys.length} building storeys`
+              );
+              const firstStorey = storeys[0];
+
+              if (
+                firstStorey.spatialChildren &&
+                firstStorey.spatialChildren.length > 0
+              ) {
+                outputElements = elements.filter(
+                  (el: EnhancedIfcElement) =>
+                    firstStorey.spatialChildren?.includes(el.id) ||
+                    firstStorey.spatialChildren?.includes(
+                      el.properties?.GlobalId
+                    )
+                );
+
+                console.log(
+                  `SpatialHierarchyNode processor: Using first storey with ${outputElements.length} elements`
+                );
+              }
+            } else {
+              // Try buildings if no storeys
+              const buildings = elements.filter(
+                (el: EnhancedIfcElement) =>
+                  el.type.toUpperCase() === "IFCBUILDING"
+              );
+
+              if (buildings.length > 0) {
+                console.log(
+                  `SpatialHierarchyNode processor: No storeys found, using building with ${
+                    buildings[0].spatialChildren?.length || 0
+                  } children`
+                );
+
+                if (
+                  buildings[0].spatialChildren &&
+                  buildings[0].spatialChildren.length > 0
+                ) {
+                  outputElements = elements.filter(
+                    (el: EnhancedIfcElement) =>
+                      buildings[0].spatialChildren?.includes(el.id) ||
+                      buildings[0].spatialChildren?.includes(
+                        el.properties?.GlobalId
+                      )
+                  );
+                }
+              }
+            }
+          } else {
+            // No spatial structure, analyze available element types
+            const availableTypes = Object.keys(
+              modelStructure.elementTypes || {}
+            );
+            console.log(
+              "SpatialHierarchyNode processor: Available types",
+              availableTypes
+            );
+
+            // If model only has walls, select all walls
+            if (
+              availableTypes.length === 1 &&
+              availableTypes[0] === "IFCWALL"
+            ) {
+              console.log(
+                "SpatialHierarchyNode processor: Simple IFC file with only walls detected"
+              );
+
+              const walls = elements.filter(
+                (el: EnhancedIfcElement) => el.type.toUpperCase() === "IFCWALL"
+              );
+
+              // Do wall-specific analysis
+              if (walls.length > 0) {
+                console.log(
+                  "SpatialHierarchyNode processor: Auto-selecting all wall elements"
+                );
+                outputElements = walls;
+
+                // Analyze wall properties
+                const wallAnalysis = analyzeWallElements(walls);
+                console.log(
+                  "SpatialHierarchyNode processor: Wall elements analysis",
+                  wallAnalysis
+                );
+              }
+            } else if (availableTypes.includes("IFCBUILDINGSTOREY")) {
+              // Use the first storey if available
+              const storey = elements.find(
+                (el: EnhancedIfcElement) =>
+                  el.type.toUpperCase() === "IFCBUILDINGSTOREY"
+              );
+              if (storey) {
+                console.log(
+                  "SpatialHierarchyNode processor: Using first building storey"
+                );
+                outputElements = [storey];
+              }
+            } else if (availableTypes.includes("IFCBUILDING")) {
+              // Use the first building if available
+              const building = elements.find(
+                (el: EnhancedIfcElement) =>
+                  el.type.toUpperCase() === "IFCBUILDING"
+              );
+              if (building) {
+                console.log(
+                  "SpatialHierarchyNode processor: Using first building"
+                );
+                outputElements = [building];
+              }
+            } else if (availableTypes.length > 0) {
+              // Use the first available type
+              const firstType = availableTypes[0];
+              console.log(
+                `SpatialHierarchyNode processor: Using first available type: ${firstType}`
+              );
+              outputElements = elements.filter(
+                (el: EnhancedIfcElement) => el.type.toUpperCase() === firstType
+              );
+            }
+          }
+        }
+
+        // Set node output
+        result = {
+          elements: outputElements,
+          spatialStructure: {
+            elements: spatialElements,
+            containment: containmentStructures,
+          },
+          model: inputValues.model,
+        };
         break;
 
       default:
@@ -857,4 +1560,662 @@ export class WorkflowExecutor {
       throw error;
     }
   }
+}
+
+// Add these utility functions at the end of the file
+function analyzeModelStructure(elements: EnhancedIfcElement[]) {
+  // Count elements by type
+  const typeCount: Record<string, number> = {};
+  elements.forEach((el: EnhancedIfcElement) => {
+    const type = el.type.toUpperCase();
+    typeCount[type] = (typeCount[type] || 0) + 1;
+  });
+
+  // Find property sets
+  const psetTypes = new Set<string>();
+  elements.forEach((el: EnhancedIfcElement) => {
+    if (el.psets) {
+      Object.keys(el.psets).forEach((pset) => psetTypes.add(pset));
+    }
+  });
+
+  // Analyze spatial structure elements
+  const spatialElements = elements.filter((el) => el.isSpatial);
+  const project = elements.find((el) => el.type.toUpperCase() === "IFCPROJECT");
+  const sites = elements.filter((el) => el.type.toUpperCase() === "IFCSITE");
+  const buildings = elements.filter(
+    (el) => el.type.toUpperCase() === "IFCBUILDING"
+  );
+  const storeys = elements.filter(
+    (el) => el.type.toUpperCase() === "IFCBUILDINGSTOREY"
+  );
+  const spaces = elements.filter((el) => el.type.toUpperCase() === "IFCSPACE");
+
+  // Analyze building topology
+  const buildingStructure: any = {
+    project: project
+      ? {
+          id: project.id,
+          name: project.properties?.Name || "Unnamed Project",
+          children: project.spatialChildren || [],
+        }
+      : null,
+    sites: sites.length,
+    buildings: buildings.length,
+    storeys: storeys.length,
+    spaces: spaces.length,
+  };
+
+  // Analyze containment relationships
+  const containmentMap: Record<string, string[]> = {};
+  const elementsWithContainment = elements.filter((el) => el.containedIn);
+  elementsWithContainment.forEach((el) => {
+    if (el.containedIn) {
+      if (!containmentMap[el.containedIn]) {
+        containmentMap[el.containedIn] = [];
+      }
+      containmentMap[el.containedIn].push(el.id);
+    }
+  });
+
+  return {
+    elementCount: elements.length,
+    elementTypes: typeCount,
+    propertySetTypes: Array.from(psetTypes),
+    spatialElements: {
+      count: spatialElements.length,
+      project: project?.id,
+      sites: sites.map((site) => site.id),
+      buildings: buildings.map((building) => building.id),
+      storeys: storeys.map((storey) => storey.id),
+      spaces: spaces.map((space) => space.id),
+    },
+    containmentMap,
+    buildingStructure,
+    hasSpatialStructure: spatialElements.length > 0,
+  };
+}
+
+function analyzeWallElements(walls: EnhancedIfcElement[]) {
+  // Skip if no walls
+  if (!walls || walls.length === 0) return null;
+
+  // Analyze wall properties
+  const wallHeights = walls.map((wall) => {
+    let height = null;
+
+    // Try to find height in various property locations
+    if (wall.properties && wall.properties.Height) {
+      height = wall.properties.Height;
+    } else if (wall.psets) {
+      // Look in common property sets
+      for (const psetName of Object.keys(wall.psets)) {
+        const pset = wall.psets[psetName];
+        if (pset.Height) {
+          height = pset.Height;
+          break;
+        }
+        if (pset.height) {
+          height = pset.height;
+          break;
+        }
+        if (pset.TotalHeight) {
+          height = pset.TotalHeight;
+          break;
+        }
+      }
+    }
+
+    // Look at geometry if available
+    if (!height && wall.geometry && wall.geometry.dimensions) {
+      height = wall.geometry.dimensions.z;
+    }
+
+    return {
+      id: wall.id,
+      height,
+      name: wall.properties?.Name || wall.id,
+      globalId: wall.properties?.GlobalId,
+    };
+  });
+
+  // Count walls with found heights
+  const wallsWithHeight = wallHeights.filter((w) => w.height !== null).length;
+
+  // Find common psets in walls
+  const psetFrequency: Record<string, number> = {};
+  walls.forEach((wall) => {
+    if (wall.psets) {
+      Object.keys(wall.psets).forEach((pset) => {
+        psetFrequency[pset] = (psetFrequency[pset] || 0) + 1;
+      });
+    }
+  });
+
+  return {
+    count: walls.length,
+    wallsWithHeightInfo: wallsWithHeight,
+    commonPropertySets: psetFrequency,
+    walls: wallHeights.slice(0, 3), // Only return first 3 walls for brevity
+  };
+}
+
+// Add a proper containment extraction function based on the Python algorithm
+function extractContainmentStructure(
+  elements: EnhancedIfcElement[]
+): Record<string, any>[] {
+  console.log("Extracting containment structures for all elements...");
+
+  // Create lookup maps for faster access
+  const elementsById: Record<string, EnhancedIfcElement> = {};
+  elements.forEach((el) => {
+    if (el.properties?.GlobalId) {
+      elementsById[el.properties.GlobalId] = el;
+    } else if (el.id) {
+      // Fallback to using element ID if GlobalId is missing
+      elementsById[el.id] = el;
+    }
+  });
+
+  // Find all relationship elements
+  const relationshipElements = elements.filter((el) =>
+    el.type.toUpperCase().startsWith("IFCREL")
+  );
+
+  // Find the spatial containment relationships
+  const spatialRelationships = relationshipElements.filter(
+    (rel) => rel.type.toUpperCase() === "IFCRELCONTAINEDINSPATIALSTRUCTURE"
+  );
+  console.log(
+    `Found ${spatialRelationships.length} spatial containment relationships`
+  );
+
+  // Find the aggregation relationships
+  const aggregationRelationships = relationshipElements.filter(
+    (rel) => rel.type.toUpperCase() === "IFCRELAGGREGATES"
+  );
+  console.log(
+    `Found ${aggregationRelationships.length} aggregation relationships`
+  );
+
+  // --- Function to find parent via IfcRelAggregates ---
+  const findParentAggregate = (
+    childId: string,
+    targetParentType?: string
+  ): EnhancedIfcElement | null => {
+    for (const rel of aggregationRelationships) {
+      const relatedObjects = Array.isArray(rel.properties?.RelatedObjects)
+        ? rel.properties?.RelatedObjects
+        : [rel.properties?.RelatedObjects];
+
+      if (relatedObjects.includes(childId)) {
+        const parentId = rel.properties?.RelatingObject;
+        const parentElement = elementsById[parentId];
+        if (parentElement) {
+          if (
+            !targetParentType ||
+            parentElement.type.toUpperCase() === targetParentType
+          ) {
+            return parentElement;
+          }
+          // If target type specified but doesn't match, keep searching upwards
+          // Note: This basic recursive search might need limits in complex models
+          // return findParentAggregate(parentId, targetParentType);
+        }
+      }
+    }
+    return null;
+  };
+  // --- End of helper function ---
+
+  // Process each element (excluding relationships) to find its containment structure
+  const results: Record<string, any>[] = [];
+  elements.forEach((element) => {
+    // Skip relationship elements themselves
+    if (element.type.toUpperCase().startsWith("IFCREL")) return;
+
+    const elementId = element.properties?.GlobalId || element.id;
+    if (!elementId) return;
+
+    const structure: {
+      elementId: string;
+      building: any;
+      storey: any;
+      space: any;
+    } = {
+      elementId: elementId,
+      building: null,
+      storey: null,
+      space: null,
+    };
+
+    // Find spatial relationships where this element is contained
+    for (const rel of spatialRelationships) {
+      const relatedElements = Array.isArray(rel.properties?.RelatedElements)
+        ? rel.properties?.RelatedElements
+        : [rel.properties?.RelatedElements];
+
+      if (relatedElements.includes(elementId)) {
+        const containerId = rel.properties?.RelatingStructure;
+        const container = elementsById[containerId];
+
+        if (!container) continue;
+
+        const containerType = container.type.toUpperCase();
+
+        if (containerType === "IFCBUILDINGSTOREY") {
+          structure.storey = {
+            id: container.properties?.GlobalId || container.id,
+            name: container.properties?.Name,
+            elevation: container.properties?.Elevation,
+            description: container.properties?.Description,
+          };
+          // Find building via aggregation
+          const building = findParentAggregate(containerId, "IFCBUILDING");
+          if (building) {
+            structure.building = {
+              id: building.properties?.GlobalId || building.id,
+              name: building.properties?.Name,
+              description: building.properties?.Description,
+            };
+          }
+          // Found direct container, break from this loop
+          break;
+        } else if (containerType === "IFCSPACE") {
+          structure.space = {
+            id: container.properties?.GlobalId || container.id,
+            name: container.properties?.Name,
+            description: container.properties?.Description,
+          };
+          // Find storey via aggregation
+          const storey = findParentAggregate(containerId, "IFCBUILDINGSTOREY");
+          if (storey) {
+            structure.storey = {
+              id: storey.properties?.GlobalId || storey.id,
+              name: storey.properties?.Name,
+              elevation: storey.properties?.Elevation,
+              description: storey.properties?.Description,
+            };
+            // Find building via storey's aggregation
+            const building = findParentAggregate(
+              storey.properties?.GlobalId || storey.id,
+              "IFCBUILDING"
+            );
+            if (building) {
+              structure.building = {
+                id: building.properties?.GlobalId || building.id,
+                name: building.properties?.Name,
+                description: building.properties?.Description,
+              };
+            }
+          }
+          // Found direct container, break from this loop
+          break;
+        } else if (containerType === "IFCBUILDING") {
+          // Element directly contained in building? Less common but possible.
+          structure.building = {
+            id: container.properties?.GlobalId || container.id,
+            name: container.properties?.Name,
+            description: container.properties?.Description,
+          };
+          // Found direct container, break from this loop
+          break;
+        } else if (containerType === "IFCSITE") {
+          // Element directly contained in site?
+          // You might want to add site info or traverse up to project here
+          break;
+        }
+      }
+    }
+
+    // Clean up nulls and add if we found some structure
+    const finalStructure = {
+      elementId: structure.elementId,
+      building: structure.building,
+      storey: structure.storey,
+      space: structure.space,
+    };
+
+    if (
+      finalStructure.building ||
+      finalStructure.storey ||
+      finalStructure.space
+    ) {
+      results.push(finalStructure);
+    }
+  });
+
+  console.log(`Extracted ${results.length} containment structures`);
+  return results;
+}
+
+// Update processSpatialHierarchyNode to use NodePair type
+function processSpatialHierarchyNode(nodePair: NodePair): void {
+  const { node, inputValues } = nodePair;
+
+  console.log("Processing spatialHierarchyNode", { node, inputValues });
+
+  // Ensure elements array exists before accessing it
+  if (!inputValues.elements || !Array.isArray(inputValues.elements)) {
+    console.log("SpatialHierarchyNode processor: No elements to process");
+    return;
+  }
+
+  const elements: EnhancedIfcElement[] = inputValues.elements;
+  console.log(
+    `SpatialHierarchyNode processor: Processing ${elements.length} elements`
+  );
+
+  // Extract proper containment structure
+  const containmentStructures = extractContainmentStructure(elements);
+
+  // Add containment information to elements
+  containmentStructures.forEach((structure) => {
+    const element = elements.find(
+      (el: EnhancedIfcElement) =>
+        el.properties?.GlobalId === structure.elementId
+    );
+
+    if (element) {
+      element.containmentStructure = {
+        building: structure.building,
+        storey: structure.storey,
+        space: structure.space,
+      };
+
+      // Set containedIn property for backward compatibility
+      if (structure.storey) {
+        element.containedIn = structure.storey.id;
+      } else if (structure.building) {
+        element.containedIn = structure.building.id;
+      } else if (structure.space) {
+        element.containedIn = structure.space.id;
+      }
+    }
+  });
+
+  // Find spatial elements
+  const spatialTypes = [
+    "IFCPROJECT",
+    "IFCSITE",
+    "IFCBUILDING",
+    "IFCBUILDINGSTOREY",
+    "IFCSPACE",
+  ];
+
+  const spatialElements = elements.filter((el: EnhancedIfcElement) =>
+    spatialTypes.includes(el.type.toUpperCase())
+  );
+
+  // Mark spatial elements and set up hierarchy
+  spatialElements.forEach((element: EnhancedIfcElement) => {
+    element.isSpatial = true;
+
+    // Set spatial level
+    switch (element.type.toUpperCase()) {
+      case "IFCPROJECT":
+        element.spatialLevel = 0;
+        break;
+      case "IFCSITE":
+        element.spatialLevel = 1;
+        break;
+      case "IFCBUILDING":
+        element.spatialLevel = 2;
+        break;
+      case "IFCBUILDINGSTOREY":
+        element.spatialLevel = 3;
+        break;
+      case "IFCSPACE":
+        element.spatialLevel = 4;
+        break;
+    }
+  });
+
+  // Create spatial relationships using containment information
+  const buildingSpatialMap: Record<string, string[]> = {};
+  const storeySpatialMap: Record<string, string[]> = {};
+
+  containmentStructures.forEach((structure) => {
+    if (structure.building && structure.storey) {
+      const buildingId = structure.building.id;
+      const storeyId = structure.storey.id;
+
+      // Add storey to building's children
+      if (!buildingSpatialMap[buildingId]) {
+        buildingSpatialMap[buildingId] = [];
+      }
+      if (!buildingSpatialMap[buildingId].includes(storeyId)) {
+        buildingSpatialMap[buildingId].push(storeyId);
+      }
+    }
+
+    if (structure.storey && structure.elementId) {
+      const storeyId = structure.storey.id;
+
+      // Add element to storey's children
+      if (!storeySpatialMap[storeyId]) {
+        storeySpatialMap[storeyId] = [];
+      }
+      if (!storeySpatialMap[storeyId].includes(structure.elementId)) {
+        storeySpatialMap[storeyId].push(structure.elementId);
+      }
+    }
+  });
+
+  // Set spatial children
+  for (const [buildingId, storeyIds] of Object.entries(buildingSpatialMap)) {
+    const building = elements.find(
+      (el: EnhancedIfcElement) => el.properties?.GlobalId === buildingId
+    );
+
+    if (building) {
+      building.spatialChildren = storeyIds;
+    }
+  }
+
+  for (const [storeyId, elementIds] of Object.entries(storeySpatialMap)) {
+    const storey = elements.find(
+      (el: EnhancedIfcElement) => el.properties?.GlobalId === storeyId
+    );
+
+    if (storey) {
+      storey.spatialChildren = elementIds;
+    }
+  }
+
+  // Gather statistics about the model
+  const modelStructure = analyzeModelStructure(elements);
+
+  console.log(
+    "SpatialHierarchyNode processor: Model structure report",
+    modelStructure
+  );
+
+  // Get node configuration
+  const spatialType = node.data.properties?.spatialType || "IFCBUILDINGSTOREY";
+  const spatialId = node.data.properties?.[spatialType.toLowerCase()];
+  const elementType = node.data.properties?.elementType;
+
+  console.log("SpatialHierarchyNode processor: Configuration", {
+    spatialType,
+    spatialId,
+    elementType,
+  });
+
+  // Process according to configuration
+  let outputElements: any[] = [];
+
+  if (spatialId) {
+    // If a specific spatial element is selected
+    const selectedSpatial = elements.find(
+      (el: EnhancedIfcElement) => el.id === spatialId
+    );
+
+    if (selectedSpatial && selectedSpatial.spatialChildren) {
+      console.log(
+        `SpatialHierarchyNode processor: Found selected ${spatialType} with ID ${spatialId}`
+      );
+
+      // Get all child elements
+      outputElements = elements.filter(
+        (el: EnhancedIfcElement) =>
+          selectedSpatial.spatialChildren?.includes(el.id) ||
+          selectedSpatial.spatialChildren?.includes(el.properties?.GlobalId)
+      );
+
+      console.log(
+        `SpatialHierarchyNode processor: Selected spatial element has ${outputElements.length} contained elements`
+      );
+    } else {
+      console.log(
+        `SpatialHierarchyNode processor: Selected spatial element not found or has no children`
+      );
+    }
+  } else if (elementType) {
+    // If an element type is selected
+    console.log(
+      `SpatialHierarchyNode processor: Using element type filter: ${elementType}`
+    );
+    outputElements = elements.filter(
+      (el: EnhancedIfcElement) => el.type.toUpperCase() === elementType
+    );
+    console.log(
+      `SpatialHierarchyNode processor: Found ${outputElements.length} elements of type ${elementType}`
+    );
+  } else {
+    // No selection made, analyze model structure and make a best guess
+    console.log(
+      "SpatialHierarchyNode processor: No selection made - analyzing model structure"
+    );
+
+    if (
+      modelStructure.spatialElements &&
+      Object.keys(modelStructure.spatialElements).length > 0
+    ) {
+      // Model has spatial structure, use storeys by default
+      const storeys = elements.filter(
+        (el: EnhancedIfcElement) =>
+          el.type.toUpperCase() === "IFCBUILDINGSTOREY"
+      );
+
+      if (storeys.length > 0) {
+        console.log(
+          `SpatialHierarchyNode processor: Found ${storeys.length} building storeys`
+        );
+        const firstStorey = storeys[0];
+
+        if (
+          firstStorey.spatialChildren &&
+          firstStorey.spatialChildren.length > 0
+        ) {
+          outputElements = elements.filter(
+            (el: EnhancedIfcElement) =>
+              firstStorey.spatialChildren?.includes(el.id) ||
+              firstStorey.spatialChildren?.includes(el.properties?.GlobalId)
+          );
+
+          console.log(
+            `SpatialHierarchyNode processor: Using first storey with ${outputElements.length} elements`
+          );
+        }
+      } else {
+        // Try buildings if no storeys
+        const buildings = elements.filter(
+          (el: EnhancedIfcElement) => el.type.toUpperCase() === "IFCBUILDING"
+        );
+
+        if (buildings.length > 0) {
+          console.log(
+            `SpatialHierarchyNode processor: No storeys found, using building with ${
+              buildings[0].spatialChildren?.length || 0
+            } children`
+          );
+
+          if (
+            buildings[0].spatialChildren &&
+            buildings[0].spatialChildren.length > 0
+          ) {
+            outputElements = elements.filter(
+              (el: EnhancedIfcElement) =>
+                buildings[0].spatialChildren?.includes(el.id) ||
+                buildings[0].spatialChildren?.includes(el.properties?.GlobalId)
+            );
+          }
+        }
+      }
+    } else {
+      // No spatial structure, analyze available element types
+      const availableTypes = Object.keys(modelStructure.elementTypes || {});
+      console.log(
+        "SpatialHierarchyNode processor: Available types",
+        availableTypes
+      );
+
+      // If model only has walls, select all walls
+      if (availableTypes.length === 1 && availableTypes[0] === "IFCWALL") {
+        console.log(
+          "SpatialHierarchyNode processor: Simple IFC file with only walls detected"
+        );
+
+        const walls = elements.filter(
+          (el: EnhancedIfcElement) => el.type.toUpperCase() === "IFCWALL"
+        );
+
+        // Do wall-specific analysis
+        if (walls.length > 0) {
+          console.log(
+            "SpatialHierarchyNode processor: Auto-selecting all wall elements"
+          );
+          outputElements = walls;
+
+          // Analyze wall properties
+          const wallAnalysis = analyzeWallElements(walls);
+          console.log(
+            "SpatialHierarchyNode processor: Wall elements analysis",
+            wallAnalysis
+          );
+        }
+      } else if (availableTypes.includes("IFCBUILDINGSTOREY")) {
+        // Use the first storey if available
+        const storey = elements.find(
+          (el: EnhancedIfcElement) =>
+            el.type.toUpperCase() === "IFCBUILDINGSTOREY"
+        );
+        if (storey) {
+          console.log(
+            "SpatialHierarchyNode processor: Using first building storey"
+          );
+          outputElements = [storey];
+        }
+      } else if (availableTypes.includes("IFCBUILDING")) {
+        // Use the first building if available
+        const building = elements.find(
+          (el: EnhancedIfcElement) => el.type.toUpperCase() === "IFCBUILDING"
+        );
+        if (building) {
+          console.log("SpatialHierarchyNode processor: Using first building");
+          outputElements = [building];
+        }
+      } else if (availableTypes.length > 0) {
+        // Use the first available type
+        const firstType = availableTypes[0];
+        console.log(
+          `SpatialHierarchyNode processor: Using first available type: ${firstType}`
+        );
+        outputElements = elements.filter(
+          (el: EnhancedIfcElement) => el.type.toUpperCase() === firstType
+        );
+      }
+    }
+  }
+
+  // Set node output
+  node.data.outputData = {
+    elements: outputElements,
+    spatialStructure: {
+      elements: spatialElements,
+      containment: containmentStructures,
+    },
+    model: inputValues.model,
+  };
 }

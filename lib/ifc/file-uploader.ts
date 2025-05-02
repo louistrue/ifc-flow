@@ -1,4 +1,5 @@
 import { loadIfcFile, IfcModel } from "@/lib/ifc-utils";
+import { storeRawIfcContent } from "../ifc-utils";
 
 // Interface for file upload handler props
 export interface FileUploaderProps {
@@ -41,6 +42,25 @@ export async function handleFileUpload(
             "Still processing, large IFC files can take a while..."
           );
       }, 20000); // Show warning after 20 seconds
+    }
+
+    // Store the IFC file for direct access by classification nodes
+    try {
+      // Use FileReader to get raw text content for classification parsing
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        if (e.target && typeof e.target.result === "string") {
+          // Store raw content with filename as key
+          storeRawIfcContent(file.name, e.target.result);
+          console.log(
+            `Stored raw IFC content for ${file.name} (${e.target.result.length} chars)`
+          );
+        }
+      };
+      // Start reading as text
+      reader.readAsText(file);
+    } catch (err) {
+      console.warn("Failed to store raw IFC content:", err);
     }
 
     // Load the file with our IfcOpenShell implementation

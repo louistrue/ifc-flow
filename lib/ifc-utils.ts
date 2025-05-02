@@ -175,6 +175,24 @@ export async function initializeWorker(): Promise<void> {
   }
 }
 
+// Store raw IFC content for direct parsing when needed (used for classification extraction)
+let _rawIfcContent: Map<string, string> = new Map();
+
+// Function to store raw IFC content
+export function storeRawIfcContent(fileName: string, content: string): void {
+  if (fileName && content) {
+    _rawIfcContent.set(fileName, content);
+    console.log(
+      `Stored raw IFC content for ${fileName}, length: ${content.length} chars`
+    );
+  }
+}
+
+// Function to get raw IFC content
+export function getRawIfcContent(fileName: string): string | null {
+  return _rawIfcContent.get(fileName) || null;
+}
+
 // Load an IFC file using IfcOpenShell via the worker
 export async function loadIfcFile(
   file: File,
@@ -205,6 +223,21 @@ export async function loadIfcFile(
     // Store the File object in the cache
     ifcFileCache.set(file.name, file);
     console.log(`Stored File object for ${file.name} in cache.`);
+
+    // Try to read the file as text for raw IFC content storage
+    // This is used for direct parsing of classifications
+    try {
+      const textReader = new FileReader();
+      textReader.onload = (e) => {
+        if (e.target?.result) {
+          const content = e.target.result as string;
+          storeRawIfcContent(file.name, content);
+        }
+      };
+      textReader.readAsText(file);
+    } catch (err) {
+      console.warn("Could not read file as text for raw storage:", err);
+    }
 
     // Read the file as ArrayBuffer - this instance will be transferred
     const arrayBuffer = await file.arrayBuffer();
@@ -277,17 +310,31 @@ export async function loadIfcFile(
       workerPromiseResolvers.set(messageId2, { resolve, reject });
 
       // Request all types that have at least one element
-      const types = Object.entries(modelInfo.element_counts)
+      const typesFromCounts = Object.entries(modelInfo.element_counts)
         .filter(([_, count]) => (count as number) > 0)
         .map(([type]) => type);
 
-      console.log("Extracting element types:", types);
+      // **Explicitly add relationship types needed for spatial hierarchy**
+      const requiredRelationshipTypes = [
+        "IfcRelContainedInSpatialStructure",
+        "IfcRelAggregates",
+        // Add other relevant relationship types if needed in the future
+        // "IfcRelDefinesByProperties",
+        // "IfcRelAssociatesMaterial"
+      ];
 
-      // Send the request
+      // Combine types from counts and required relationship types
+      const typesToExtract = [
+        ...new Set([...typesFromCounts, ...requiredRelationshipTypes]),
+      ];
+
+      console.log("Extracting element types:", typesToExtract);
+
+      // Send the request with the combined types
       ifcWorker!.postMessage({
         action: "extractData",
         messageId: messageId2,
-        data: { types },
+        data: { types: typesToExtract },
       });
 
       // Set a timeout to detect if the worker doesn't respond
@@ -1140,15 +1187,32 @@ export function manageProperties(
 
 // Classification functions
 export function manageClassifications(
-  elements: IfcElement[],
+  elements: IfcElement[] | any,
   system = "uniclass",
   action = "get",
   code = ""
 ): IfcElement[] {
   console.log("Managing classifications:", system, action, code);
 
-  if (!elements || elements.length === 0) {
-    console.warn("No elements for classification management");
+  // Ensure elements is an array
+  let elementArray: IfcElement[] = [];
+
+  if (Array.isArray(elements)) {
+    elementArray = elements;
+  } else if (
+    elements &&
+    elements.elements &&
+    Array.isArray(elements.elements)
+  ) {
+    // Handle case where elements is an object with an elements array property
+    elementArray = elements.elements;
+  } else {
+    console.warn("No valid elements for classification management");
+    return [];
+  }
+
+  if (elementArray.length === 0) {
+    console.warn("Empty elements array for classification management");
     return [];
   }
 
@@ -1165,16 +1229,85 @@ export function manageClassifications(
   const systemName = systemNames[system as keyof typeof systemNames] || system;
 
   if (action === "get") {
+    console.log(
+      `Searching for classifications in ${elementArray.length} elements`
+    );
+
+    // Debug: Log the structure of the first element to understand its properties
+    if (elementArray.length > 0) {
+      const sampleElement = elementArray[0];
+      console.log("Sample element structure for classification detection:", {
+        id: sampleElement.id,
+        type: sampleElement.type,
+        hasProperties: !!sampleElement.properties,
+        propertiesKeys: sampleElement.properties
+          ? Object.keys(sampleElement.properties)
+          : [],
+        hasPsets: !!sampleElement.psets,
+        psetKeys: sampleElement.psets ? Object.keys(sampleElement.psets) : [],
+        hasAssociations: !!(
+          sampleElement.properties && sampleElement.properties.HasAssociations
+        ),
+      });
+    }
+
     // Return elements with classification information if present
-    return elements.map((element) => {
+    return elementArray.map((element) => {
       const enhancedElement = { ...element };
 
       // Look for classifications in properties or psets
       let classifications = [];
 
       // Check in direct properties
-      if (element.properties.Classification) {
-        classifications.push(element.properties.Classification);
+      if (element.properties && element.properties.Classification) {
+        // Handle single classification object
+        if (
+          typeof element.properties.Classification === "object" &&
+          !Array.isArray(element.properties.Classification)
+        ) {
+          classifications.push({
+            system: element.properties.Classification.System || "Unknown",
+            code:
+              element.properties.Classification.Code ||
+              element.properties.Classification.ItemReference ||
+              "",
+            description:
+              element.properties.Classification.Description ||
+              element.properties.Classification.Name ||
+              "",
+          });
+        }
+        // Handle array of classifications
+        else if (Array.isArray(element.properties.Classification)) {
+          for (const cls of element.properties.Classification) {
+            classifications.push({
+              system: cls.System || "Unknown",
+              code: cls.Code || cls.ItemReference || "",
+              description: cls.Description || cls.Name || "",
+            });
+          }
+        }
+      }
+
+      // Check for specific classification property in direct properties
+      if (element.properties) {
+        const classificationPropNames = [
+          "ClassificationCode",
+          "ClassificationSystem",
+          "ClassificationReference",
+          "IfcClassificationReference",
+        ];
+
+        for (const propName of classificationPropNames) {
+          if (element.properties[propName]) {
+            classifications.push({
+              system: element.properties.ClassificationSystem || "Unknown",
+              code: element.properties[propName],
+              description: element.properties.ClassificationDescription || "",
+            });
+            break;
+          }
+        }
       }
 
       // Check in property sets
@@ -1195,10 +1328,84 @@ export function manageClassifications(
             code:
               element.psets[pset].Code ||
               element.psets[pset].ItemReference ||
+              element.psets[pset].Identification ||
               "",
             description: element.psets[pset].Description || "",
           });
         }
+      }
+
+      // IMPROVED: Check for IfcRelAssociatesClassification in HasAssociations similar to Python script
+      if (element.properties && element.properties.HasAssociations) {
+        console.log(
+          `Element ${element.id} (${element.type}) has HasAssociations property`
+        );
+
+        const associations = Array.isArray(element.properties.HasAssociations)
+          ? element.properties.HasAssociations
+          : [element.properties.HasAssociations];
+
+        // Log the first association to understand structure
+        if (associations.length > 0) {
+          console.log("First association structure:", associations[0]);
+        }
+
+        for (const assoc of associations) {
+          // Check if association is IfcRelAssociatesClassification
+          const isClassAssoc =
+            (assoc.type &&
+              assoc.type.includes("IfcRelAssociatesClassification")) ||
+            (assoc.is_a &&
+              typeof assoc.is_a === "function" &&
+              assoc.is_a("IfcRelAssociatesClassification")) ||
+            (assoc.properties &&
+              assoc.properties.type === "IfcRelAssociatesClassification");
+
+          if (isClassAssoc || (assoc && assoc.RelatingClassification)) {
+            console.log("Found classification association");
+
+            // Find the RelatingClassification based on structure
+            const relatingCls =
+              assoc.RelatingClassification ||
+              (assoc.properties && assoc.properties.RelatingClassification);
+
+            if (relatingCls) {
+              console.log("Classification reference found:", relatingCls);
+
+              // Extract relevant information
+              const systemName =
+                (relatingCls.ReferencedSource &&
+                  relatingCls.ReferencedSource.Name) ||
+                relatingCls.Name ||
+                "Unknown";
+
+              // Handle both IFC2X3 and IFC4 schemas
+              const code =
+                relatingCls.ItemReference || // IFC2X3
+                relatingCls.Identification || // IFC4
+                "";
+
+              const description = relatingCls.Description || "";
+
+              classifications.push({
+                system: systemName,
+                code: code,
+                description: description,
+              });
+
+              console.log(
+                `Added classification - System: ${systemName}, Code: ${code}`
+              );
+            }
+          }
+        }
+      }
+
+      // If we found classifications, log them
+      if (classifications.length > 0) {
+        console.log(
+          `Found ${classifications.length} classifications for element ${element.id} (${element.type})`
+        );
       }
 
       enhancedElement.classifications = classifications;
@@ -1207,7 +1414,7 @@ export function manageClassifications(
   }
 
   // Set classification
-  return elements.map((element) => {
+  return elementArray.map((element) => {
     const newElement = { ...element };
 
     // First, check if we have psets
@@ -1559,6 +1766,15 @@ export function exportData(
       console.error("Cannot export IFC: Invalid input data structure.");
       return Promise.reject("Cannot export IFC: Invalid input data.");
     }
+
+    // Log the number of elements and their properties for debugging
+    console.log("Exporting IFC with elements:", {
+      count: elementsToUse.length,
+      sampleElement: elementsToUse[0],
+      properties: elementsToUse[0]?.properties,
+      psets: elementsToUse[0]?.psets,
+      classifications: elementsToUse[0]?.classifications,
+    });
 
     // Create the model object containing the potentially modified elements
     // but crucially retain the original model's metadata like ID and NAME for lookup purposes

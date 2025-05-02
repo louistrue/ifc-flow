@@ -69,6 +69,32 @@ export const IfcNode = memo(({ id, data, isConnectable }) => {
               file,
               (model) => {
                 console.log("IFC model loaded:", model);
+
+                // No spatial processing here - just pass the raw model data
+                // Let each node (like SpatialHierarchyNode) do its own processing
+
+                // Just do basic cleanup and model validation
+                // This ensures all elements have consistent IDs and properties structure
+                if (model.elements) {
+                  // Ensure all elements have an id
+                  model.elements.forEach((element) => {
+                    if (!element.id && element.properties?.GlobalId) {
+                      element.id = element.properties.GlobalId;
+                    } else if (!element.id) {
+                      element.id = `el-${
+                        element.expressId || Date.now()
+                      }-${Math.random().toString(36).substring(2, 9)}`;
+                    }
+
+                    // Ensure all elements have a properties object
+                    if (!element.properties) {
+                      element.properties = {};
+                    }
+                  });
+
+                  console.log(`Validated ${model.elements.length} elements`);
+                }
+
                 // Update node with model, clear loading/progress
                 setNodes((nodes) =>
                   nodes.map((node) => {
@@ -77,7 +103,7 @@ export const IfcNode = memo(({ id, data, isConnectable }) => {
                         ...node,
                         data: {
                           ...node.data,
-                          model: model, // Store the full model object
+                          model: model, // Store the full model object with minimal pre-processing
                           isLoading: false,
                           error: null,
                         },

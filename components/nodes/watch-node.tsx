@@ -10,6 +10,7 @@ import {
   Copy,
   Check,
   Database,
+  ChevronDown,
 } from "lucide-react";
 import { formatPropertyValue } from "@/lib/ifc/property-utils";
 
@@ -27,6 +28,21 @@ interface WatchNodeData {
   };
   width?: number;
   height?: number;
+}
+
+// Add interface for classification data
+interface IClassification {
+  system: string;
+  code: string;
+  description?: string;
+  name?: string;
+}
+
+interface ClassificationGroup {
+  [system: string]: Array<{
+    code: string;
+    description: string;
+  }>;
 }
 
 type WatchNodeProps = NodeProps<WatchNodeData>;
@@ -241,6 +257,218 @@ export const WatchNode = memo(
       return null;
     };
 
+    // Special function to render classifications
+    const renderClassifications = () => {
+      if (!inputData.value) return null;
+
+      // Try to detect if this is classification data
+      const hasClassifications =
+        (inputData.value.uniqueClassifications &&
+          inputData.value.uniqueClassifications.length > 0) ||
+        (inputData.value.modelClassifications &&
+          inputData.value.modelClassifications.length > 0) ||
+        inputData.value.type === "classifications" ||
+        (inputData.value.elements &&
+          inputData.value.elements.some(
+            (el: any) => el.classifications && el.classifications.length > 0
+          ));
+
+      if (!hasClassifications) return null;
+
+      // Debug logging to understand the data
+      console.log("Rendering classifications, input data:", inputData.value);
+
+      // Extract all unique classifications from either format
+      const systemGroups: ClassificationGroup = {};
+
+      // First check for uniqueClassifications which is the most direct format
+      if (
+        inputData.value.uniqueClassifications &&
+        inputData.value.uniqueClassifications.length > 0
+      ) {
+        console.log("Using uniqueClassifications");
+        // Use pre-grouped classification data if available
+        const classifications: IClassification[] =
+          inputData.value.uniqueClassifications;
+
+        // Group by system
+        classifications.forEach((cls: IClassification) => {
+          if (!systemGroups[cls.system]) {
+            systemGroups[cls.system] = [];
+          }
+          systemGroups[cls.system].push({
+            code: cls.code,
+            description: cls.description || cls.code,
+          });
+        });
+      }
+      // Then check for modelClassifications (from workflow-executor output)
+      else if (
+        inputData.value.modelClassifications &&
+        Array.isArray(inputData.value.modelClassifications) &&
+        inputData.value.modelClassifications.length > 0
+      ) {
+        console.log("Using modelClassifications");
+        inputData.value.modelClassifications.forEach((systemData: any) => {
+          const system = systemData.name;
+          if (!systemGroups[system]) {
+            systemGroups[system] = [];
+          }
+
+          if (systemData.references && Array.isArray(systemData.references)) {
+            systemData.references.forEach((ref: any) => {
+              systemGroups[system].push({
+                code: ref.id,
+                description: ref.name || ref.id,
+              });
+            });
+          }
+        });
+      }
+      // Finally, try to extract from elements directly if other formats are not available
+      else if (inputData.value.elements) {
+        console.log("Extracting from elements");
+        // Extract from elements
+        inputData.value.elements.forEach((element: any) => {
+          if (element.classifications && element.classifications.length > 0) {
+            console.log(
+              `Element ${element.id} has ${element.classifications.length} classifications`
+            );
+            element.classifications.forEach((cls: IClassification) => {
+              if (!systemGroups[cls.system]) {
+                systemGroups[cls.system] = [];
+              }
+
+              // Check if this code is already in the group
+              const exists = systemGroups[cls.system].some(
+                (c) => c.code === cls.code
+              );
+              if (!exists) {
+                systemGroups[cls.system].push({
+                  code: cls.code,
+                  description: cls.description || cls.name || "",
+                });
+              }
+            });
+          }
+        });
+      }
+
+      if (Object.keys(systemGroups).length === 0) {
+        console.log(
+          "No classification groups were created, checking raw data:"
+        );
+
+        // Check elements directly for classifications
+        if (
+          inputData.value.elements &&
+          Array.isArray(inputData.value.elements)
+        ) {
+          const elementsWithClassifications = inputData.value.elements.filter(
+            (el: any) => el.classifications && el.classifications.length > 0
+          );
+
+          console.log(
+            `Found ${elementsWithClassifications.length} elements with classifications out of ${inputData.value.elements.length} total elements`
+          );
+
+          if (elementsWithClassifications.length > 0) {
+            // Show the first element with classifications for debugging
+            const sample = elementsWithClassifications[0];
+            console.log("Sample element with classifications:", {
+              id: sample.id,
+              type: sample.type,
+              classifications: sample.classifications,
+            });
+
+            // Try to add these classifications directly
+            elementsWithClassifications.forEach((element: any) => {
+              element.classifications.forEach((cls: IClassification) => {
+                if (!systemGroups[cls.system]) {
+                  systemGroups[cls.system] = [];
+                }
+
+                const exists = systemGroups[cls.system].some(
+                  (c) => c.code === cls.code
+                );
+                if (!exists) {
+                  systemGroups[cls.system].push({
+                    code: cls.code,
+                    description: cls.description || cls.name || "",
+                  });
+                }
+              });
+            });
+          }
+        }
+
+        // If we still have no classifications, try to read from uniqueClassifications directly
+        if (
+          Object.keys(systemGroups).length === 0 &&
+          inputData.value.uniqueClassifications &&
+          inputData.value.uniqueClassifications.length > 0
+        ) {
+          console.log(
+            "Fallback: Directly accessing uniqueClassifications array"
+          );
+          const firstClass = inputData.value.uniqueClassifications[0];
+          console.log("First classification:", firstClass);
+
+          // Add a default system if we found any classifications
+          systemGroups["EBKP"] = inputData.value.uniqueClassifications.map(
+            (cls: any) => ({
+              code: cls.code || "Unknown",
+              description: cls.description || cls.name || "Unknown",
+            })
+          );
+        }
+      }
+
+      if (Object.keys(systemGroups).length === 0) return null;
+
+      return (
+        <div className="space-y-3">
+          <div className="flex items-center gap-1 text-blue-600 text-xs font-medium">
+            <Database className="h-3 w-3" />
+            <span>Classifications Found</span>
+          </div>
+
+          <div
+            className="overflow-auto"
+            style={{ maxHeight: `${contentHeight - 40}px` }}
+          >
+            {Object.entries(systemGroups).map(([system, codes], index) => (
+              <div key={index} className="mb-3">
+                <div className="text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded mb-1 inline-block">
+                  {system}
+                </div>
+                <table className="w-full text-xs">
+                  <thead className="bg-gray-100">
+                    <tr>
+                      <th className="p-1 text-left w-1/3">Code</th>
+                      <th className="p-1 text-left w-2/3">Description</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {codes.map((cls, i) => (
+                      <tr key={i} className={i % 2 === 0 ? "bg-gray-50" : ""}>
+                        <td className="p-1 border-t border-gray-200 font-medium">
+                          {cls.code}
+                        </td>
+                        <td className="p-1 border-t border-gray-200">
+                          {cls.description}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    };
+
     const renderData = () => {
       // Return empty state message if no data
       if (!inputData.value) {
@@ -320,6 +548,12 @@ export const WatchNode = memo(
       // Special handling for property results
       if (inputData.type === "propertyResults") {
         return renderPropertyResults();
+      }
+
+      // Special handling for classifications
+      const classificationsView = renderClassifications();
+      if (classificationsView) {
+        return classificationsView;
       }
 
       // Table view for objects
@@ -479,6 +713,30 @@ export const WatchNode = memo(
       }
     };
 
+    // Add display mode change handler
+    const handleDisplayModeChange = useCallback(
+      (newMode: string) => {
+        setNodes((nodes) =>
+          nodes.map((node) => {
+            if (node.id === id) {
+              return {
+                ...node,
+                data: {
+                  ...node.data,
+                  properties: {
+                    ...node.data.properties,
+                    displayMode: newMode,
+                  },
+                },
+              };
+            }
+            return node;
+          })
+        );
+      },
+      [id, setNodes]
+    );
+
     return (
       <div
         className={`bg-white border-2 ${
@@ -496,17 +754,28 @@ export const WatchNode = memo(
           </div>
         </div>
         <div className="p-3">
-          <div className="text-xs mb-1 flex justify-between">
-            <span className="flex items-center gap-1">
-              {getDisplayModeIcon()}
-              <span>
-                {displayMode === "raw"
-                  ? "JSON"
-                  : displayMode === "summary"
-                  ? "Summary"
-                  : "Table"}
-              </span>
-            </span>
+          <div className="text-xs mb-1 flex justify-between items-center">
+            <div className="flex items-center gap-2">
+              <div
+                className="flex items-center gap-1 bg-white/10 px-2 py-0.5 rounded cursor-pointer hover:bg-white/20 transition-colors"
+                onClick={() => {
+                  const modes = ["table", "raw", "summary"];
+                  const currentIndex = modes.indexOf(displayMode);
+                  const nextMode = modes[(currentIndex + 1) % modes.length];
+                  handleDisplayModeChange(nextMode);
+                }}
+              >
+                {getDisplayModeIcon()}
+                <span>
+                  {displayMode === "raw"
+                    ? "JSON"
+                    : displayMode === "summary"
+                    ? "Summary"
+                    : "Table"}
+                </span>
+                <ChevronDown className="h-3 w-3" />
+              </div>
+            </div>
             <span className="text-muted-foreground">
               {inputData.type === "array"
                 ? `${inputData.count || 0} items`

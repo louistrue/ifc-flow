@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import ReactFlow, {
   ReactFlowProvider,
   addEdge,
@@ -51,34 +51,7 @@ import {
 import { useAppSettings } from "@/lib/settings-manager";
 import { useTheme } from "next-themes";
 import { nodeCategories } from "@/components/sidebar";
-
-// Define custom node types
-const nodeTypes: NodeTypes = {
-  ifcNode: IfcNode,
-  geometryNode: GeometryNode,
-  filterNode: FilterNode,
-  transformNode: TransformNode,
-  viewerNode: ViewerNode,
-  quantityNode: QuantityNode,
-  propertyNode: PropertyNode,
-  classificationNode: ClassificationNode,
-  spatialNode: SpatialNode,
-  exportNode: ExportNode,
-  relationshipNode: RelationshipNode,
-  analysisNode: AnalysisNode,
-  watchNode: WatchNode,
-  parameterNode: ParameterNode,
-};
-
-// Custom node style to highlight selected nodes
-const nodeStyle = {
-  selected: {
-    boxShadow: "0 0 10px 2px rgba(59, 130, 246, 0.6)",
-    borderRadius: "6px",
-    zIndex: 10,
-  },
-  default: {},
-};
+import { SpatialHierarchyNode } from "@/components/nodes/spatial-hierarchy-node";
 
 // Define interfaces
 interface FlowState {
@@ -89,6 +62,36 @@ interface NodePosition {
   x: number;
   y: number;
 }
+
+// Define custom node types using React.memo outside of any component
+// This ensures the nodeTypes object is only created once and not on every render
+const nodeTypes = {
+  ifcNode: IfcNode,
+  geometryNode: GeometryNode,
+  filterNode: FilterNode,
+  transformNode: TransformNode,
+  viewerNode: ViewerNode,
+  quantityNode: QuantityNode,
+  propertyNode: PropertyNode,
+  classificationNode: ClassificationNode,
+  spatialNode: SpatialNode,
+  spatialHierarchyNode: SpatialHierarchyNode,
+  exportNode: ExportNode,
+  relationshipNode: RelationshipNode,
+  analysisNode: AnalysisNode,
+  watchNode: WatchNode,
+  parameterNode: ParameterNode,
+} as const;
+
+// Custom node style to highlight selected nodes
+const nodeStyle = {
+  selected: {
+    boxShadow: "0 0 10px 2px rgba(59, 130, 246, 0.6)",
+    borderRadius: "6px",
+    zIndex: 10,
+  },
+  default: {},
+};
 
 // Helper function to find node definition by type
 const findNodeDefinition = (nodeType: string) => {
@@ -1592,7 +1595,7 @@ function FlowWithProvider() {
       {editingNode && (
         <PropertiesPanel
           node={editingNode}
-          setNodes={setNodes}
+          setNodes={setNodes as any}
           setSelectedNode={setEditingNode}
         />
       )}

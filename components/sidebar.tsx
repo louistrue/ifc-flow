@@ -28,6 +28,7 @@ import {
   Clock,
   Plus,
   Database,
+  Building,
 } from "lucide-react";
 import {
   type Workflow as WorkflowType,
@@ -74,6 +75,12 @@ export const nodeCategories = [
         id: "spatialNode",
         label: "Spatial Query",
         icon: <Layers className="h-4 w-4 mr-2" />,
+        status: "wip",
+      },
+      {
+        id: "spatialHierarchyNode",
+        label: "Spatial Hierarchy",
+        icon: <Building className="h-4 w-4 mr-2" />,
         status: "wip",
       },
     ],
@@ -144,7 +151,13 @@ export const nodeCategories = [
   },
 ];
 
-export function Sidebar({ onLoadWorkflow, getFlowObject }) {
+export function Sidebar({
+  onLoadWorkflow,
+  getFlowObject,
+}: {
+  onLoadWorkflow: any;
+  getFlowObject: any;
+}) {
   const [collapsed, setCollapsed] = useState(false);
   const [presets, setPresets] = useState<WorkflowType[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
@@ -160,7 +173,7 @@ export function Sidebar({ onLoadWorkflow, getFlowObject }) {
     setPresets(presetWorkflows);
   }, []);
 
-  const onDragStart = (event, nodeType) => {
+  const onDragStart = (event: any, nodeType: any) => {
     event.dataTransfer.setData("application/reactflow", nodeType);
     event.dataTransfer.effectAllowed = "move";
   };

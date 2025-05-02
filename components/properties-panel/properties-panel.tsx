@@ -30,6 +30,7 @@ export function PropertiesPanel({
 }: PropertiesPanelProps) {
   const [properties, setProperties] = useState<Record<string, any>>({});
 
+  // Update properties when node changes
   useEffect(() => {
     if (node && node.data) {
       setProperties(node.data.properties || {});
@@ -51,8 +52,14 @@ export function PropertiesPanel({
         return n;
       })
     );
-    setSelectedNode(null);
   };
+
+  // Update node immediately when properties change
+  useEffect(() => {
+    if (node) {
+      updateNodeProperties();
+    }
+  }, [properties]);
 
   if (!node) return null;
 
@@ -103,12 +110,6 @@ export function PropertiesPanel({
             properties={properties}
             setProperties={setProperties}
           />
-
-          <div className="mt-6">
-            <Button onClick={updateNodeProperties} className="w-full">
-              Apply Changes
-            </Button>
-          </div>
         </div>
       </ScrollArea>
     </div>
