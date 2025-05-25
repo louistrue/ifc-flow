@@ -136,4 +136,13 @@ export interface WatchNodeData extends BaseNodeData {
         watchType?: string;
         [key: string]: any;
     };
-} 
+}
+
+// Python script node data
+export interface PythonScriptNodeData extends BaseNodeData {
+    properties?: {
+        script?: string;
+        [key: string]: any;
+    };
+    console?: string;
+}

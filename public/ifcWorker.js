@@ -124,6 +124,11 @@ self.onmessage = async (event) => {
         await handleExtractQuantities(data, messageId);
         break;
 
+      case "runScript":
+        console.log("Executing custom Python script...");
+        await handleRunScript(data, messageId);
+        break;
+
       default:
         throw new Error(`Unknown action: ${action}`);
     }
@@ -1860,6 +1865,49 @@ except Exception as e:
     self.postMessage({
       type: "error",
       message: `Error extracting quantities: ${error.message}`,
+      messageId,
+    });
+  }
+}
+
+async function handleRunScript(data, messageId) {
+  try {
+    await initPyodide();
+    const { script = "", input } = data;
+    const namespace = pyodide.globals.get("dict")();
+    namespace.set("input_json", JSON.stringify(input));
+    namespace.set("user_script", script);
+    await pyodide.runPythonAsync(
+      `import json, io, sys, traceback
+input_data = json.loads(input_json)
+stdout_buf = io.StringIO()
+_stdout = sys.stdout
+sys.stdout = stdout_buf
+result = None
+try:
+    exec(user_script, globals(), locals())
+    result = locals().get('result', None)
+except Exception as e:
+    result = {"error": str(e), "trace": traceback.format_exc()}
+sys.stdout = _stdout
+console_output = stdout_buf.getvalue()
+result_json = json.dumps(result)
+`,
+      { globals: namespace }
+    );
+    const outputJson = namespace.get("result_json");
+    const consoleOut = namespace.get("console_output");
+    namespace.destroy();
+    self.postMessage({
+      type: "scriptResult",
+      messageId,
+      result: JSON.parse(outputJson),
+      console: consoleOut,
+    });
+  } catch (error) {
+    self.postMessage({
+      type: "error",
+      message: `Script error: ${error.message}`,
       messageId,
     });
   }

@@ -12,6 +12,7 @@ import { RelationshipNode } from "./relationship-node"
 import { AnalysisNode } from "./analysis-node"
 import { WatchNode } from "./watch-node"
 import { ParameterNode } from "./parameter-node"
+import { PythonScriptNode } from "./python-script-node"
 
 // Define custom node types
 export const nodeTypes = {
@@ -29,6 +30,7 @@ export const nodeTypes = {
   analysisNode: AnalysisNode,
   watchNode: WatchNode,
   parameterNode: ParameterNode,
+  pythonNode: PythonScriptNode,
 }
 
 export {
@@ -46,5 +48,6 @@ export {
   AnalysisNode,
   WatchNode,
   ParameterNode,
+  PythonScriptNode,
 }
 
