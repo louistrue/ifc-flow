@@ -152,6 +152,11 @@ export async function initializeWorker(): Promise<void> {
           workerPromiseResolvers.get(messageId)!.resolve(data.data);
           workerPromiseResolvers.delete(messageId);
         }
+      } else if (type === "scriptResult") {
+        if (messageId && workerPromiseResolvers.has(messageId)) {
+          workerPromiseResolvers.get(messageId)!.resolve(data);
+          workerPromiseResolvers.delete(messageId);
+        }
       }
       // Progress messages don't resolve promises
     };
@@ -1634,4 +1639,27 @@ export function exportData(
 
     return csvContent;
   }
+}
+
+// Run arbitrary Python script via worker
+export async function runPythonScript(script: string, input: any): Promise<{ result: any; console: string }> {
+  await initializeWorker();
+  if (!ifcWorker) throw new Error("IFC worker unavailable");
+
+  const messageId = `script_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+
+  return new Promise((resolve, reject) => {
+    workerPromiseResolvers.set(messageId, { resolve, reject });
+    ifcWorker!.postMessage({
+      action: "runScript",
+      messageId,
+      data: { script, input },
+    });
+    setTimeout(() => {
+      if (workerPromiseResolvers.has(messageId)) {
+        reject(new Error("Worker timeout running script"));
+        workerPromiseResolvers.delete(messageId);
+      }
+    }, 30000);
+  });
 }

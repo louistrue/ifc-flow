@@ -990,6 +990,22 @@ export function NodePropertyRenderer({
         </div>
       );
 
+    case "pythonNode":
+      return (
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="script">Python Script</Label>
+            <textarea
+              id="script"
+              className="w-full h-32 p-1 font-mono border rounded bg-gray-50 dark:bg-gray-900"
+              value={properties.script || ""}
+              onChange={(e) => setProperties({ ...properties, script: e.target.value })}
+              placeholder="# e.g. result = len(input_data)"
+            />
+          </div>
+        </div>
+      );
+
     default:
       return (
         <div className="text-center text-sm text-muted-foreground py-4">
