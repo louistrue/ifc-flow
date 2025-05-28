@@ -113,25 +113,25 @@ export function HelpDialog({ open, onOpenChange }: HelpDialogProps) {
 
     e.preventDefault();
 
-    // Build key combination
-    const keys = [];
+    // Ignore modifier-only key presses so users can hold them
+    const pressedKey = e.key.toLowerCase();
+    if (["control", "alt", "shift", "meta"].includes(pressedKey)) {
+      return;
+    }
+
+    // Build key combination from currently held modifier keys
+    const keys = [] as string[];
     if (e.ctrlKey) keys.push("ctrl");
     if (e.altKey) keys.push("alt");
     if (e.shiftKey) keys.push("shift");
     if (e.metaKey) keys.push("meta");
 
-    // Add the main key if it's not a modifier
-    const key = e.key.toLowerCase();
-    if (!["control", "alt", "shift", "meta"].includes(key)) {
-      keys.push(key);
-    }
+    // Add the main key
+    keys.push(pressedKey);
 
-    // Only update if we have at least one key
-    if (keys.length > 0) {
-      updateShortcut(editingShortcut, keys.join("+"));
-      setListeningForKeys(false);
-      setEditingShortcut(null);
-    }
+    updateShortcut(editingShortcut, keys.join("+"));
+    setListeningForKeys(false);
+    setEditingShortcut(null);
   };
 
   // Copy shortcut to clipboard

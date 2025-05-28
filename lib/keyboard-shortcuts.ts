@@ -240,6 +240,7 @@ export function saveShortcuts(shortcuts: KeyboardShortcut[]): void {
     // Only save id and keys to keep it minimal
     const toSave = shortcuts.map(({ id, keys }) => ({ id, keys }))
     localStorage.setItem("keyboard-shortcuts", JSON.stringify(toSave))
+    window.dispatchEvent(new Event("keyboardShortcutsChanged"))
   } catch (error) {
     console.error("Error saving keyboard shortcuts:", error)
   }
@@ -251,6 +252,9 @@ export function useKeyboardShortcuts() {
 
   useEffect(() => {
     setShortcuts(loadShortcuts())
+    const handler = () => setShortcuts(loadShortcuts())
+    window.addEventListener("keyboardShortcutsChanged", handler)
+    return () => window.removeEventListener("keyboardShortcutsChanged", handler)
   }, [])
 
   const updateShortcut = (id: string, newKeys: string) => {
