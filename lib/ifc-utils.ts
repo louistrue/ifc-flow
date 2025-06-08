@@ -1,5 +1,13 @@
 // IfcOpenShell integration for IFC data processing via Pyodide web worker
 // Remove web-ifc imports as we're using pure IfcOpenShell now
+import {
+  Scene,
+  Mesh,
+  MeshStandardMaterial,
+  BufferGeometry,
+  BufferAttribute,
+} from "three";
+import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 
 // Define interfaces based on IfcOpenShell structure
 export interface IfcElement {
@@ -1504,12 +1512,12 @@ export function performAnalysis(
 }
 
 // Export functions
-export function exportData(
+export async function exportData(
   elementsInput: IfcElement[] | { elements: IfcElement[] },
   format = "csv",
   fileName = "export",
   properties = "Name,Type,Material"
-): string | Promise<void> {
+): Promise<string | ArrayBuffer | void> {
   console.log("Exporting data:", format, fileName, properties);
 
   // If format is IFC, dispatch an event to handle export in main thread
@@ -1573,38 +1581,31 @@ export function exportData(
     ? properties.split(",").map((h) => h.trim())
     : Object.keys(elements[0]?.properties || {});
 
-  if (format === "json") {
-    // Export as JSON
-    const data = elements.map((element) => {
-      const row: Record<string, any> = {};
-      headers.forEach((header) => {
-        // Handle nested properties (e.g., Pset_WallCommon.IsExternal)
-        const parts = header.split(".");
-        if (parts.length === 1) {
-          row[header] = element.properties[header];
-        } else if (
-          parts.length === 2 &&
-          element.psets &&
-          element.psets[parts[0]]
-        ) {
-          row[header] = element.psets[parts[0]][parts[1]];
-        }
-      });
-      return row;
-    });
-    return JSON.stringify(data, null, 2);
-  } else {
-    // Export as CSV
-    // Header row
-    let csvContent = headers.join(",") + "\n";
-
-    // Data rows
-    elements.forEach((element) => {
-      const row = headers
-        .map((header) => {
-          let value = "";
-          // Handle nested properties (e.g., Pset_WallCommon.IsExternal)
+  switch (format.toLowerCase()) {
+    case "json": {
+      const data = elements.map((element) => {
+        const row: Record<string, any> = {};
+        headers.forEach((header) => {
           const parts = header.split(".");
+          if (parts.length === 1) {
+            row[header] = element.properties[header];
+          } else if (
+            parts.length === 2 &&
+            element.psets &&
+            element.psets[parts[0]]
+          ) {
+            row[header] = element.psets[parts[0]][parts[1]];
+          }
+        });
+        return row;
+      });
+      return JSON.stringify(data, null, 2);
+    }
+    case "excel": {
+      const rows = elements.map((element) => {
+        const cells = headers.map((header) => {
+          const parts = header.split(".");
+          let value = "";
           if (parts.length === 1) {
             value = element.properties[header];
           } else if (
@@ -1614,24 +1615,61 @@ export function exportData(
           ) {
             value = element.psets[parts[0]][parts[1]];
           }
-
-          // Format value for CSV (handle commas, quotes, newlines)
-          const strValue = String(
-            value === undefined || value === null ? "" : value
-          );
-          if (
-            strValue.includes(",") ||
-            strValue.includes('"') ||
-            strValue.includes("\n")
-          ) {
-            return `"${strValue.replace(/"/g, '""')}"`;
-          }
-          return strValue;
-        })
-        .join(",");
-      csvContent += row + "\n";
-    });
-
-    return csvContent;
+          return `<td>${String(value ?? "")}</td>`;
+        });
+        return `<tr>${cells.join("")}</tr>`;
+      });
+      const table = `<table><thead><tr>${headers
+        .map((h) => `<th>${h}</th>`)
+        .join("")}</tr></thead><tbody>${rows.join("")}</tbody></table>`;
+      const html = `<?xml version="1.0" encoding="UTF-8"?>\n<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">\n<head><meta http-equiv="Content-Type" content="application/vnd.ms-excel; charset=UTF-8"/></head><body>${table}</body></html>`;
+      return html;
+    }
+    case "glb": {
+      const scene = new Scene();
+      elements.forEach((element) => {
+        if (element.geometry && element.geometry.vertices) {
+          const geo = new BufferGeometry();
+          const verts = new Float32Array(element.geometry.vertices);
+          geo.setAttribute("position", new BufferAttribute(verts, 3));
+          const mesh = new Mesh(geo, new MeshStandardMaterial());
+          scene.add(mesh);
+        }
+      });
+      const exporter = new GLTFExporter();
+      const res = await exporter.parseAsync(scene, { binary: true });
+      if (res instanceof ArrayBuffer) {
+        return res;
+      }
+      return new TextEncoder().encode(JSON.stringify(res)).buffer as ArrayBuffer;
+    }
+    case "csv":
+    default: {
+      let csvContent = headers.join(",") + "\n";
+      elements.forEach((element) => {
+        const row = headers
+          .map((header) => {
+            let value = "";
+            const parts = header.split(".");
+            if (parts.length === 1) {
+              value = element.properties[header];
+            } else if (
+              parts.length === 2 &&
+              element.psets &&
+              element.psets[parts[0]]
+            ) {
+              value = element.psets[parts[0]][parts[1]];
+            }
+            const strValue = String(value === undefined || value === null ? "" : value);
+            if (strValue.includes(",") || strValue.includes('"') || strValue.includes("\n")) {
+              return `"${strValue.replace(/"/g, '""')}"`;
+            }
+            return strValue;
+          })
+          .join(",");
+        csvContent += row + "\n";
+      });
+      return csvContent;
+    }
   }
 }

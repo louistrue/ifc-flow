@@ -868,8 +868,28 @@ function FlowWithProvider() {
 
     const result = executionResults.get(nodeId);
 
-    // In a real app, this would create a file based on the format
-    const blob = new Blob([result], { type: "text/plain" });
+    if (format === "ifc") {
+      toast({
+        title: "IFC export started",
+        description: "The file will download when ready",
+      });
+      return;
+    }
+
+    const mimeMap: Record<string, string> = {
+      csv: "text/csv",
+      json: "application/json",
+      excel:
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      glb: "model/gltf-binary",
+    };
+
+    const blob =
+      result instanceof ArrayBuffer
+        ? new Blob([result], { type: mimeMap[format] || "application/octet-stream" })
+        : new Blob([result as BlobPart], {
+            type: mimeMap[format] || "text/plain",
+          });
     const url = URL.createObjectURL(blob);
 
     const a = document.createElement("a");

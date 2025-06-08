@@ -739,7 +739,7 @@ export class WorkflowExecutor {
           console.warn(`No input provided to export node ${nodeId}`);
           result = "";
         } else {
-          result = exportData(
+          result = await exportData(
             inputValues.input,
             node.data.properties?.format || "csv",
             node.data.properties?.fileName || "export",
