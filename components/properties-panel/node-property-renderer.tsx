@@ -652,24 +652,6 @@ export function NodePropertyRenderer({
               }
             />
           </div>
-          {(properties.format === "csv" ||
-            properties.format === "excel" ||
-            properties.format === "json") && (
-              <div className="space-y-2">
-                <Label htmlFor="properties">Include Properties</Label>
-                <Input
-                  id="properties"
-                  value={properties.properties || "Name,Type,Material"}
-                  onChange={(e) =>
-                    setProperties({
-                      ...properties,
-                      properties: e.target.value,
-                    })
-                  }
-                  placeholder="Comma-separated properties"
-                />
-              </div>
-            )}
         </div>
       );
 

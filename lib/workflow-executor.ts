@@ -742,8 +742,7 @@ export class WorkflowExecutor {
           result = await exportData(
             inputValues.input,
             node.data.properties?.format || "csv",
-            node.data.properties?.fileName || "export",
-            node.data.properties?.properties || "Name,Type,Material"
+            node.data.properties?.fileName || "export"
           );
         }
         break;

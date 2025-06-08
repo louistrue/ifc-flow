@@ -1515,10 +1515,9 @@ export function performAnalysis(
 export async function exportData(
   elementsInput: IfcElement[] | { elements: IfcElement[] },
   format = "csv",
-  fileName = "export",
-  properties = "Name,Type,Material"
+  fileName = "export"
 ): Promise<string | ArrayBuffer | void> {
-  console.log("Exporting data:", format, fileName, properties);
+  console.log("Exporting data:", format, fileName);
 
   // If format is IFC, dispatch an event to handle export in main thread
   if (format.toLowerCase() === "ifc") {
@@ -1576,10 +1575,17 @@ export async function exportData(
     return format === "json" ? "[]" : ""; // Return empty array for JSON, empty string for CSV
   }
 
-  // Get headers from properties string or first element
-  const headers = properties
-    ? properties.split(",").map((h) => h.trim())
-    : Object.keys(elements[0]?.properties || {});
+  // Determine headers from all element properties and psets
+  const headerSet = new Set<string>();
+  elements.forEach((el) => {
+    Object.keys(el.properties || {}).forEach((key) => headerSet.add(key));
+    Object.entries(el.psets || {}).forEach(([pset, props]) => {
+      if (typeof props === "object") {
+        Object.keys(props).forEach((prop) => headerSet.add(`${pset}.${prop}`));
+      }
+    });
+  });
+  const headers = Array.from(headerSet);
 
   switch (format.toLowerCase()) {
     case "json": {
