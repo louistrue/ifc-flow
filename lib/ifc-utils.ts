@@ -1513,7 +1513,7 @@ export function performAnalysis(
 
 // Export functions
 export async function exportData(
-  elementsInput: IfcElement[] | { elements: IfcElement[] },
+  input: any,
   format = "csv",
   fileName = "export"
 ): Promise<string | ArrayBuffer | void> {
@@ -1521,7 +1521,7 @@ export async function exportData(
 
   // If format is IFC, dispatch an event to handle export in main thread
   if (format.toLowerCase() === "ifc") {
-    const sourceModel = getLastLoadedModel(); // Get the originally loaded model
+    const sourceModel = getLastLoadedModel();
     if (!sourceModel || !sourceModel.name) {
       console.error(
         "Cannot export IFC: Source model or its name not found. Please load a file first."
@@ -1531,10 +1531,10 @@ export async function exportData(
 
     // Extract elements, handling both array and model object inputs
     let elementsToUse: IfcElement[];
-    if (Array.isArray(elementsInput)) {
-      elementsToUse = elementsInput;
-    } else if (elementsInput && elementsInput.elements) {
-      elementsToUse = elementsInput.elements;
+    if (Array.isArray(input)) {
+      elementsToUse = input;
+    } else if (input && input.elements) {
+      elementsToUse = input.elements;
     } else {
       console.error("Cannot export IFC: Invalid input data structure.");
       return Promise.reject("Cannot export IFC: Invalid input data.");
@@ -1564,24 +1564,43 @@ export async function exportData(
     return Promise.resolve(); // Indicate async operation
   }
 
-  // For other formats (CSV, JSON), process the data here
-  // Extract elements if input is a model object
-  const elements = Array.isArray(elementsInput)
-    ? elementsInput
-    : elementsInput.elements;
-
-  if (!elements || elements.length === 0) {
-    console.warn(`No elements provided to exportData for format ${format}`);
-    return format === "json" ? "[]" : ""; // Return empty array for JSON, empty string for CSV
+  // For other formats (CSV, JSON, Excel, GLB), process the data here
+  let rows: any[];
+  if (Array.isArray(input)) {
+    rows = input;
+  } else if (input && typeof input === "object") {
+    if (Array.isArray(input.elements)) {
+      rows = input.elements;
+    } else {
+      rows = [input];
+    }
+  } else {
+    rows = [{ value: input }];
   }
 
-  // Determine headers from all element properties and psets
+  if (!rows || rows.length === 0) {
+    console.warn(`No elements provided to exportData for format ${format}`);
+    return format === "json" ? "[]" : "";
+  }
+
+  // Determine headers from row data
   const headerSet = new Set<string>();
-  elements.forEach((el) => {
+  rows.forEach((el) => {
+    if (!el || typeof el !== "object") {
+      headerSet.add("value");
+      return;
+    }
     Object.keys(el.properties || {}).forEach((key) => headerSet.add(key));
     Object.entries(el.psets || {}).forEach(([pset, props]) => {
-      if (typeof props === "object") {
-        Object.keys(props).forEach((prop) => headerSet.add(`${pset}.${prop}`));
+      if (typeof props === "object" && props !== null) {
+        Object.keys(props as any).forEach((prop) =>
+          headerSet.add(`${pset}.${prop}`)
+        );
+      }
+    });
+    Object.keys(el).forEach((key) => {
+      if (key !== "properties" && key !== "psets" && key !== "geometry") {
+        headerSet.add(key);
       }
     });
   });
@@ -1589,12 +1608,12 @@ export async function exportData(
 
   switch (format.toLowerCase()) {
     case "json": {
-      const data = elements.map((element) => {
+      const data = rows.map((element: any) => {
         const row: Record<string, any> = {};
         headers.forEach((header) => {
           const parts = header.split(".");
           if (parts.length === 1) {
-            row[header] = element.properties[header];
+            row[header] = element.properties?.[header] ?? element[header];
           } else if (
             parts.length === 2 &&
             element.psets &&
@@ -1608,12 +1627,12 @@ export async function exportData(
       return JSON.stringify(data, null, 2);
     }
     case "excel": {
-      const rows = elements.map((element) => {
+      const tableRows = rows.map((element) => {
         const cells = headers.map((header) => {
           const parts = header.split(".");
           let value = "";
           if (parts.length === 1) {
-            value = element.properties[header];
+            value = element.properties?.[header] ?? element[header];
           } else if (
             parts.length === 2 &&
             element.psets &&
@@ -1627,13 +1646,13 @@ export async function exportData(
       });
       const table = `<table><thead><tr>${headers
         .map((h) => `<th>${h}</th>`)
-        .join("")}</tr></thead><tbody>${rows.join("")}</tbody></table>`;
+        .join("")}</tr></thead><tbody>${tableRows.join("")}</tbody></table>`;
       const html = `<?xml version="1.0" encoding="UTF-8"?>\n<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">\n<head><meta http-equiv="Content-Type" content="application/vnd.ms-excel; charset=UTF-8"/></head><body>${table}</body></html>`;
       return html;
     }
     case "glb": {
       const scene = new Scene();
-      elements.forEach((element) => {
+      rows.forEach((element: any) => {
         if (element.geometry && element.geometry.vertices) {
           const geo = new BufferGeometry();
           const verts = new Float32Array(element.geometry.vertices);
@@ -1652,13 +1671,13 @@ export async function exportData(
     case "csv":
     default: {
       let csvContent = headers.join(",") + "\n";
-      elements.forEach((element) => {
+      rows.forEach((element: any) => {
         const row = headers
           .map((header) => {
-            let value = "";
+            let value: any = "";
             const parts = header.split(".");
             if (parts.length === 1) {
-              value = element.properties[header];
+              value = element.properties?.[header] ?? element[header];
             } else if (
               parts.length === 2 &&
               element.psets &&
