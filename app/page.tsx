@@ -39,7 +39,7 @@ import { WatchNode } from "@/components/nodes/watch-node";
 import { ParameterNode } from "@/components/nodes/parameter-node";
 import { Toaster } from "@/components/toaster";
 import { WorkflowExecutor } from "@/lib/workflow-executor";
-import { loadIfcFile, getIfcFile } from "@/lib/ifc-utils";
+import { loadIfcFile, getIfcFile, downloadExportedFile } from "@/lib/ifc-utils";
 import { useToast } from "@/hooks/use-toast";
 import { FileUp } from "lucide-react";
 import type { Workflow } from "@/lib/workflow-storage";
@@ -876,29 +876,7 @@ function FlowWithProvider() {
       return;
     }
 
-    const mimeMap: Record<string, string> = {
-      csv: "text/csv",
-      json: "application/json",
-      excel:
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      glb: "model/gltf-binary",
-    };
-
-    const blob =
-      result instanceof ArrayBuffer
-        ? new Blob([result], { type: mimeMap[format] || "application/octet-stream" })
-        : new Blob([result as BlobPart], {
-            type: mimeMap[format] || "text/plain",
-          });
-    const url = URL.createObjectURL(blob);
-
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${filename}.${format}`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    downloadExportedFile(result, format, filename);
   };
 
   // Function to get the flow object for saving

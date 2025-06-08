@@ -9,6 +9,7 @@ import {
   queryRelationships,
   performAnalysis,
   exportData,
+  downloadExportedFile,
   loadIfcFile,
   IfcModel,
   getLastLoadedModel,
@@ -744,6 +745,16 @@ export class WorkflowExecutor {
             node.data.properties?.format || "csv",
             node.data.properties?.fileName || "export"
           );
+          if (
+            result !== undefined &&
+            node.data.properties?.format?.toLowerCase() !== "ifc"
+          ) {
+            downloadExportedFile(
+              result,
+              node.data.properties?.format || "csv",
+              node.data.properties?.fileName || "export"
+            );
+          }
         }
         break;
 

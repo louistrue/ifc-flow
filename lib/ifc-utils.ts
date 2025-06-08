@@ -1698,3 +1698,30 @@ export async function exportData(
     }
   }
 }
+
+export function downloadExportedFile(
+  data: string | ArrayBuffer,
+  format: string,
+  fileName: string,
+): void {
+  const mimeMap: Record<string, string> = {
+    csv: "text/csv",
+    json: "application/json",
+    excel: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    glb: "model/gltf-binary",
+  };
+
+  const blob =
+    data instanceof ArrayBuffer
+      ? new Blob([data], { type: mimeMap[format] || "application/octet-stream" })
+      : new Blob([data as BlobPart], { type: mimeMap[format] || "text/plain" });
+
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${fileName}.${format}`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
