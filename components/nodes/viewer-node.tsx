@@ -11,26 +11,32 @@ import {
 import { CuboidIcon as Cube, Loader2, AlertCircle, CheckCircle } from "lucide-react";
 import { IfcViewer } from "@/lib/ifc/viewer-utils";
 import { ViewerNodeData as BaseViewerNodeData } from "./node-types";
-import { ClashVisualizer } from "../clash-visualizer";
+import { registerActiveViewer, unregisterActiveViewer } from "@/lib/ifc/viewer-registry";
 
 // Extend the base ViewerNodeData with additional properties
 interface ExtendedViewerNodeData extends BaseViewerNodeData {
   inputData?: any;
   width?: number;
   height?: number;
+  viewerState?: {
+    isReady?: boolean;
+    isLoading?: boolean;
+  };
 }
 
 export const ViewerNode = memo(
   ({ data, id, selected, isConnectable }: NodeProps<ExtendedViewerNodeData>) => {
     const viewerRef = useRef<HTMLDivElement>(null);
+    const viewerIdRef = useRef<string | null>(null); // Ref to store this instance's ID for cleanup
     const [viewer, setViewer] = useState<IfcViewer | null>(null);
     const [elementCount, setElementCount] = useState(0);
     const [isLoading, setIsLoading] = useState(false);
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const [loadedFileIdentifier, setLoadedFileIdentifier] = useState<string | null>(null);
-    const [clashResults, setClashResults] = useState<any>(null);
     const [isResizing, setIsResizing] = useState(false);
+    const [modelIsReady, setModelIsReady] = useState(false);
     const { setNodes } = useReactFlow();
+    const viewerLoadingPromiseRef = useRef<Promise<void> | null>(null);
 
     // Default sizes with fallback values
     const width = data.width || 220;
@@ -82,25 +88,64 @@ export const ViewerNode = memo(
       [id, width, height, setNodes]
     );
 
-    // Create and clean up the viewer
+    // Function to update node data with viewer state
+    const updateNodeViewerState = useCallback((viewer: IfcViewer | null) => {
+      const isReady = viewer?.isReady() ?? false;
+      const isLoading = !!viewer?.getLoadingPromise();
+      console.log(`ViewerNode ${id}: updateNodeViewerState called. isReady=${isReady}, isLoading=${isLoading}`);
+      setModelIsReady(isReady);
+      setIsLoading(isLoading);
+
+      setNodes((nodes) =>
+        nodes.map((n) => {
+          if (n.id === id) {
+            return {
+              ...n,
+              data: {
+                ...n.data,
+                viewerState: {
+                  ...(n.data.viewerState || {}),
+                  isReady: isReady,
+                  isLoading: isLoading,
+                },
+              },
+            };
+          }
+          return n;
+        })
+      );
+    }, [id, setNodes]);
+
+    // Create and clean up the viewer & register/unregister
     useEffect(() => {
       if (!viewerRef.current) return;
+      console.log(`ViewerNode ${id}: Running viewer creation useEffect.`);
 
       const newViewer = new IfcViewer(viewerRef.current, {
         backgroundColor: "#f5f5f5",
         showGrid: true,
         showAxes: true,
       });
-
+      const viewerId = newViewer.getId();
+      viewerIdRef.current = viewerId;
       setViewer(newViewer);
+      registerActiveViewer(newViewer);
+      updateNodeViewerState(newViewer); // Initial update
 
       return () => {
+        console.log(`ViewerNode ${id}: Cleanup effect for viewer ${viewerIdRef.current}.`);
+        const idToUnregister = viewerIdRef.current;
+        if (idToUnregister) {
+          unregisterActiveViewer(idToUnregister);
+          viewerIdRef.current = null;
+        }
         if (newViewer) {
           newViewer.dispose();
         }
         setViewer(null);
+        updateNodeViewerState(null); // Update state on cleanup
       };
-    }, []);
+    }, [id, registerActiveViewer, unregisterActiveViewer, updateNodeViewerState]); // Added dependencies
 
     // Update viewer when size changes
     useEffect(() => {
@@ -115,35 +160,17 @@ export const ViewerNode = memo(
       }
     }, [width, height, viewer]);
 
-    // Handle input data changes - Could be File OR clash results
+    // Handle input data changes - File input only now
     useEffect(() => {
       console.log("ViewerNode: Input data effect triggered.", { hasViewer: !!viewer, inputData: data.inputData });
 
-      if (!viewer) {
-        console.log("ViewerNode: Viewer instance not ready yet.");
-        return;
-      }
+      if (!viewer) return;
 
       const input = data.inputData;
-      const fileInput = input?.file; // Potential file object
-      const potentialClashResults = input?.type === 'clashResults' ? input.value : null;
-
-      // --- Handle Clash Results Input --- 
-      if (potentialClashResults) {
-        console.log("ViewerNode: Received clash results, updating state.", potentialClashResults);
-        setClashResults(potentialClashResults); // Update clash results state
-        // Keep existing model loaded, don't clear viewer
-        // Reset error/loading related to file loading if necessary
-        setErrorMessage(null);
-        setIsLoading(false);
-        return; // Stop processing, handled clash results
-      } else {
-        // If input is not clash results, clear previous clash results state
-        setClashResults(null);
-      }
-
-      // --- Handle File Input (IFC) --- 
+      const fileInput = input?.file ?? (input instanceof File ? input : null);
       const inputFileIdentifier = fileInput instanceof File ? `${fileInput.name}_${fileInput.lastModified}_${fileInput.size}` : null;
+
+      viewer.clearClashVisualizations();
 
       if (!fileInput || !(fileInput instanceof File) || !fileInput.name.toLowerCase().endsWith(".ifc")) {
         if (loadedFileIdentifier !== null) {
@@ -151,50 +178,57 @@ export const ViewerNode = memo(
           viewer.clear();
           setLoadedFileIdentifier(null);
           setElementCount(0);
-          setIsLoading(false);
+          updateNodeViewerState(viewer); // Reflect viewer is cleared but exists
           setErrorMessage("Invalid input: Expected IFC file.");
         } else {
           setErrorMessage(null);
-          setIsLoading(false);
           setElementCount(0);
+          // viewer state already reflects not ready from initial load or previous clear
         }
         return;
       }
 
       const file = fileInput;
       const newFileIdentifier = inputFileIdentifier;
-
-      if (newFileIdentifier === loadedFileIdentifier) {
-        console.log(`ViewerNode: File ${file.name} (${newFileIdentifier}) already loaded.`);
-        setIsLoading(false);
-        setErrorMessage(null);
-        setElementCount(e => e > 0 ? e : 1);
-        return;
-      }
+      if (newFileIdentifier === loadedFileIdentifier) return;
 
       console.log(`ViewerNode: New file detected (${file.name}), initiating load.`);
-      setIsLoading(true);
       setErrorMessage(null);
       setElementCount(0);
+      updateNodeViewerState(viewer); // Reflect viewer is loading
 
-      viewer.loadIfc(file)
+      // Store the promise locally when starting load
+      viewerLoadingPromiseRef.current = viewer.loadIfc(file);
+      updateNodeViewerState(viewer); // Update state again to reflect promise existence
+
+      viewerLoadingPromiseRef.current
         .then(() => {
+          if (!viewerLoadingPromiseRef.current) return; // Check if aborted/cleared
           console.log(`IFC loaded successfully in viewer node: ${file.name}`);
           setElementCount(1);
           setLoadedFileIdentifier(newFileIdentifier);
           setErrorMessage(null);
+          updateNodeViewerState(viewer); // Reflect viewer is ready
         })
         .catch(error => {
+          if (error.message.includes('aborted')) {
+            console.log("ViewerNode: Load aborted, skipping state update.");
+            return; // Don't update state if aborted
+          }
           console.error(`Error loading IFC (${file.name}) in viewer node:`, error);
           setErrorMessage(`Failed to load ${file.name}. See console.`);
           setElementCount(0);
           setLoadedFileIdentifier(null);
+          updateNodeViewerState(viewer); // Reflect viewer is not ready after error
         })
         .finally(() => {
-          setIsLoading(false);
+          // Clear local promise ref once done (success, error, or abort)
+          viewerLoadingPromiseRef.current = null;
+          // Update state one last time - isLoading should now be false
+          if (viewer) updateNodeViewerState(viewer);
         });
 
-    }, [data.inputData, viewer, loadedFileIdentifier]);
+    }, [data.inputData?.file?.name, data.inputData?.file?.lastModified, data.inputData?.file?.size, viewer, updateNodeViewerState]);
 
     // Used to determine if we should disable dragging - when resizing
     const nodeDraggable = !isResizing;
@@ -206,12 +240,10 @@ export const ViewerNode = memo(
         style={{ width: `${width}px` }}
         data-id={id}
       >
-        <ClashVisualizer viewer={viewer} clashResults={clashResults} />
-
         <div className="bg-cyan-500 text-white px-3 py-1 flex items-center justify-between gap-2 nodrag-handle">
           <div className="flex items-center gap-2 min-w-0">
             <Cube className="h-4 w-4 flex-shrink-0" />
-            <div className="text-sm font-medium truncate">{data.label}</div>
+            <div className="text-sm font-medium truncate">{data.label || 'Viewer'}</div>
           </div>
           <div className="flex-shrink-0">
             {isLoading && <Loader2 className="h-4 w-4 animate-spin" />}
@@ -237,7 +269,7 @@ export const ViewerNode = memo(
             )}
             {!elementCount && !isLoading && !errorMessage && (
               <div className="text-xs text-muted-foreground pointer-events-none">
-                Connect IFC File or Clash Results
+                Connect IFC File
               </div>
             )}
           </div>
@@ -258,12 +290,6 @@ export const ViewerNode = memo(
               <div className="flex justify-between mt-1 text-red-700">
                 <span>Status:</span>
                 <span className="font-medium">Error</span>
-              </div>
-            )}
-            {clashResults && !isLoading && !errorMessage && (
-              <div className="flex justify-between mt-1 text-blue-700">
-                <span>Clashes:</span>
-                <span className="font-medium">{clashResults.clashes || 0} detected</span>
               </div>
             )}
           </div>

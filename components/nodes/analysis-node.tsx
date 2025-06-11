@@ -5,11 +5,12 @@ import { Handle, Position, type NodeProps, useReactFlow } from "reactflow"
 import { AlertTriangle, Eye, Table, Square, Copy } from "lucide-react"
 import { AnalysisNodeData } from "./node-types"
 import { performClashDetection } from "@/lib/ifc/analysis-utils"
+import type { Node } from "reactflow"
 
 export const AnalysisNode = memo(({ data, id, isConnectable }: NodeProps<AnalysisNodeData>) => {
   const [loading, setLoading] = useState(false)
   const [results, setResults] = useState<any>(null)
-  const { getEdges, getNode, setNodes } = useReactFlow()
+  const { getEdges, getNode, setNodes, getNodes } = useReactFlow()
 
   // Local state for tolerance
   const [localTolerance, setLocalTolerance] = useState<number>(() => {
@@ -20,21 +21,21 @@ export const AnalysisNode = memo(({ data, id, isConnectable }: NodeProps<Analysi
 
   // Update node data when local tolerance changes
   const updateNodeTolerance = useCallback(() => {
-    setNodes((nodes) =>
-      nodes.map((node) => {
-        if (node.id === id) {
+    setNodes((nds) =>
+      nds.map((n) => {
+        if (n.id === id) {
           return {
-            ...node,
+            ...n,
             data: {
-              ...node.data,
+              ...n.data,
               properties: {
-                ...node.data.properties,
+                ...n.data.properties,
                 tolerance: localTolerance, // Update with local state
               },
             },
           };
         }
-        return node;
+        return n;
       })
     );
   }, [id, localTolerance, setNodes]);
@@ -54,139 +55,96 @@ export const AnalysisNode = memo(({ data, id, isConnectable }: NodeProps<Analysi
     updateNodeTolerance();
   }, [localTolerance, updateNodeTolerance]);
 
-  // Track connected elements for analysis
+  // Analysis Effect - Depends on the whole nodes array now
   useEffect(() => {
-    const performAnalysis = async () => {
-      // Skip if not configured for clash detection (though this node only does clash now)
-      // if (data.properties?.analysisType !== "clash") return
+    // Get nodes *inside* the effect
+    const allNodes = getNodes();
+    console.log("AnalysisNode: Effect triggered by nodes array change or tolerance.", { nodesLength: allNodes.length, localTolerance });
 
-      setLoading(true)
-      setResults(null); // Clear previous results on re-run
+    const performAnalysis = async () => {
+      setLoading(true);
+      setResults(null);
 
       try {
-        const edges = getEdges()
-        const inputEdge = edges.find(edge => edge.target === id && edge.targetHandle === "input")
-        const referenceEdge = edges.find(edge => edge.target === id && edge.targetHandle === "reference")
+        // Get Edges and Nodes within the effect
+        const currentEdges = getEdges();
+        const inputEdge = currentEdges.find(edge => edge.target === id && edge.targetHandle === "input");
+        const referenceEdge = currentEdges.find(edge => edge.target === id && edge.targetHandle === "reference");
 
-        // Determine if inputs are connected
-        const isInputConnected = !!inputEdge;
-        const isReferenceConnected = !!referenceEdge;
-
-        if (!isInputConnected || !isReferenceConnected) {
-          setResults({ error: "Connect both primary and reference elements" })
-          setLoading(false); // Stop loading if not connected
-          return;
+        if (!inputEdge || !referenceEdge) {
+          setResults({ error: "Connect both primary and reference elements" });
+          setLoading(false); return;
         }
 
-        // Inputs seem connected, now try to get node data
-        const inputNode = getNode(inputEdge.source)
-        const referenceNode = getNode(referenceEdge.source)
-
-        // It's possible getNode returns null if the node isn't fully ready yet
+        const inputNode = getNode(inputEdge.source);
+        const referenceNode = getNode(referenceEdge.source);
         if (!inputNode || !referenceNode) {
-          console.warn(`AnalysisNode: Could not get node objects for inputs (Input: ${inputEdge.source}, Ref: ${referenceEdge.source})`);
           setResults({ error: "Input nodes not found" });
-          setLoading(false);
-          return;
+          setLoading(false); return;
         }
 
-        // Log the raw input values before validation
-        console.log("AnalysisNode Input Debug: Primary Raw Input:", inputNode?.data.outputData);
-        console.log("AnalysisNode Input Debug: Reference Raw Input:", referenceNode?.data.outputData);
+        // Get Element Data
+        const primaryInputData = inputNode.data?.outputData;
+        const referenceInputData = referenceNode.data?.outputData;
+        const primaryElements = primaryInputData?.value;
+        const referenceElements = referenceInputData?.value;
 
-        const primaryElements = inputNode?.data.outputData?.value;
-        const referenceElements = referenceNode?.data.outputData?.value;
-
-        // Log the extracted values
-        console.log("AnalysisNode Input Debug: Primary Elements Extracted:", primaryElements);
-        console.log("AnalysisNode Input Debug: Reference Elements Extracted:", referenceElements);
-
-        // Add specific checks for undefined before Array.isArray
-        if (primaryElements === undefined) {
-          console.error("AnalysisNode Validation Failed: Primary input data is undefined.");
-          setResults({ error: "Primary input data is missing" });
-          setLoading(false);
-          return;
+        // Validate Element Data
+        if (!primaryInputData || primaryInputData.type === 'error' || primaryInputData.type === 'loading' || !Array.isArray(primaryElements) || primaryElements.length === 0) {
+          setResults({ error: "Waiting for or invalid primary input" });
+          setLoading(false); return;
         }
-        if (!Array.isArray(primaryElements) || primaryElements.length === 0) {
-          console.error("AnalysisNode Validation Failed: Primary input is not a valid array or is empty.");
-          setResults({ error: "Primary input elements are invalid or empty" });
-          setLoading(false);
-          return;
+        if (!referenceInputData || referenceInputData.type === 'error' || referenceInputData.type === 'loading' || !Array.isArray(referenceElements) || referenceElements.length === 0) {
+          setResults({ error: "Waiting for or invalid reference input" });
+          setLoading(false); return;
         }
 
-        if (referenceElements === undefined) {
-          console.error("AnalysisNode Validation Failed: Reference input data is undefined.");
-          setResults({ error: "Reference input data is missing" });
-          setLoading(false);
-          return;
-        }
-        if (!Array.isArray(referenceElements) || referenceElements.length === 0) {
-          console.error("AnalysisNode Validation Failed: Reference input is not a valid array or is empty.");
-          setResults({ error: "Reference input elements are invalid or empty" });
-          setLoading(false);
-          return;
+        // Check Viewer Readiness using the `allNodes` array fetched at the start of the effect
+        const viewerNode = allNodes.find((n: Node) => n.type === 'viewerNode'); // Type node as Node
+        const viewerIsReady = viewerNode?.data?.viewerState?.isReady ?? false;
+        console.log(`AnalysisNode ${id}: Found viewer node ${viewerNode?.id}. IsReady = ${viewerIsReady}`);
+
+        if (!viewerIsReady) {
+          console.log(`AnalysisNode ${id}: Viewer is not ready yet.`);
+          setResults({ status: 'viewer_not_ready', message: `Waiting for viewer...`, clashes: 0, details: [] });
+          setLoading(false); return;
         }
 
-        console.log(`AnalysisNode: Running clash with tolerance ${localTolerance}mm`);
-
-        // Perform clash detection using localTolerance state
+        console.log(`AnalysisNode: Running clash with tolerance ${localTolerance}mm (Viewer ready)`);
         const analysisResults = await performClashDetection(
           primaryElements,
           referenceElements,
           { tolerance: localTolerance, showIn3DViewer: true }
-        )
+        );
+        setResults(analysisResults);
 
-        setResults(analysisResults)
       } catch (error) {
-        console.error("Clash detection error:", error)
-        setResults({ error: "Failed to perform clash detection" })
+        console.error("Clash detection error:", error);
+        setResults({ error: "Failed to perform clash detection" });
       } finally {
-        setLoading(false)
+        setLoading(false);
       }
-    }
+    };
 
-    // Trigger analysis primarily based on connections changing
-    // We rely on the overall workflow re-running when tolerance *property* changes,
-    // which should provide updated input data to this node.
-    performAnalysis()
-    // IMPORTANT: Removing localTolerance from dependencies.
-    // We add placeholders for the input data values themselves if possible, 
-    // but React Flow doesn't easily provide direct dependency on upstream data values.
-    // Relying on edge changes and node graph structure changes is more typical.
-    // For simplicity now, let's just use getEdges and getNode references. A more robust
-    // solution might involve passing a 'version' number through data or context.
-  }, [getEdges, getNode, id]) // Removed localTolerance
+    performAnalysis();
+    // Depend on getNodes and localTolerance.
+    // Changes to node data will cause getNodes to potentially return a different reference (or internal changes)
+    // which should trigger the effect correctly.
+  }, [localTolerance, id, getEdges, getNode, getNodes]); // Corrected spelling
 
   // Propagate results to the appropriate output handles
   useEffect(() => {
     if (results) {
-      setNodes(nodes =>
-        nodes.map(node => {
-          if (node.id === id) {
-            return {
-              ...node,
-              data: {
-                ...node.data,
-                // Main output for clash results data (e.g., for WatchNode)
-                outputData: {
-                  type: "clashResults",
-                  value: results
-                },
-                // Separate output property for visualization trigger/data (e.g., for ViewerNode)
-                // For now, just pass the same results. ViewerNode checks type.
-                visualizationData: {
-                  type: "clashResults",
-                  value: results
-                }
-              }
-            }
+      setNodes(nds =>
+        nds.map((n: Node) => { // Type node as Node
+          if (n.id === id) {
+            return { ...n, data: { ...n.data, outputData: { type: "clashResults", value: results }, visualizationData: { type: "clashResults", value: results } } };
           }
-          return node
+          return n;
         })
-      )
+      );
     }
-  }, [results, id, setNodes])
+  }, [results, id, setNodes]);
 
   // Calculate clash severity color
   const getSeverityColor = () => {
@@ -239,6 +197,10 @@ export const AnalysisNode = memo(({ data, id, isConnectable }: NodeProps<Analysi
           {loading ? (
             <div className="mt-2 text-blue-500">
               Running clash detection...
+            </div>
+          ) : results?.status === 'viewer_not_ready' ? (
+            <div className="mt-2 text-orange-500 italic">
+              Waiting for 3D viewer to finish loading geometry...
             </div>
           ) : results?.error ? (
             <div className="mt-2 text-red-500">

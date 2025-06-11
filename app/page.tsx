@@ -761,80 +761,80 @@ function FlowWithProvider() {
   };
 
   // Handle running a workflow
-  const handleRunWorkflow = async () => {
-    try {
-      setIsRunning(true);
-      const executor = new WorkflowExecutor(nodes, edges);
-      const results = await executor.execute();
-      setExecutionResults(results);
-
-      // Update node data using the executor's updated node list
-      const updatedNodesFromExecutor = executor.getUpdatedNodes();
-
-      // Apply updates to the nodes
-      setNodes(prev => {
-        // Create a completely new array to ensure React detects the changes
-        const newNodes = updatedNodesFromExecutor.map(executorNode => {
-          // Find the corresponding node in the current state
-          const currentNode = prev.find(n => n.id === executorNode.id);
-
-          // Special handling for watch nodes - they need to be forced to update
-          if (executorNode.type === 'watchNode') {
-            return {
-              ...executorNode,
-              // Add a timestamp to force React to see this as a new object
-              data: {
-                ...executorNode.data,
-                // This ensures the data is treated as new even if content is the same
-                _forceUpdate: Date.now()
-              }
-            };
-          }
-
-          // For other nodes, preserve any UI state from the current node that isn't in the executor node
-          if (currentNode) {
-            return {
-              ...currentNode, // Keep position, etc.
-              data: {
-                ...currentNode.data, // Keep existing node data
-                ...executorNode.data, // Override with executor's updated data
-              }
-            };
-          }
-
-          // Fall back to the executor node data for any nodes we couldn't find in current state
-          return executorNode;
-        });
-
-        return newNodes;
-      });
-
-      setIsRunning(false);
-
-      // Show success message
-      toast({
-        title: "Workflow executed",
-        description: "Workflow completed successfully",
-      });
-    } catch (error: unknown) {
-      console.error("Error executing workflow:", error);
-      setIsRunning(false);
-
-      // Create a more detailed error message
-      const errorDetails =
-        error instanceof Error && error.stack
-          ? `${error.message}\n\nStack: ${error.stack}`
-          : error instanceof Error
-            ? error.message
-            : String(error);
-
-      toast({
-        title: "Error executing workflow",
-        description: errorDetails,
-        variant: "destructive",
-      });
+  const handleRunWorkflow = useCallback(async () => {
+    console.log("Starting workflow execution...");
+    if (!reactFlowInstance) {
+      console.error("React Flow instance not available");
+      return;
     }
-  };
+
+    // Get current nodes/edges from React Flow state
+    const currentNodes = reactFlowInstance.getNodes();
+    const currentEdges = reactFlowInstance.getEdges();
+
+    const executor = new WorkflowExecutor(currentNodes, currentEdges);
+
+    try {
+      // Execute the workflow
+      const executionResults = await executor.execute();
+
+      // *** Update node data based on execution results ***
+      setNodes((prevNodes) =>
+        prevNodes.map((node) => {
+          const result = executionResults.get(node.id);
+
+          // Prepare structured input data for this node based on its incoming edges
+          let inputDataForNode: Record<string, any> = {};
+          const inputEdges = currentEdges.filter(edge => edge.target === node.id);
+          inputEdges.forEach(edge => {
+            const sourceResult = executionResults.get(edge.source);
+            const handle = edge.targetHandle || 'input';
+
+            // Use specific keys for analysis inputs
+            if (node.type === 'analysisNode') {
+              if (handle === 'input') inputDataForNode.primary = sourceResult;
+              else if (handle === 'reference') inputDataForNode.reference = sourceResult;
+              // Add other potential inputs if needed
+            } else if (node.type === 'propertyNode' && handle === 'valueInput') {
+              inputDataForNode.valueInput = sourceResult; // Specific key for property value input
+            } else {
+              // Default assignment for other nodes/handles
+              inputDataForNode[handle] = sourceResult;
+            }
+          });
+
+          // Return the updated node structure
+          return {
+            ...node,
+            data: {
+              ...node.data,
+              // Store the node's OWN calculated result in outputData
+              // (Handle cases where result might be undefined or error)
+              outputData: result && result.type !== 'error' && result.type !== 'loading' ? result : node.data.outputData,
+              visualizationData: node.type === 'analysisNode' && result?.type === 'clashResults' ? result : node.data.visualizationData,
+              // Store the structured INPUT data from upstream nodes
+              inputData: inputDataForNode,
+              // Update status flags based on result
+              isLoading: result?.type === 'loading',
+              error: result?.type === 'error' ? result.value : null,
+              // Update viewer readiness if this is a viewer node
+              viewerState: node.type === 'viewerNode' ? {
+                ...(node.data.viewerState || {}),
+                isReady: result?.value?.isReady ?? false, // Assuming result holds viewer instance
+                isLoading: !!result?.value?.getLoadingPromise?.() // Check promise
+              } : node.data.viewerState,
+            },
+          };
+        })
+      );
+
+      console.log("Node states updated after workflow execution.");
+
+    } catch (error) {
+      console.error("Workflow execution failed:", error);
+      // Optionally update UI to show a general execution error
+    }
+  }, [reactFlowInstance, setNodes]); // Ensure reactFlowInstance is stable or included if needed
 
   // Handle exporting results
   const handleExportResults = (format: string, filename: string) => {

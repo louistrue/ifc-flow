@@ -8,8 +8,22 @@ export interface BaseNodeData {
 export interface AnalysisNodeData extends BaseNodeData {
     properties?: {
         analysisType?: string;
-        tolerance?: string;
+        tolerance?: number | string;
         metric?: string;
+        [key: string]: any;
+    };
+    inputData?: {
+        primary?: any;
+        reference?: any;
+    };
+    outputData?: {
+        type: string;
+        value: any;
+        [key: string]: any;
+    };
+    visualizationData?: {
+        type: string;
+        value: any;
         [key: string]: any;
     };
 }
