@@ -9,6 +9,7 @@ import {
   queryRelationships,
   performAnalysis,
   exportData,
+  downloadExportedFile,
   loadIfcFile,
   IfcModel,
   getLastLoadedModel,
@@ -739,12 +740,21 @@ export class WorkflowExecutor {
           console.warn(`No input provided to export node ${nodeId}`);
           result = "";
         } else {
-          result = exportData(
+          result = await exportData(
             inputValues.input,
             node.data.properties?.format || "csv",
-            node.data.properties?.fileName || "export",
-            node.data.properties?.properties || "Name,Type,Material"
+            node.data.properties?.fileName || "export"
           );
+          if (
+            result !== undefined &&
+            node.data.properties?.format?.toLowerCase() !== "ifc"
+          ) {
+            downloadExportedFile(
+              result,
+              node.data.properties?.format || "csv",
+              node.data.properties?.fileName || "export"
+            );
+          }
         }
         break;
 

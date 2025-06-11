@@ -26,17 +26,6 @@ export const ExportNode = memo(({ data, isConnectable }: NodeProps<ExportNodeDat
               {data.properties?.fileName || "export"}
             </span>
           </div>
-          {(data.properties?.format === "csv" ||
-            data.properties?.format === "excel" ||
-            data.properties?.format === "json") &&
-            data.properties?.properties ? (
-            <div className="flex justify-between">
-              <span>Properties:</span>
-              <span className="font-medium truncate">
-                {data.properties.properties}
-              </span>
-            </div>
-          ) : null}
         </div>
       </div>
       <Handle

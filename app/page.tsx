@@ -39,7 +39,7 @@ import { WatchNode } from "@/components/nodes/watch-node";
 import { ParameterNode } from "@/components/nodes/parameter-node";
 import { Toaster } from "@/components/toaster";
 import { WorkflowExecutor } from "@/lib/workflow-executor";
-import { loadIfcFile, getIfcFile } from "@/lib/ifc-utils";
+import { loadIfcFile, getIfcFile, downloadExportedFile } from "@/lib/ifc-utils";
 import { useToast } from "@/hooks/use-toast";
 import { FileUp } from "lucide-react";
 import type { Workflow } from "@/lib/workflow-storage";
@@ -868,17 +868,15 @@ function FlowWithProvider() {
 
     const result = executionResults.get(nodeId);
 
-    // In a real app, this would create a file based on the format
-    const blob = new Blob([result], { type: "text/plain" });
-    const url = URL.createObjectURL(blob);
+    if (format === "ifc") {
+      toast({
+        title: "IFC export started",
+        description: "The file will download when ready",
+      });
+      return;
+    }
 
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${filename}.${format}`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    downloadExportedFile(result, format, filename);
   };
 
   // Function to get the flow object for saving

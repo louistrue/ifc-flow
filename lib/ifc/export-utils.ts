@@ -5,11 +5,12 @@ export function exportData(
   elements: IfcElement[],
   format = "csv",
   fileName = "export",
-  properties = "Name,Type,Material",
 ): string {
-  console.log("Exporting data:", format, fileName, properties)
+  console.log("Exporting data:", format, fileName)
 
-  const propertyList = properties.split(",")
+  const propertyList = Array.from(
+    new Set(elements.flatMap((el) => Object.keys(el.properties || {})))
+  )
 
   switch (format) {
     case "csv":

@@ -28,7 +28,7 @@ export interface ClassificationNodeData extends BaseNodeData {
 export interface ExportNodeData extends BaseNodeData {
     properties?: {
         format?: string;
-        filename?: string;
+        fileName?: string;
         [key: string]: any;
     };
 }
