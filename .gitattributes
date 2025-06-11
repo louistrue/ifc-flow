@@ -1,0 +1,20 @@
+# Mark license as documentation
+LICENSE linguist-documentation
+
+# Mark generated WASM files as binary
+*.wasm linguist-generated=true
+*.whl linguist-generated=true
+
+# Mark generated JavaScript files as generated
+public/wasm/*.js linguist-generated=true
+public/wasm/helpers/*.js linguist-generated=true
+
+# Mark documentation files
+*.md linguist-documentation
+docs/* linguist-documentation
+
+# Mark configuration files
+*.json linguist-documentation
+*.config.js linguist-documentation
+*.config.mjs linguist-documentation
+*.config.ts linguist-documentation 
