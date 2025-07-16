@@ -38,7 +38,6 @@ import {
   Copy,
   Check,
   Command,
-  FileDown,
 } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Input } from "@/components/ui/input";
@@ -62,7 +61,6 @@ interface Shortcut {
   id: string;
   name: string;
   keys: string;
-  defaultKeys: string;
   category: string;
 }
 
@@ -71,13 +69,10 @@ type ShortcutsByCategory = Record<string, Shortcut[]>;
 
 export function HelpDialog({ open, onOpenChange }: HelpDialogProps) {
   const [activeTab, setActiveTab] = useState("shortcuts");
-  const [editingShortcut, setEditingShortcut] = useState<string | null>(null);
-  const [listeningForKeys, setListeningForKeys] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [copiedId, setCopiedId] = useState<string | null>(null);
   // Explicitly type the shortcuts from the hook if possible, otherwise use the local Shortcut type
-  const { shortcuts, updateShortcut, resetShortcut, resetAllShortcuts } =
-    useKeyboardShortcuts();
+  const { shortcuts } = useKeyboardShortcuts();
   const dialogRef = useRef<HTMLDivElement>(null);
 
   // Group shortcuts by category
@@ -100,39 +95,6 @@ export function HelpDialog({ open, onOpenChange }: HelpDialogProps) {
         s.category.toLowerCase().includes(searchQuery.toLowerCase())
     )
     : null;
-
-  // Handle shortcut edit
-  const handleShortcutClick = (id: string) => {
-    setEditingShortcut(id);
-    setListeningForKeys(true);
-  };
-
-  // Handle key press for shortcut editing
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (!listeningForKeys || !editingShortcut) return;
-
-    e.preventDefault();
-
-    // Build key combination
-    const keys = [];
-    if (e.ctrlKey) keys.push("ctrl");
-    if (e.altKey) keys.push("alt");
-    if (e.shiftKey) keys.push("shift");
-    if (e.metaKey) keys.push("meta");
-
-    // Add the main key if it's not a modifier
-    const key = e.key.toLowerCase();
-    if (!["control", "alt", "shift", "meta"].includes(key)) {
-      keys.push(key);
-    }
-
-    // Only update if we have at least one key
-    if (keys.length > 0) {
-      updateShortcut(editingShortcut, keys.join("+"));
-      setListeningForKeys(false);
-      setEditingShortcut(null);
-    }
-  };
 
   // Copy shortcut to clipboard
   const handleCopyShortcut = (id: string, keys: string) => {
@@ -207,7 +169,6 @@ export function HelpDialog({ open, onOpenChange }: HelpDialogProps) {
       <DialogContent
         ref={dialogRef}
         className="sm:max-w-4xl max-h-[90vh] overflow-hidden flex flex-col bg-background"
-        onKeyDown={handleKeyDown}
       >
         <DialogHeader className="pb-2 border-b">
           <DialogTitle className="flex items-center gap-2 text-xl">
@@ -264,9 +225,6 @@ export function HelpDialog({ open, onOpenChange }: HelpDialogProps) {
                     onChange={(e) => setSearchQuery(e.target.value)}
                   />
                 </div>
-                <Button variant="outline" size="sm" onClick={resetAllShortcuts}>
-                  Reset All
-                </Button>
               </div>
             )}
           </div>
@@ -276,19 +234,7 @@ export function HelpDialog({ open, onOpenChange }: HelpDialogProps) {
             className="flex-1 overflow-hidden flex flex-col mt-0 border rounded-md"
             tabIndex={0}
           >
-            {listeningForKeys && (
-              <Alert className="m-4 mb-0">
-                <AlertTitle className="flex items-center gap-2">
-                  <Keyboard className="h-4 w-4" />
-                  Listening for key press
-                </AlertTitle>
-                <AlertDescription>
-                  Press the key combination you want to use for this shortcut
-                </AlertDescription>
-              </Alert>
-            )}
-
-            <ScrollArea className="flex-1 p-4">
+            <ScrollArea className="flex-1 h-full p-4">
               {filteredShortcuts ? (
                 <div className="space-y-4">
                   <h3 className="text-lg font-medium">Search Results</h3>
@@ -298,7 +244,6 @@ export function HelpDialog({ open, onOpenChange }: HelpDialogProps) {
                         <TableHead>Category</TableHead>
                         <TableHead>Action</TableHead>
                         <TableHead>Shortcut</TableHead>
-                        <TableHead className="w-[140px]">Actions</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -308,49 +253,25 @@ export function HelpDialog({ open, onOpenChange }: HelpDialogProps) {
                             {shortcut.category}
                           </TableCell>
                           <TableCell>{shortcut.name}</TableCell>
-                          <TableCell>
+                          <TableCell className="flex items-center gap-2">
+                            <span className="font-mono">
+                              {formatKeyCombination(shortcut.keys)}
+                            </span>
                             <Button
                               variant="ghost"
-                              size="sm"
-                              className={`font-mono ${editingShortcut === shortcut.id
-                                ? "bg-primary/20"
-                                : ""
-                                }`}
-                              onClick={() => handleShortcutClick(shortcut.id)}
+                              size="icon"
+                              className="h-8 w-8"
+                              onClick={() =>
+                                handleCopyShortcut(shortcut.id, shortcut.keys)
+                              }
+                              title="Copy shortcut"
                             >
-                              {formatKeyCombination(shortcut.keys)}
+                              {copiedId === shortcut.id ? (
+                                <Check className="h-4 w-4 text-green-500" />
+                              ) : (
+                                <Copy className="h-4 w-4" />
+                              )}
                             </Button>
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex gap-1">
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8"
-                                onClick={() =>
-                                  handleCopyShortcut(shortcut.id, shortcut.keys)
-                                }
-                                title="Copy shortcut"
-                              >
-                                {copiedId === shortcut.id ? (
-                                  <Check className="h-4 w-4 text-green-500" />
-                                ) : (
-                                  <Copy className="h-4 w-4" />
-                                )}
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8"
-                                onClick={() => resetShortcut(shortcut.id)}
-                                disabled={
-                                  shortcut.keys === shortcut.defaultKeys
-                                }
-                                title="Reset to default"
-                              >
-                                <FileDown className="h-4 w-4" />
-                              </Button>
-                            </div>
                           </TableCell>
                         </TableRow>
                       ))}
@@ -384,7 +305,6 @@ export function HelpDialog({ open, onOpenChange }: HelpDialogProps) {
                           <TableRow>
                             <TableHead>Action</TableHead>
                             <TableHead>Shortcut</TableHead>
-                            <TableHead className="w-[140px]">Actions</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -392,54 +312,25 @@ export function HelpDialog({ open, onOpenChange }: HelpDialogProps) {
                             (shortcut: Shortcut) => (
                               <TableRow key={shortcut.id}>
                                 <TableCell>{shortcut.name}</TableCell>
-                                <TableCell>
+                                <TableCell className="flex items-center gap-2">
+                                  <span className="font-mono">
+                                    {formatKeyCombination(shortcut.keys)}
+                                  </span>
                                   <Button
                                     variant="ghost"
-                                    size="sm"
-                                    className={`font-mono ${editingShortcut === shortcut.id
-                                      ? "bg-primary/20"
-                                      : ""
-                                      }`}
+                                    size="icon"
+                                    className="h-8 w-8"
                                     onClick={() =>
-                                      handleShortcutClick(shortcut.id)
+                                      handleCopyShortcut(shortcut.id, shortcut.keys)
                                     }
+                                    title="Copy shortcut"
                                   >
-                                    {formatKeyCombination(shortcut.keys)}
+                                    {copiedId === shortcut.id ? (
+                                      <Check className="h-4 w-4 text-green-500" />
+                                    ) : (
+                                      <Copy className="h-4 w-4" />
+                                    )}
                                   </Button>
-                                </TableCell>
-                                <TableCell>
-                                  <div className="flex gap-1">
-                                    <Button
-                                      variant="ghost"
-                                      size="icon"
-                                      className="h-8 w-8"
-                                      onClick={() =>
-                                        handleCopyShortcut(
-                                          shortcut.id,
-                                          shortcut.keys
-                                        )
-                                      }
-                                      title="Copy shortcut"
-                                    >
-                                      {copiedId === shortcut.id ? (
-                                        <Check className="h-4 w-4 text-green-500" />
-                                      ) : (
-                                        <Copy className="h-4 w-4" />
-                                      )}
-                                    </Button>
-                                    <Button
-                                      variant="ghost"
-                                      size="icon"
-                                      className="h-8 w-8"
-                                      onClick={() => resetShortcut(shortcut.id)}
-                                      disabled={
-                                        shortcut.keys === shortcut.defaultKeys
-                                      }
-                                      title="Reset to default"
-                                    >
-                                      <FileDown className="h-4 w-4" />
-                                    </Button>
-                                  </div>
                                 </TableCell>
                               </TableRow>
                             )
