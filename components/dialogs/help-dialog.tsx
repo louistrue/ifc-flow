@@ -629,6 +629,33 @@ export function HelpDialog({ open, onOpenChange }: HelpDialogProps) {
                     </Button>
                   </CardFooter>
                 </Card>
+
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-base">
+                      Python Aggregation
+                    </CardTitle>
+                    <CardDescription>
+                      Use the Python node to group elements and compute stats
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="text-sm text-muted-foreground">
+                    <p>
+                      Demonstrates running custom Python code that processes
+                      elements and outputs a table readable by a Watch node.
+                    </p>
+                  </CardContent>
+                  <CardFooter className="pt-0">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="w-full"
+                      onClick={() => window.open('/docs/python-node.md', '_blank')}
+                    >
+                      View Script
+                    </Button>
+                  </CardFooter>
+                </Card>
               </div>
 
               <div className="flex justify-center mt-6">

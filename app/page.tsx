@@ -37,7 +37,9 @@ import { RelationshipNode } from "@/components/nodes/relationship-node";
 import { AnalysisNode } from "@/components/nodes/analysis-node";
 import { WatchNode } from "@/components/nodes/watch-node";
 import { ParameterNode } from "@/components/nodes/parameter-node";
+import { PythonScriptNode } from "@/components/nodes/python-script-node";
 import { Toaster } from "@/components/toaster";
+import { PythonEditorDialog } from "@/components/dialogs/python-editor-dialog";
 import { WorkflowExecutor } from "@/lib/workflow-executor";
 import { loadIfcFile, getIfcFile } from "@/lib/ifc-utils";
 import { useToast } from "@/hooks/use-toast";
@@ -68,6 +70,7 @@ const nodeTypes: NodeTypes = {
   analysisNode: AnalysisNode,
   watchNode: WatchNode,
   parameterNode: ParameterNode,
+  pythonNode: PythonScriptNode,
 };
 
 // Custom node style to highlight selected nodes
@@ -109,6 +112,7 @@ function FlowWithProvider() {
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge[]>([]);
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [editingNode, setEditingNode] = useState<Node | null>(null);
+  const [pythonEditorNode, setPythonEditorNode] = useState<Node | null>(null);
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
   const { shortcuts } = useKeyboardShortcuts();
@@ -462,7 +466,10 @@ function FlowWithProvider() {
   // Handle node double-click to open properties panel
   const onNodeDoubleClick = useCallback(
     (event: React.MouseEvent, node: Node) => {
-      // Only open edit mode on double click if we're not already editing
+      if (node.type === "pythonNode") {
+        setPythonEditorNode(node);
+        return;
+      }
       if (!editingNode) {
         setEditingNode(node);
       }
@@ -1597,6 +1604,22 @@ function FlowWithProvider() {
           node={editingNode}
           setNodes={setNodes as React.Dispatch<React.SetStateAction<any[]>>}
           setSelectedNode={setEditingNode}
+        />
+      )}
+      {pythonEditorNode && (
+        <PythonEditorDialog
+          node={pythonEditorNode}
+          onClose={() => setPythonEditorNode(null)}
+          onSave={(id, script) => {
+            setNodes((nds) =>
+              nds.map((n) =>
+                n.id === id
+                  ? { ...n, data: { ...n.data, properties: { ...(n.data as any).properties, script } } }
+                  : n
+              )
+            )
+            setPythonEditorNode(null)
+          }}
         />
       )}
       <Toaster />
