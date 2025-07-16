@@ -560,20 +560,26 @@ export async function extractGeometryWithGeom(
 
 // Filter elements by property
 export function filterElements(
-  elements: IfcElement[],
+  elements: IfcElement[] | IfcModel,
   property: string,
   operator: string,
   value: string
 ): IfcElement[] {
   console.log("Filtering elements:", property, operator, value);
 
+  const elementArray = Array.isArray(elements)
+    ? elements
+    : elements && (elements as IfcModel).elements
+    ? (elements as IfcModel).elements
+    : [];
+
   // Add a check for undefined or empty elements
-  if (!elements || elements.length === 0) {
+  if (!elementArray || elementArray.length === 0) {
     console.warn("No elements to filter");
     return [];
   }
 
-  return elements.filter((element) => {
+  return elementArray.filter((element) => {
     // Split property path (e.g., "Pset_WallCommon.FireRating")
     const propParts = property.split(".");
 

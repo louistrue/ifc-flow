@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -10,6 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { getLastLoadedModel } from "@/lib/ifc-utils";
 
 interface NodePropertyRendererProps {
   node: any;
@@ -22,6 +24,28 @@ export function NodePropertyRenderer({
   properties,
   setProperties,
 }: NodePropertyRendererProps) {
+  const [availableProps, setAvailableProps] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (node.type === "filterNode") {
+      const model = getLastLoadedModel();
+      if (model) {
+        const propSet = new Set<string>();
+        model.elements.forEach((el) => {
+          Object.keys(el.properties || {}).forEach((p) => propSet.add(p));
+          if (el.psets) {
+            for (const psetName in el.psets) {
+              const pset = el.psets[psetName];
+              Object.keys(pset || {}).forEach((prop) =>
+                propSet.add(`${psetName}.${prop}`)
+              );
+            }
+          }
+        });
+        setAvailableProps(Array.from(propSet).sort());
+      }
+    }
+  }, [node.type]);
   // Return null for ifcNode type to prevent properties panel from rendering anything
   if (node.type === "ifcNode") {
     return null;
@@ -99,14 +123,34 @@ export function NodePropertyRenderer({
         <div className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="property">Property</Label>
-            <Input
-              id="property"
-              value={properties.property || ""}
-              onChange={(e) =>
-                setProperties({ ...properties, property: e.target.value })
-              }
-              placeholder="e.g. Type, Material, etc."
-            />
+            {availableProps.length > 0 ? (
+              <Select
+                value={properties.property || ""}
+                onValueChange={(value) =>
+                  setProperties({ ...properties, property: value })
+                }
+              >
+                <SelectTrigger id="property">
+                  <SelectValue placeholder="Select property" />
+                </SelectTrigger>
+                <SelectContent>
+                  {availableProps.map((p) => (
+                    <SelectItem key={p} value={p}>
+                      {p}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <Input
+                id="property"
+                value={properties.property || ""}
+                onChange={(e) =>
+                  setProperties({ ...properties, property: e.target.value })
+                }
+                placeholder="e.g. Pset_WallCommon.FireRating"
+              />
+            )}
           </div>
           <div className="space-y-2">
             <Label htmlFor="operator">Operator</Label>
