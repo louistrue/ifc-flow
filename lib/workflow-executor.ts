@@ -269,8 +269,20 @@ export class WorkflowExecutor {
           console.warn(`No input provided to filter node ${nodeId}`);
           result = [];
         } else {
+          let elements: any = inputValues.input;
+          if (!Array.isArray(elements)) {
+            if (Array.isArray((elements as any).elements)) {
+              elements = (elements as any).elements;
+            } else {
+              console.warn(
+                `Filter node ${nodeId} received unsupported input type`
+              );
+              elements = [];
+            }
+          }
+
           result = filterElements(
-            inputValues.input,
+            elements,
             node.data.properties?.property || "",
             node.data.properties?.operator || "equals",
             node.data.properties?.value || ""

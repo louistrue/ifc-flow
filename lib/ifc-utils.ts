@@ -66,6 +66,25 @@ export function getLastLoadedModel(): IfcModel | null {
   return _lastLoadedModel;
 }
 
+// Get all distinct property names from a model using Pset.Property notation
+export function getModelPropertyNames(model: IfcModel | null): string[] {
+  if (!model || !model.elements) return [];
+  const names = new Set<string>();
+  for (const el of model.elements) {
+    if (el.properties) {
+      Object.keys(el.properties).forEach((p) => names.add(p));
+    }
+    if (el.psets) {
+      for (const pset in el.psets) {
+        for (const prop in el.psets[pset]) {
+          names.add(`${pset}.${prop}`);
+        }
+      }
+    }
+  }
+  return Array.from(names).sort();
+}
+
 // Function to retrieve a stored File object
 export function getIfcFile(fileName: string): File | null {
   return ifcFileCache.get(fileName) || null;

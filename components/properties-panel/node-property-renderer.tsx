@@ -10,6 +10,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useState, useEffect } from "react";
+import { getLastLoadedModel, getModelPropertyNames } from "@/lib/ifc-utils";
 
 interface NodePropertyRendererProps {
   node: any;
@@ -26,6 +28,15 @@ export function NodePropertyRenderer({
   if (node.type === "ifcNode") {
     return null;
   }
+
+  const [propertyOptions, setPropertyOptions] = useState<string[]>([]);
+
+  useEffect(() => {
+    const model = getLastLoadedModel();
+    if (model) {
+      setPropertyOptions(getModelPropertyNames(model));
+    }
+  }, []);
 
   switch (node.type) {
     case "geometryNode":
@@ -99,14 +110,34 @@ export function NodePropertyRenderer({
         <div className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="property">Property</Label>
-            <Input
-              id="property"
-              value={properties.property || ""}
-              onChange={(e) =>
-                setProperties({ ...properties, property: e.target.value })
-              }
-              placeholder="e.g. Type, Material, etc."
-            />
+            {propertyOptions.length > 0 ? (
+              <Select
+                value={properties.property || ""}
+                onValueChange={(value) =>
+                  setProperties({ ...properties, property: value })
+                }
+              >
+                <SelectTrigger id="property">
+                  <SelectValue placeholder="Select property" />
+                </SelectTrigger>
+                <SelectContent>
+                  {propertyOptions.map((name) => (
+                    <SelectItem key={name} value={name}>
+                      {name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <Input
+                id="property"
+                value={properties.property || ""}
+                onChange={(e) =>
+                  setProperties({ ...properties, property: e.target.value })
+                }
+                placeholder="e.g. Pset_WallCommon.FireRating"
+              />
+            )}
           </div>
           <div className="space-y-2">
             <Label htmlFor="operator">Operator</Label>
