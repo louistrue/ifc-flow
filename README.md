@@ -49,6 +49,7 @@ IFC Flow Map provides a graphical interface for viewing, filtering, transforming
   - 📊 **Analysis Node** - Perform analyses like clash detection
   - 👀 **Watch Node** - Monitor element values
   - ⚙️ **Parameter Node** - Define workflow parameters
+  - 🐍 **Python Node** - Run custom Python scripts
 - 💾 **Workflow Storage** - Save and load workflows
 - ⚡ **Real-time Execution** - Execute workflows and see results immediately
 - ⌨️ **Keyboard Shortcuts** - Efficient workflow creation with keyboard shortcuts

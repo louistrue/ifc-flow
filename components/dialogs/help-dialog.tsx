@@ -178,6 +178,17 @@ export function HelpDialog({ open, onOpenChange }: HelpDialogProps) {
       ],
     },
     {
+      id: "python",
+      title: "Using the Python Node",
+      icon: <Code className="h-5 w-5" />,
+      description: "Run custom scripts to process data.",
+      steps: [
+        'Drag a <i>Python Script</i> node onto the canvas',
+        'Double-click the node to open the editor',
+        'Write code using <code>input_data</code> and press <kbd>Run</kbd>',
+      ],
+    },
+    {
       id: "saving",
       title: "Saving and Loading Workflows",
       icon: <FileJson className="h-5 w-5" />,
@@ -601,6 +612,26 @@ export function HelpDialog({ open, onOpenChange }: HelpDialogProps) {
                     <p>
                       This example shows how to classify and group elements
                       based on their properties and relationships.
+                    </p>
+                  </CardContent>
+                  <CardFooter className="pt-0">
+                    <Button variant="outline" size="sm" className="w-full">
+                      Load Example
+                    </Button>
+                  </CardFooter>
+                </Card>
+
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-base">Python Aggregator</CardTitle>
+                    <CardDescription>
+                      Summarize elements using a Python script
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="text-sm text-muted-foreground">
+                    <p>
+                      This example groups elements by type, computes averages,
+                      and outputs a convenient table.
                     </p>
                   </CardContent>
                   <CardFooter className="pt-0">

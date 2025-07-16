@@ -462,7 +462,7 @@ function FlowWithProvider() {
   // Handle node double-click to open properties panel
   const onNodeDoubleClick = useCallback(
     (event: React.MouseEvent, node: Node) => {
-      // Only open edit mode on double click if we're not already editing
+      if (node.type === "pythonNode") return;
       if (!editingNode) {
         setEditingNode(node);
       }
