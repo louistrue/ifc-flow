@@ -48,6 +48,7 @@ IFC Flow Map provides a graphical interface for viewing, filtering, transforming
   - 🔗 **Relationship Node** - Query element relationships
   - 📊 **Analysis Node** - Perform analyses like clash detection
   - 👀 **Watch Node** - Monitor element values
+  - 🐍 **Python Script Node** - Run custom Python code in your workflow
   - ⚙️ **Parameter Node** - Define workflow parameters
 - 💾 **Workflow Storage** - Save and load workflows
 - ⚡ **Real-time Execution** - Execute workflows and see results immediately
@@ -116,6 +117,7 @@ To learn more about the technologies used:
 - [React Flow Documentation](https://reactflow.dev/docs/introduction/)
 - [Radix UI Documentation](https://www.radix-ui.com/docs/primitives/overview/introduction)
 - [IfcOpenShell Documentation](https://blenderbim.org/docs-python/)
+- [Python Node Guide](docs/python-node.md)
 
 ## 🚀 Deployment
 

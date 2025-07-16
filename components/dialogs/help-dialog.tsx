@@ -178,6 +178,18 @@ export function HelpDialog({ open, onOpenChange }: HelpDialogProps) {
       ],
     },
     {
+      id: "python",
+      title: "Using the Python Script Node",
+      icon: <Code className="h-5 w-5" />,
+      description: "Run custom Python to transform data.",
+      steps: [
+        "Drag a <strong>Python Script</strong> node onto the canvas",
+        "Double-click the node to open the editor",
+        "Write your Python code and assign the output to <code>result</code>",
+        "Run the workflow to execute the script",
+      ],
+    },
+    {
       id: "saving",
       title: "Saving and Loading Workflows",
       icon: <FileJson className="h-5 w-5" />,
@@ -621,6 +633,25 @@ export function HelpDialog({ open, onOpenChange }: HelpDialogProps) {
                     <p>
                       Learn how to export IFC data to CSV, JSON, and other
                       formats for further processing.
+                    </p>
+                  </CardContent>
+                  <CardFooter className="pt-0">
+                    <Button variant="outline" size="sm" className="w-full">
+                      Load Example
+                    </Button>
+                  </CardFooter>
+                </Card>
+
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-base">Python Aggregation</CardTitle>
+                    <CardDescription>
+                      Summarize elements with a custom script
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="text-sm text-muted-foreground">
+                    <p>
+                      Demonstrates grouping elements in Python and computing averages.
                     </p>
                   </CardContent>
                   <CardFooter className="pt-0">
