@@ -607,12 +607,31 @@ export function HelpDialog({ open, onOpenChange }: HelpDialogProps) {
                     <Button variant="outline" size="sm" className="w-full">
                       Load Example
                     </Button>
-                  </CardFooter>
-                </Card>
+                </CardFooter>
+              </Card>
 
-                <Card>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-base">Data Export</CardTitle>
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-base">Python Aggregation</CardTitle>
+                  <CardDescription>
+                    Group elements and compute averages using a Python Script node
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="text-sm text-muted-foreground">
+                  <p>
+                    This example demonstrates running custom Python code inside a workflow.
+                  </p>
+                </CardContent>
+                <CardFooter className="pt-0">
+                  <Button variant="outline" size="sm" className="w-full">
+                    Load Example
+                  </Button>
+                </CardFooter>
+              </Card>
+
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-base">Data Export</CardTitle>
                     <CardDescription>
                       Export model data to various formats
                     </CardDescription>
