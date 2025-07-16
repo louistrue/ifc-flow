@@ -560,15 +560,25 @@ export async function extractGeometryWithGeom(
 
 // Filter elements by property
 export function filterElements(
-  elements: IfcElement[],
+  elementsInput: IfcElement[] | IfcModel | null,
   property: string,
   operator: string,
   value: string
 ): IfcElement[] {
   console.log("Filtering elements:", property, operator, value);
 
-  // Add a check for undefined or empty elements
-  if (!elements || elements.length === 0) {
+  if (!elementsInput) {
+    console.warn("No elements to filter");
+    return [];
+  }
+
+  const elements = Array.isArray(elementsInput)
+    ? elementsInput
+    : Array.isArray(elementsInput.elements)
+    ? elementsInput.elements
+    : [];
+
+  if (elements.length === 0) {
     console.warn("No elements to filter");
     return [];
   }

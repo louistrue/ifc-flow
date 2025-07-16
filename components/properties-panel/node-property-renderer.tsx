@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -10,6 +11,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { getLastLoadedModel } from "@/lib/ifc-utils";
+import { listModelProperties } from "@/lib/ifc/property-utils";
 
 interface NodePropertyRendererProps {
   node: any;
@@ -22,6 +25,14 @@ export function NodePropertyRenderer({
   properties,
   setProperties,
 }: NodePropertyRendererProps) {
+  const [availableProps, setAvailableProps] = useState<string[]>([])
+
+  useEffect(() => {
+    const model = getLastLoadedModel()
+    if (model) {
+      setAvailableProps(listModelProperties(model))
+    }
+  }, [])
   // Return null for ifcNode type to prevent properties panel from rendering anything
   if (node.type === "ifcNode") {
     return null;
@@ -101,12 +112,20 @@ export function NodePropertyRenderer({
             <Label htmlFor="property">Property</Label>
             <Input
               id="property"
+              list="filter-properties"
               value={properties.property || ""}
               onChange={(e) =>
                 setProperties({ ...properties, property: e.target.value })
               }
-              placeholder="e.g. Type, Material, etc."
+              placeholder="e.g. Pset_WallCommon.FireRating"
             />
+            {availableProps.length > 0 && (
+              <datalist id="filter-properties">
+                {availableProps.map((p) => (
+                  <option key={p} value={p} />
+                ))}
+              </datalist>
+            )}
           </div>
           <div className="space-y-2">
             <Label htmlFor="operator">Operator</Label>

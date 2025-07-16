@@ -2,12 +2,19 @@ import type { IfcElement } from "@/lib/ifc/ifc-loader"
 
 // Mock function to filter elements by property
 export function filterElements(
-  elements: IfcElement[],
+  elementsInput: IfcElement[] | { elements?: IfcElement[] } | null,
   property: string,
   operator: string,
   value: string,
 ): IfcElement[] {
   console.log("Filtering elements:", property, operator, value)
+  if (!elementsInput) return []
+
+  const elements = Array.isArray(elementsInput)
+    ? elementsInput
+    : Array.isArray(elementsInput.elements)
+    ? elementsInput.elements!
+    : []
 
   return elements.filter((element) => {
     const propParts = property.split(".")

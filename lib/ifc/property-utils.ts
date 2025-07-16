@@ -498,3 +498,34 @@ export function summarizePropertyData(
 
   return summary;
 }
+
+/**
+ * List all unique property names in a model using the notation
+ * "Pset.Property". If direct properties exist on elements they
+ * are included without a prefix.
+ * @param model IFC model which may contain elements
+ */
+export function listModelProperties(model: { elements?: IfcElement[] } | null): string[] {
+  if (!model || !Array.isArray(model.elements)) {
+    return [];
+  }
+
+  const names = new Set<string>();
+
+  for (const el of model.elements) {
+    if (el.properties) {
+      Object.keys(el.properties).forEach((prop) => names.add(prop));
+    }
+
+    if (el.psets) {
+      for (const psetName in el.psets) {
+        const pset = el.psets[psetName];
+        for (const propName in pset) {
+          names.add(`${psetName}.${propName}`);
+        }
+      }
+    }
+  }
+
+  return Array.from(names).sort();
+}
