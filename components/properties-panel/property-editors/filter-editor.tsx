@@ -3,6 +3,8 @@
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { useEffect, useState } from "react"
+import { getModelPropertyNames } from "@/lib/ifc-utils"
 
 interface FilterEditorProps {
   properties: {
@@ -15,16 +17,29 @@ interface FilterEditorProps {
 }
 
 export function FilterEditor({ properties, setProperties }: FilterEditorProps) {
+  const [modelProps, setModelProps] = useState<string[]>([])
+
+  useEffect(() => {
+    setModelProps(getModelPropertyNames())
+  }, [])
   return (
     <div className="space-y-4">
       <div className="space-y-2">
         <Label htmlFor="property">Property</Label>
         <Input
           id="property"
+          list="model-properties"
           value={properties.property || ""}
           onChange={(e) => setProperties({ ...properties, property: e.target.value })}
-          placeholder="e.g. Type, Material, etc."
+          placeholder="e.g. Pset_WallCommon.FireRating"
         />
+        {modelProps.length > 0 && (
+          <datalist id="model-properties">
+            {modelProps.map((p) => (
+              <option key={p} value={p} />
+            ))}
+          </datalist>
+        )}
       </div>
       <div className="space-y-2">
         <Label htmlFor="operator">Operator</Label>

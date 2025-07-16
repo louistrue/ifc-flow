@@ -269,8 +269,12 @@ export class WorkflowExecutor {
           console.warn(`No input provided to filter node ${nodeId}`);
           result = [];
         } else {
+          const elementsToFilter = Array.isArray(inputValues.input)
+            ? inputValues.input
+            : inputValues.input.elements;
+
           result = filterElements(
-            inputValues.input,
+            elementsToFilter || [],
             node.data.properties?.property || "",
             node.data.properties?.operator || "equals",
             node.data.properties?.value || ""

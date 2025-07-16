@@ -71,6 +71,32 @@ export function getIfcFile(fileName: string): File | null {
   return ifcFileCache.get(fileName) || null;
 }
 
+// Get a list of unique property names available in the given model
+// If no model is provided, uses the last loaded model
+export function getModelPropertyNames(model?: IfcModel): string[] {
+  const current = model || getLastLoadedModel();
+  if (!current) return [];
+
+  const props = new Set<string>();
+
+  current.elements.forEach((el) => {
+    if (el.properties) {
+      Object.keys(el.properties).forEach((p) => props.add(p));
+    }
+
+    if (el.psets) {
+      for (const pset in el.psets) {
+        const psetProps = el.psets[pset];
+        for (const prop in psetProps) {
+          props.add(`${pset}.${prop}`);
+        }
+      }
+    }
+  });
+
+  return Array.from(props).sort();
+}
+
 // Worker management
 let ifcWorker: Worker | null = null;
 let isWorkerInitialized = false;
@@ -567,65 +593,41 @@ export function filterElements(
 ): IfcElement[] {
   console.log("Filtering elements:", property, operator, value);
 
-  // Add a check for undefined or empty elements
   if (!elements || elements.length === 0) {
     console.warn("No elements to filter");
     return [];
   }
 
   return elements.filter((element) => {
-    // Split property path (e.g., "Pset_WallCommon.FireRating")
-    const propParts = property.split(".");
+    const parts = property.split(".");
+    let propValue: any;
 
-    if (propParts.length === 1) {
-      // Direct property lookup
-      let propValue = element.properties[property];
-      if (propValue === undefined) return false;
-
-      // Convert to string for comparison
-      propValue = String(propValue);
-
-      switch (operator) {
-        case "equals":
-          return propValue === value;
-        case "contains":
-          return propValue.includes(value);
-        case "startsWith":
-          return propValue.startsWith(value);
-        case "endsWith":
-          return propValue.endsWith(value);
-        default:
-          return false;
-      }
-    } else if (propParts.length === 2) {
-      // Property set lookup (e.g., "Pset_WallCommon.FireRating")
-      const [psetName, propName] = propParts;
-
-      // Check in property sets
-      if (element.psets && element.psets[psetName]) {
-        let propValue = element.psets[psetName][propName];
-        if (propValue === undefined) return false;
-
-        // Convert to string for comparison
-        propValue = String(propValue);
-
-        switch (operator) {
-          case "equals":
-            return propValue === value;
-          case "contains":
-            return propValue.includes(value);
-          case "startsWith":
-            return propValue.startsWith(value);
-          case "endsWith":
-            return propValue.endsWith(value);
-          default:
-            return false;
-        }
-      }
-      return false;
+    if (parts.length > 1 && element.psets && element.psets[parts[0]]) {
+      // Property set lookup
+      propValue = parts.slice(1).reduce((obj, key) => obj?.[key], element.psets[parts[0]]);
+    } else if (parts.length > 1 && element.qtos && element.qtos[parts[0]]) {
+      // Quantity set lookup
+      propValue = parts.slice(1).reduce((obj, key) => obj?.[key], element.qtos[parts[0]]);
+    } else {
+      // Standard property lookup (may also traverse nested props)
+      propValue = parts.reduce((obj, key) => obj?.[key], element.properties);
     }
 
-    return false;
+    if (propValue === undefined) return false;
+
+    const strVal = String(propValue);
+    switch (operator) {
+      case "equals":
+        return strVal === value;
+      case "contains":
+        return strVal.includes(value);
+      case "startsWith":
+        return strVal.startsWith(value);
+      case "endsWith":
+        return strVal.endsWith(value);
+      default:
+        return false;
+    }
   });
 }
 
