@@ -35,6 +35,7 @@ import {
   BarChart,
   Download,
   Sliders,
+  Code,
   Search,
   Clock,
   Plus,
@@ -115,6 +116,12 @@ export const nodeCategories = [
         id: "classificationNode",
         label: "Classification",
         icon: <FileText className="h-4 w-4 mr-2" />,
+        status: "new",
+      },
+      {
+        id: "pythonNode",
+        label: "Python",
+        icon: <Code className="h-4 w-4 mr-2" />,
         status: "new",
       },
       {

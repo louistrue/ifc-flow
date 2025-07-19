@@ -794,6 +794,27 @@ export function NodePropertyRenderer({
         </div>
       );
 
+    case "pythonNode":
+      return (
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="script">Python Script</Label>
+            <textarea
+              id="script"
+              className="w-full h-32 p-1 font-mono text-xs border rounded"
+              value={properties.script || ""}
+              onChange={(e) =>
+                setProperties({ ...properties, script: e.target.value })
+              }
+            />
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Provide Python code that uses <code>ifc_file</code> and
+            <code>ifcopenshell</code>. Assign output to <code>result</code>.
+          </p>
+        </div>
+      );
+
     case "watchNode":
       return (
         <div className="space-y-4">

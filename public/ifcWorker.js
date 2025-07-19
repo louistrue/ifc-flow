@@ -124,6 +124,11 @@ self.onmessage = async (event) => {
         await handleExtractQuantities(data, messageId);
         break;
 
+      case "runPython":
+        console.log("Running custom Python code...");
+        await handleRunPython(data, messageId);
+        break;
+
       default:
         throw new Error(`Unknown action: ${action}`);
     }
@@ -1860,6 +1865,59 @@ except Exception as e:
     self.postMessage({
       type: "error",
       message: `Error extracting quantities: ${error.message}`,
+      messageId,
+    });
+  }
+}
+
+// Execute custom Python code using the loaded IFC model
+async function handleRunPython(data, messageId) {
+  try {
+    await initPyodide();
+    const { code, arrayBuffer } = data;
+
+    if (arrayBuffer) {
+      try {
+        pyodide.FS.writeFile("model.ifc", new Uint8Array(arrayBuffer));
+      } catch (e) {
+        console.error("Failed to write IFC buffer for Python execution", e);
+      }
+    }
+
+    const namespace = pyodide.globals.get("dict")();
+    namespace.set("user_code", code);
+
+    await pyodide.runPythonAsync(
+      `import ifcopenshell, json, traceback
+try:
+    ifc_file = ifcopenshell.open('model.ifc')
+    local_vars = {}
+    exec(user_code, {'ifc_file': ifc_file, 'ifcopenshell': ifcopenshell}, local_vars)
+    result_json = json.dumps(local_vars.get('result'))
+    success = True
+    error_msg = ''
+except Exception as e:
+    success = False
+    error_msg = str(e)
+    result_json = None
+`,
+      { globals: namespace }
+    );
+
+    const success = namespace.get("success");
+    if (!success) {
+      const msg = namespace.get("error_msg");
+      throw new Error(msg);
+    }
+    const resultJson = namespace.get("result_json");
+    const result = resultJson ? JSON.parse(resultJson) : null;
+    namespace.destroy();
+
+    self.postMessage({ type: "pythonResult", messageId, result });
+  } catch (error) {
+    self.postMessage({
+      type: "error",
+      message: `Python execution failed: ${error.message}`,
       messageId,
     });
   }

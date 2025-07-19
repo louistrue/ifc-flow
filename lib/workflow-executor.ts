@@ -14,6 +14,7 @@ import {
   IfcModel,
   getLastLoadedModel,
   extractGeometryWithGeom,
+  runPython,
 } from "@/lib/ifc-utils";
 
 // Add TypeScript interfaces at the top of the file
@@ -742,6 +743,18 @@ export class WorkflowExecutor {
               ),
               metric: node.data.properties?.metric || "area",
             }
+          );
+        }
+        break;
+
+      case "pythonNode":
+        if (!inputValues.input) {
+          console.warn(`No input provided to python node ${nodeId}`);
+          result = null;
+        } else {
+          result = await runPython(
+            inputValues.input,
+            node.data.properties?.script || ""
           );
         }
         break;

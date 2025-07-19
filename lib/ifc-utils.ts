@@ -186,6 +186,11 @@ export async function initializeWorker(): Promise<void> {
           workerPromiseResolvers.get(messageId)!.resolve(data.data);
           workerPromiseResolvers.delete(messageId);
         }
+      } else if (type === "pythonResult") {
+        if (messageId && workerPromiseResolvers.has(messageId)) {
+          workerPromiseResolvers.get(messageId)!.resolve(data.result);
+          workerPromiseResolvers.delete(messageId);
+        }
       }
       // Progress messages don't resolve promises
     };
@@ -1774,4 +1779,39 @@ export function downloadExportedFile(
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
+}
+
+// Execute custom Python code using the IFC worker
+export async function runPython(model: IfcModel, code: string): Promise<any> {
+  await initializeWorker();
+  if (!ifcWorker) throw new Error("IFC worker is not available");
+
+  const file = getIfcFile(model.name);
+  if (!file) {
+    throw new Error(`Could not retrieve cached file object for ${model.name}`);
+  }
+  const arrayBuffer = await file.arrayBuffer();
+
+  const messageId = `python_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+
+  const result = await new Promise<any>((resolve, reject) => {
+    workerPromiseResolvers.set(messageId, { resolve, reject });
+    ifcWorker!.postMessage(
+      {
+        action: "runPython",
+        messageId,
+        data: { code, arrayBuffer },
+      },
+      [arrayBuffer]
+    );
+
+    setTimeout(() => {
+      if (workerPromiseResolvers.has(messageId)) {
+        reject(new Error("Worker timeout during Python execution"));
+        workerPromiseResolvers.delete(messageId);
+      }
+    }, 60000);
+  });
+
+  return result;
 }

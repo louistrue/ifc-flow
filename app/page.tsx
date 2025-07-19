@@ -37,6 +37,7 @@ import { RelationshipNode } from "@/components/nodes/relationship-node";
 import { AnalysisNode } from "@/components/nodes/analysis-node";
 import { WatchNode } from "@/components/nodes/watch-node";
 import { ParameterNode } from "@/components/nodes/parameter-node";
+import { PythonNode } from "@/components/nodes/python-node";
 import { Toaster } from "@/components/toaster";
 import { WorkflowExecutor } from "@/lib/workflow-executor";
 import { loadIfcFile, getIfcFile, downloadExportedFile } from "@/lib/ifc-utils";
@@ -68,6 +69,7 @@ const nodeTypes: NodeTypes = {
   analysisNode: AnalysisNode,
   watchNode: WatchNode,
   parameterNode: ParameterNode,
+  pythonNode: PythonNode,
 };
 
 // Custom node style to highlight selected nodes
