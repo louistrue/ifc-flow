@@ -87,11 +87,11 @@ export function HelpDialog({ open, onOpenChange }: HelpDialogProps) {
   // Filter shortcuts by search query
   const filteredShortcuts = searchQuery
     ? shortcuts.filter(
-      (s) =>
-        s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        s.keys.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        s.category.toLowerCase().includes(searchQuery.toLowerCase())
-    )
+        (s) =>
+          s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          s.keys.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          s.category.toLowerCase().includes(searchQuery.toLowerCase()),
+      )
     : null;
 
   // Copy shortcut to clipboard
@@ -105,7 +105,7 @@ export function HelpDialog({ open, onOpenChange }: HelpDialogProps) {
   useEffect(() => {
     if (dialogRef.current) {
       const focusableElement = dialogRef.current.querySelector(
-        '[tabindex="0"]'
+        '[tabindex="0"]',
       ) as HTMLElement;
       if (focusableElement) focusableElement.focus();
     }
@@ -166,7 +166,7 @@ export function HelpDialog({ open, onOpenChange }: HelpDialogProps) {
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         ref={dialogRef}
-        className="sm:max-w-4xl max-h-[90vh] overflow-hidden flex flex-col bg-background"
+        className="sm:max-w-4xl max-h-[90vh] overflow-hidden flex flex-col bg-background rounded-xl border shadow-xl"
       >
         <DialogHeader className="pb-2 border-b">
           <DialogTitle className="flex items-center gap-2 text-xl">
@@ -174,8 +174,7 @@ export function HelpDialog({ open, onOpenChange }: HelpDialogProps) {
             IFCflow Help
           </DialogTitle>
           <DialogDescription>
-            Documentation and resources to help you use IFCflow
-            effectively
+            Documentation and resources to help you use IFCflow effectively
           </DialogDescription>
         </DialogHeader>
 
@@ -185,7 +184,7 @@ export function HelpDialog({ open, onOpenChange }: HelpDialogProps) {
           className="flex-1 overflow-hidden flex flex-col mt-2"
         >
           <div className="flex justify-between items-center">
-            <TabsList className="mb-2">
+            <TabsList className="mb-3 bg-muted/50 backdrop-blur p-1 rounded-lg shadow">
               <TabsTrigger
                 value="shortcuts"
                 data-tab="shortcuts"
@@ -201,14 +200,6 @@ export function HelpDialog({ open, onOpenChange }: HelpDialogProps) {
               >
                 <AlertCircle className="h-4 w-4" />
                 Tutorial
-              </TabsTrigger>
-              <TabsTrigger
-                value="examples"
-                data-tab="examples"
-                className="flex items-center gap-1"
-              >
-                <Code className="h-4 w-4" />
-                Examples
               </TabsTrigger>
             </TabsList>
 
@@ -229,11 +220,9 @@ export function HelpDialog({ open, onOpenChange }: HelpDialogProps) {
 
           <TabsContent
             value="shortcuts"
-            className="flex-1 overflow-hidden flex flex-col mt-0 border rounded-md"
+            className="flex-1 overflow-hidden flex flex-col mt-0 border rounded-lg bg-muted/50 backdrop-blur"
             tabIndex={0}
           >
-
-
             <ScrollArea className="flex-1 p-4 overflow-y-auto">
               {filteredShortcuts ? (
                 <div className="space-y-4">
@@ -330,7 +319,7 @@ export function HelpDialog({ open, onOpenChange }: HelpDialogProps) {
                                       onClick={() =>
                                         handleCopyShortcut(
                                           shortcut.id,
-                                          shortcut.keys
+                                          shortcut.keys,
                                         )
                                       }
                                       title="Copy shortcut"
@@ -344,12 +333,12 @@ export function HelpDialog({ open, onOpenChange }: HelpDialogProps) {
                                   </div>
                                 </TableCell>
                               </TableRow>
-                            )
+                            ),
                           )}
                         </TableBody>
                       </Table>
                     </div>
-                  )
+                  ),
                 )
               )}
             </ScrollArea>
@@ -357,7 +346,7 @@ export function HelpDialog({ open, onOpenChange }: HelpDialogProps) {
 
           <TabsContent
             value="tutorial"
-            className="flex-1 overflow-auto mt-0 border rounded-md p-4"
+            className="flex-1 overflow-auto mt-0 border rounded-lg p-6 bg-muted/50 backdrop-blur"
           >
             <div className="space-y-6">
               <div>
@@ -373,7 +362,10 @@ export function HelpDialog({ open, onOpenChange }: HelpDialogProps) {
 
               <div className="space-y-6 mt-4">
                 {tutorialSteps.map((section, index) => (
-                  <Card key={section.id} className="relative overflow-hidden">
+                  <Card
+                    key={section.id}
+                    className="relative overflow-hidden rounded-lg shadow"
+                  >
                     <div className="absolute top-0 left-0 h-full w-1.5 bg-primary/70"></div>
                     <CardHeader className="pb-2">
                       <CardTitle className="text-lg flex items-center gap-2">
@@ -399,7 +391,7 @@ export function HelpDialog({ open, onOpenChange }: HelpDialogProps) {
                 ))}
               </div>
 
-              <div className="bg-primary/5 p-4 rounded-md border border-primary/20">
+              <div className="bg-primary/5 p-4 rounded-lg border border-primary/20">
                 <h4 className="text-lg font-medium flex items-center gap-2">
                   <Info className="h-5 w-5 text-primary" />
                   Pro Tips
@@ -427,117 +419,6 @@ export function HelpDialog({ open, onOpenChange }: HelpDialogProps) {
                     </span>
                   </li>
                 </ul>
-              </div>
-            </div>
-          </TabsContent>
-
-          <TabsContent
-            value="examples"
-            className="flex-1 overflow-auto mt-0 border rounded-md p-4"
-          >
-            <div className="space-y-6">
-              <div>
-                <h3 className="text-xl font-medium flex items-center gap-2">
-                  <Code className="h-5 w-5 text-primary" />
-                  Example Workflows
-                </h3>
-                <p className="text-muted-foreground mt-1">
-                  Explore these example workflows to understand common use-cases
-                  and techniques.
-                </p>
-              </div>
-
-              <div className="grid md:grid-cols-2 gap-4">
-                <Card>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-base">
-                      Extract Wall Quantities
-                    </CardTitle>
-                    <CardDescription>
-                      Get volume and area measurements for all walls
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="text-sm text-muted-foreground">
-                    <p>
-                      This workflow demonstrates how to load an IFC file, filter
-                      for wall elements, and extract quantity information.
-                    </p>
-                  </CardContent>
-                  <CardFooter className="pt-0">
-                    <Button variant="outline" size="sm" className="w-full">
-                      Load Example
-                    </Button>
-                  </CardFooter>
-                </Card>
-
-                <Card>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-base">Space Analysis</CardTitle>
-                    <CardDescription>
-                      Analyze room usage and spatial relationships
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="text-sm text-muted-foreground">
-                    <p>
-                      Learn how to extract spatial data from an IFC model and
-                      generate analytics about space usage.
-                    </p>
-                  </CardContent>
-                  <CardFooter className="pt-0">
-                    <Button variant="outline" size="sm" className="w-full">
-                      Load Example
-                    </Button>
-                  </CardFooter>
-                </Card>
-
-                <Card>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-base">
-                      Element Classification
-                    </CardTitle>
-                    <CardDescription>
-                      Categorize building elements by type and properties
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="text-sm text-muted-foreground">
-                    <p>
-                      This example shows how to classify and group elements
-                      based on their properties and relationships.
-                    </p>
-                  </CardContent>
-                  <CardFooter className="pt-0">
-                    <Button variant="outline" size="sm" className="w-full">
-                      Load Example
-                    </Button>
-                  </CardFooter>
-                </Card>
-
-                <Card>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-base">Data Export</CardTitle>
-                    <CardDescription>
-                      Export model data to various formats
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="text-sm text-muted-foreground">
-                    <p>
-                      Learn how to export IFC data to CSV, JSON, and other
-                      formats for further processing.
-                    </p>
-                  </CardContent>
-                  <CardFooter className="pt-0">
-                    <Button variant="outline" size="sm" className="w-full">
-                      Load Example
-                    </Button>
-                  </CardFooter>
-                </Card>
-              </div>
-
-              <div className="flex justify-center mt-6">
-                <Button className="gap-2">
-                  <Code className="h-4 w-4" />
-                  View More Examples
-                </Button>
               </div>
             </div>
           </TabsContent>
