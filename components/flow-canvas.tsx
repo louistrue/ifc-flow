@@ -29,6 +29,7 @@ interface FlowCanvasProps {
   onNodeClick: (event: any, node: any) => void;
   isFileDragging: boolean;
   showGrid: boolean;
+  snapToGrid: boolean;
   showMinimap: boolean;
   currentWorkflow: any;
 }
@@ -43,6 +44,7 @@ export function FlowCanvas({
   onNodeClick,
   isFileDragging,
   showGrid,
+  snapToGrid,
   showMinimap,
   currentWorkflow,
 }: FlowCanvasProps) {
@@ -279,7 +281,7 @@ export function FlowCanvas({
         onDragOver={onDragOver}
         onNodeClick={onNodeClick}
         nodeTypes={nodeTypes}
-        snapToGrid
+        snapToGrid={snapToGrid}
         snapGrid={[15, 15]}
         minZoom={0.1}
         maxZoom={2}

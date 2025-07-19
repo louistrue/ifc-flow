@@ -120,6 +120,7 @@ function FlowWithProvider() {
 
   // View settings
   const [showGrid, setShowGrid] = useState(settings.viewer.showGrid);
+  const [snapToGrid, setSnapToGrid] = useState(settings.viewer.snapToGrid);
   const [showMinimap, setShowMinimap] = useState(false);
 
   // Current workflow state
@@ -175,6 +176,11 @@ function FlowWithProvider() {
   useEffect(() => {
     setShowGrid(settings.viewer.showGrid);
   }, [settings.viewer.showGrid]);
+
+  // Apply snap to grid setting
+  useEffect(() => {
+    setSnapToGrid(settings.viewer.snapToGrid);
+  }, [settings.viewer.snapToGrid]);
 
   // Set up auto-save
   useEffect(() => {
@@ -1589,7 +1595,7 @@ function FlowWithProvider() {
                 }
               }}
               nodeTypes={nodeTypes}
-              snapToGrid
+              snapToGrid={snapToGrid}
               snapGrid={[15, 15]}
               minZoom={0.1}
               maxZoom={2}

@@ -6,7 +6,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+
 import { Slider } from "@/components/ui/slider"
 import { useAppSettings } from "@/lib/settings-manager"
 import { Monitor, Moon, Sun } from "lucide-react"
@@ -18,7 +18,7 @@ interface SettingsDialogProps {
 
 export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const [activeTab, setActiveTab] = useState("general")
-  const { settings, updateGeneralSettings, updateViewerSettings, updatePerformanceSettings, resetSettings } =
+  const { settings, updateGeneralSettings, updateViewerSettings, resetSettings } =
     useAppSettings()
 
   return (
@@ -29,10 +29,9 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
           <DialogDescription>Configure application settings and preferences.</DialogDescription>
         </DialogHeader>
         <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="grid grid-cols-3">
+          <TabsList className="grid grid-cols-2">
             <TabsTrigger value="general">General</TabsTrigger>
             <TabsTrigger value="viewer">Viewer</TabsTrigger>
-            <TabsTrigger value="performance">Performance</TabsTrigger>
           </TabsList>
           <TabsContent value="general" className="space-y-4 py-4">
             <div className="space-y-2">
@@ -114,62 +113,6 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 />
               </div>
               <p className="text-sm text-muted-foreground">Automatically align nodes to the grid when moving them.</p>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="grid-size">Grid size</Label>
-              <div className="flex items-center gap-2">
-                <Slider
-                  id="grid-size"
-                  min={5}
-                  max={50}
-                  step={5}
-                  value={[settings.viewer.gridSize]}
-                  onValueChange={(value) => updateViewerSettings({ gridSize: value[0] })}
-                  className="flex-1"
-                />
-                <span className="w-12 text-center">{settings.viewer.gridSize}px</span>
-              </div>
-            </div>
-          </TabsContent>
-          <TabsContent value="performance" className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label htmlFor="max-nodes">Maximum nodes</Label>
-              <div className="flex items-center gap-2">
-                <Slider
-                  id="max-nodes"
-                  min={100}
-                  max={5000}
-                  step={100}
-                  value={[settings.performance.maxNodes]}
-                  onValueChange={(value) => updatePerformanceSettings({ maxNodes: value[0] })}
-                  className="flex-1"
-                />
-                <span className="w-16 text-center">{settings.performance.maxNodes}</span>
-              </div>
-              <p className="text-sm text-muted-foreground">
-                Maximum number of nodes allowed in a workflow. Higher values may impact performance.
-              </p>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="render-quality">Render quality</Label>
-              <Select
-                value={settings.performance.renderQuality}
-                onValueChange={(value) =>
-                  updatePerformanceSettings({ renderQuality: value as "low" | "medium" | "high" })
-                }
-              >
-                <SelectTrigger id="render-quality">
-                  <SelectValue placeholder="Select quality" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="low">Low</SelectItem>
-                  <SelectItem value="medium">Medium</SelectItem>
-                  <SelectItem value="high">High</SelectItem>
-                </SelectContent>
-              </Select>
-              <p className="text-sm text-muted-foreground">
-                Higher quality settings may impact performance on complex models.
-              </p>
             </div>
           </TabsContent>
         </Tabs>
