@@ -39,15 +39,14 @@ import {
   Command,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+
 import { Badge } from "@/components/ui/badge";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
 
 interface HelpDialogProps {
   open: boolean;
@@ -201,14 +200,6 @@ export function HelpDialog({ open, onOpenChange }: HelpDialogProps) {
               >
                 <AlertCircle className="h-4 w-4" />
                 Tutorial
-              </TabsTrigger>
-              <TabsTrigger
-                value="examples"
-                data-tab="examples"
-                className="flex items-center gap-1"
-              >
-                <Code className="h-4 w-4" />
-                Examples
               </TabsTrigger>
             </TabsList>
 
@@ -371,33 +362,35 @@ export function HelpDialog({ open, onOpenChange }: HelpDialogProps) {
                 </p>
               </div>
 
-              <div className="space-y-6 mt-4">
+              <Accordion type="single" collapsible className="mt-4 w-full">
                 {tutorialSteps.map((section, index) => (
-                  <Card key={section.id} className="relative overflow-hidden">
-                    <div className="absolute top-0 left-0 h-full w-1.5 bg-primary/70"></div>
-                    <CardHeader className="pb-2">
-                      <CardTitle className="text-lg flex items-center gap-2">
-                        <Badge variant="outline" className="mr-1 bg-primary/10">
-                          {index + 1}
-                        </Badge>
+                  <AccordionItem
+                    key={section.id}
+                    value={section.id}
+                    className="border rounded-md mb-2"
+                  >
+                    <AccordionTrigger className="px-4 py-2 text-left text-lg">
+                      <Badge variant="outline" className="mr-2 bg-primary/10">
+                        {index + 1}
+                      </Badge>
+                      <span className="flex items-center gap-2">
                         {section.icon}
                         {section.title}
-                      </CardTitle>
-                      <CardDescription>{section.description}</CardDescription>
-                    </CardHeader>
-                    <CardContent>
+                      </span>
+                    </AccordionTrigger>
+                    <AccordionContent className="px-4 pb-4">
+                      <p className="text-muted-foreground mb-2">
+                        {section.description}
+                      </p>
                       <ol className="space-y-2 ml-6 list-decimal">
                         {section.steps.map((step, i) => (
-                          <li
-                            key={i}
-                            dangerouslySetInnerHTML={{ __html: step }}
-                          ></li>
+                          <li key={i} dangerouslySetInnerHTML={{ __html: step }} />
                         ))}
                       </ol>
-                    </CardContent>
-                  </Card>
+                    </AccordionContent>
+                  </AccordionItem>
                 ))}
-              </div>
+              </Accordion>
 
               <div className="bg-primary/5 p-4 rounded-md border border-primary/20">
                 <h4 className="text-lg font-medium flex items-center gap-2">
@@ -431,116 +424,6 @@ export function HelpDialog({ open, onOpenChange }: HelpDialogProps) {
             </div>
           </TabsContent>
 
-          <TabsContent
-            value="examples"
-            className="flex-1 overflow-auto mt-0 border rounded-md p-4"
-          >
-            <div className="space-y-6">
-              <div>
-                <h3 className="text-xl font-medium flex items-center gap-2">
-                  <Code className="h-5 w-5 text-primary" />
-                  Example Workflows
-                </h3>
-                <p className="text-muted-foreground mt-1">
-                  Explore these example workflows to understand common use-cases
-                  and techniques.
-                </p>
-              </div>
-
-              <div className="grid md:grid-cols-2 gap-4">
-                <Card>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-base">
-                      Extract Wall Quantities
-                    </CardTitle>
-                    <CardDescription>
-                      Get volume and area measurements for all walls
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="text-sm text-muted-foreground">
-                    <p>
-                      This workflow demonstrates how to load an IFC file, filter
-                      for wall elements, and extract quantity information.
-                    </p>
-                  </CardContent>
-                  <CardFooter className="pt-0">
-                    <Button variant="outline" size="sm" className="w-full">
-                      Load Example
-                    </Button>
-                  </CardFooter>
-                </Card>
-
-                <Card>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-base">Space Analysis</CardTitle>
-                    <CardDescription>
-                      Analyze room usage and spatial relationships
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="text-sm text-muted-foreground">
-                    <p>
-                      Learn how to extract spatial data from an IFC model and
-                      generate analytics about space usage.
-                    </p>
-                  </CardContent>
-                  <CardFooter className="pt-0">
-                    <Button variant="outline" size="sm" className="w-full">
-                      Load Example
-                    </Button>
-                  </CardFooter>
-                </Card>
-
-                <Card>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-base">
-                      Element Classification
-                    </CardTitle>
-                    <CardDescription>
-                      Categorize building elements by type and properties
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="text-sm text-muted-foreground">
-                    <p>
-                      This example shows how to classify and group elements
-                      based on their properties and relationships.
-                    </p>
-                  </CardContent>
-                  <CardFooter className="pt-0">
-                    <Button variant="outline" size="sm" className="w-full">
-                      Load Example
-                    </Button>
-                  </CardFooter>
-                </Card>
-
-                <Card>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-base">Data Export</CardTitle>
-                    <CardDescription>
-                      Export model data to various formats
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="text-sm text-muted-foreground">
-                    <p>
-                      Learn how to export IFC data to CSV, JSON, and other
-                      formats for further processing.
-                    </p>
-                  </CardContent>
-                  <CardFooter className="pt-0">
-                    <Button variant="outline" size="sm" className="w-full">
-                      Load Example
-                    </Button>
-                  </CardFooter>
-                </Card>
-              </div>
-
-              <div className="flex justify-center mt-6">
-                <Button className="gap-2">
-                  <Code className="h-4 w-4" />
-                  View More Examples
-                </Button>
-              </div>
-            </div>
-          </TabsContent>
         </Tabs>
       </DialogContent>
     </Dialog>
