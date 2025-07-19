@@ -13,10 +13,6 @@ export interface AppSettings {
     snapToGrid: boolean
     gridSize: number
   }
-  performance: {
-    maxNodes: number
-    renderQuality: "low" | "medium" | "high"
-  }
 }
 
 // Default settings
@@ -30,10 +26,6 @@ export const defaultSettings: AppSettings = {
     showGrid: true,
     snapToGrid: true,
     gridSize: 15,
-  },
-  performance: {
-    maxNodes: 1000,
-    renderQuality: "medium",
   },
 }
 
@@ -96,14 +88,6 @@ export function useAppSettings() {
     saveSettings(updated)
   }
 
-  const updatePerformanceSettings = (performanceSettings: Partial<AppSettings["performance"]>) => {
-    const updated = {
-      ...settings,
-      performance: { ...settings.performance, ...performanceSettings },
-    }
-    setSettings(updated)
-    saveSettings(updated)
-  }
 
   const resetSettings = () => {
     setSettings(defaultSettings)
@@ -115,7 +99,6 @@ export function useAppSettings() {
     updateSettings,
     updateGeneralSettings,
     updateViewerSettings,
-    updatePerformanceSettings,
     resetSettings,
   }
 }

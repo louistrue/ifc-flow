@@ -1589,8 +1589,8 @@ function FlowWithProvider() {
                 }
               }}
               nodeTypes={nodeTypes}
-              snapToGrid
-              snapGrid={[15, 15]}
+              snapToGrid={settings.viewer.snapToGrid}
+              snapGrid={[settings.viewer.gridSize, settings.viewer.gridSize]}
               minZoom={0.1}
               maxZoom={2}
               proOptions={{ hideAttribution: true }}
@@ -1604,7 +1604,7 @@ function FlowWithProvider() {
               nodesDraggable={!focusedViewerId}
             >
               <Controls />
-              {showGrid && <Background color="#aaa" gap={16} />}
+              {showGrid && <Background color="#aaa" gap={settings.viewer.gridSize} />}
               {showMinimap && <MiniMap />}
               <Panel position="bottom-right">
                 <div className="bg-card rounded-md p-2 text-xs text-muted-foreground">

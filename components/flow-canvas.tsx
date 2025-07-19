@@ -15,6 +15,7 @@ import "reactflow/dist/style.css";
 import { FileUp } from "lucide-react";
 import { loadIfcFile } from "@/lib/ifc";
 import { useToast } from "@/hooks/use-toast";
+import { useAppSettings } from "@/lib/settings-manager";
 
 // Import node types
 import { nodeTypes } from "@/components/nodes";
@@ -48,6 +49,7 @@ export function FlowCanvas({
 }: FlowCanvasProps) {
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
+  const { settings } = useAppSettings();
   const reactFlowInstance = useReactFlow();
 
   // Handle dropping new nodes from the sidebar
@@ -279,13 +281,13 @@ export function FlowCanvas({
         onDragOver={onDragOver}
         onNodeClick={onNodeClick}
         nodeTypes={nodeTypes}
-        snapToGrid
-        snapGrid={[15, 15]}
+        snapToGrid={settings.viewer.snapToGrid}
+        snapGrid={[settings.viewer.gridSize, settings.viewer.gridSize]}
         minZoom={0.1}
         maxZoom={2}
       >
         <Controls />
-        {showGrid && <Background color="#aaa" gap={16} />}
+        {showGrid && <Background color="#aaa" gap={settings.viewer.gridSize} />}
         {showMinimap && <MiniMap />}
         <Panel position="bottom-right">
           <div className="bg-card rounded-md p-2 text-xs text-muted-foreground">
