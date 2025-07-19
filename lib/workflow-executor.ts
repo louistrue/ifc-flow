@@ -14,6 +14,7 @@ import {
   IfcModel,
   getLastLoadedModel,
   extractGeometryWithGeom,
+  runPythonScript,
 } from "@/lib/ifc-utils";
 
 // Add TypeScript interfaces at the top of the file
@@ -796,6 +797,39 @@ export class WorkflowExecutor {
       case "parameterNode":
         // Parameter
         result = node.data.properties?.value || "";
+        break;
+
+      case "pythonNode":
+        if (!inputValues.input) {
+          console.warn(`No input provided to python node ${nodeId}`);
+          result = null;
+        } else {
+          const modelInput = inputValues.input as IfcModel;
+          try {
+            result = await runPythonScript(
+              modelInput,
+              node.data.properties?.code || "",
+              (p, m) => {
+                this.updateNodeDataInList(nodeId, {
+                  ...node.data,
+                  isLoading: true,
+                });
+              }
+            );
+            this.updateNodeDataInList(nodeId, {
+              ...node.data,
+              isLoading: false,
+              output: result,
+            });
+          } catch (error) {
+            this.updateNodeDataInList(nodeId, {
+              ...node.data,
+              isLoading: false,
+              error: error instanceof Error ? error.message : String(error),
+            });
+            throw error;
+          }
+        }
         break;
 
       case "viewerNode":

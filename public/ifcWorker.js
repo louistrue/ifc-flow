@@ -124,6 +124,11 @@ self.onmessage = async (event) => {
         await handleExtractQuantities(data, messageId);
         break;
 
+      case "runPython":
+        console.log("Executing custom Python code...");
+        await handleRunPython(data, messageId);
+        break;
+
       default:
         throw new Error(`Unknown action: ${action}`);
     }
@@ -1862,5 +1867,59 @@ except Exception as e:
       message: `Error extracting quantities: ${error.message}`,
       messageId,
     });
+  }
+}
+
+// Execute arbitrary Python code
+async function handleRunPython(data, messageId) {
+  try {
+    await initPyodide();
+
+    const { code, arrayBuffer } = data;
+    if (arrayBuffer && arrayBuffer instanceof ArrayBuffer) {
+      try {
+        pyodide.FS.writeFile("model.ifc", new Uint8Array(arrayBuffer));
+      } catch (err) {
+        console.error("Failed writing IFC buffer", err);
+      }
+    }
+
+    const namespace = pyodide.globals.get("dict")();
+    namespace.set("user_code", code);
+
+    const pythonWrapper = `
+import json, traceback, ifcopenshell, os
+result = None
+success = False
+try:
+    if os.path.exists('model.ifc'):
+        ifc_file = ifcopenshell.open('model.ifc')
+    exec(user_code, globals())
+    success = True
+    if 'result' in globals():
+        result_json = json.dumps(result)
+    else:
+        result_json = json.dumps(None)
+except Exception as e:
+    result_json = json.dumps({'error': str(e), 'trace': traceback.format_exc()})
+    success = False
+`;
+
+    await pyodide.runPythonAsync(pythonWrapper, { globals: namespace });
+
+    const success = namespace.get("success");
+    const resultJson = namespace.get("result_json");
+    namespace.destroy();
+
+    if (!success) {
+      const err = JSON.parse(resultJson);
+      self.postMessage({ type: "error", message: err.error, stack: err.trace, messageId });
+      return;
+    }
+
+    const output = resultJson ? JSON.parse(resultJson) : null;
+    self.postMessage({ type: "pythonResult", data: output, messageId });
+  } catch (error) {
+    self.postMessage({ type: "error", message: error.message, messageId });
   }
 }
