@@ -28,6 +28,8 @@ import { FilterNode } from "@/components/nodes/filter-node";
 import { TransformNode } from "@/components/nodes/transform-node";
 import { ViewerNode } from "@/components/nodes/viewer-node";
 import { AppMenubar } from "@/components/menubar";
+import { useIsMobile } from "@/hooks/use-mobile";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { QuantityNode } from "@/components/nodes/quantity-node";
 import { PropertyNode } from "@/components/nodes/property-node";
 import { ClassificationNode } from "@/components/nodes/classification-node";
@@ -117,6 +119,8 @@ function FlowWithProvider() {
   const { shortcuts } = useKeyboardShortcuts();
   const { settings } = useAppSettings();
   const { theme, setTheme } = useTheme();
+  const isMobile = useIsMobile();
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   // View settings
   const [showGrid, setShowGrid] = useState(settings.viewer.showGrid);
@@ -1520,10 +1524,18 @@ function FlowWithProvider() {
 
   return (
     <div className="flex h-screen w-full bg-background">
-      <Sidebar
-        onLoadWorkflow={handleLoadWorkflow}
-        getFlowObject={getFlowObject}
-      />
+      {isMobile ? (
+        <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
+          <SheetContent side="left" className="p-0 w-72">
+            <Sidebar
+              onLoadWorkflow={handleLoadWorkflow}
+              getFlowObject={getFlowObject}
+            />
+          </SheetContent>
+        </Sheet>
+      ) : (
+        <Sidebar onLoadWorkflow={handleLoadWorkflow} getFlowObject={getFlowObject} />
+      )}
       <div className="flex flex-col flex-1">
         <AppMenubar
           onOpenFile={handleOpenFile}
@@ -1550,6 +1562,7 @@ function FlowWithProvider() {
           onCut={handleCut}
           onPaste={handlePaste}
           onDelete={handleDelete}
+          onToggleSidebar={() => setSidebarOpen(true)}
         />
         <div className={`flex-1 h-full relative`} ref={reactFlowWrapper}>
           <ViewerFocusProvider
