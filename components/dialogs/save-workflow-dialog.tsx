@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import {
   X,
   Plus,
@@ -54,13 +55,16 @@ export function SaveWorkflowDialog({
 }: SaveWorkflowDialogProps) {
   const [name, setName] = useState(existingWorkflow?.name || "");
   const [description, setDescription] = useState(
-    existingWorkflow?.description || ""
+    existingWorkflow?.description || "",
   );
   const [tags, setTags] = useState<string[]>(existingWorkflow?.tags || []);
+  const [isPreset, setIsPreset] = useState(
+    existingWorkflow?.tags?.includes("preset") || false,
+  );
   const [newTag, setNewTag] = useState("");
   const [activeTab, setActiveTab] = useState<"library" | "local">("library");
   const [localFilename, setLocalFilename] = useState(
-    existingWorkflow?.name || "untitled-workflow"
+    existingWorkflow?.name || "untitled-workflow",
   );
 
   // Reset form when dialog opens
@@ -68,10 +72,12 @@ export function SaveWorkflowDialog({
     if (open) {
       setName(existingWorkflow?.name || "");
       setDescription(existingWorkflow?.description || "");
-      setTags(existingWorkflow?.tags || []);
+      const initTags = existingWorkflow?.tags || [];
+      setTags(initTags);
+      setIsPreset(initTags.includes("preset"));
       setLocalFilename(
         existingWorkflow?.name?.toLowerCase().replace(/\s+/g, "-") ||
-        "untitled-workflow"
+          "untitled-workflow",
       );
       setActiveTab("library");
     }
@@ -81,7 +87,9 @@ export function SaveWorkflowDialog({
   // Add a new tag
   const handleAddTag = () => {
     if (newTag.trim() && !tags.includes(newTag.trim())) {
-      setTags([...tags, newTag.trim()]);
+      const tag = newTag.trim();
+      setTags([...tags, tag]);
+      if (tag === "preset") setIsPreset(true);
       setNewTag("");
     }
   };
@@ -89,6 +97,7 @@ export function SaveWorkflowDialog({
   // Remove a tag
   const handleRemoveTag = (tagToRemove: string) => {
     setTags(tags.filter((tag) => tag !== tagToRemove));
+    if (tagToRemove === "preset") setIsPreset(false);
   };
 
   // Add tag on Enter key
@@ -96,6 +105,16 @@ export function SaveWorkflowDialog({
     if (e.key === "Enter") {
       e.preventDefault();
       handleAddTag();
+    }
+  };
+
+  const handlePresetChange = (value: string) => {
+    const preset = value === "preset";
+    setIsPreset(preset);
+    if (preset && !tags.includes("preset")) {
+      setTags([...tags, "preset"]);
+    } else if (!preset) {
+      setTags(tags.filter((t) => t !== "preset"));
     }
   };
 
@@ -224,6 +243,27 @@ export function SaveWorkflowDialog({
                 onChange={(e) => setDescription(e.target.value)}
                 rows={3}
               />
+            </div>
+            <div className="space-y-2">
+              <Label>Workflow Type</Label>
+              <RadioGroup
+                value={isPreset ? "preset" : "workflow"}
+                onValueChange={handlePresetChange}
+                className="flex space-x-4"
+              >
+                <div className="flex items-center space-x-2">
+                  <RadioGroupItem value="workflow" id="workflow" />
+                  <Label htmlFor="workflow" className="text-xs cursor-pointer">
+                    Workflow
+                  </Label>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <RadioGroupItem value="preset" id="preset" />
+                  <Label htmlFor="preset" className="text-xs cursor-pointer">
+                    Preset
+                  </Label>
+                </div>
+              </RadioGroup>
             </div>
             <div className="space-y-2">
               <div className="flex items-center justify-between">
