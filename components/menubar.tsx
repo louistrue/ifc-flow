@@ -95,6 +95,7 @@ export function AppMenubar({
   const [aboutDialogOpen, setAboutDialogOpen] = useState(false);
   const isMobile = useIsMobile();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const closeMobileMenu = () => setMobileMenuOpen(false);
   const { toast } = useToast();
   const { shortcuts } = useKeyboardShortcuts();
   const { theme, setTheme } = useTheme();
@@ -264,21 +265,30 @@ export function AppMenubar({
         <MenubarTrigger>File</MenubarTrigger>
         <MenubarContent>
           <MenubarItem
-            onClick={() => setOpenFileDialogOpen(true)}
+            onClick={() => {
+              closeMobileMenu();
+              setOpenFileDialogOpen(true);
+            }}
             data-open-file-dialog-trigger
           >
             Open IFC File
             <MenubarShortcut>{getShortcutDisplay("open-file")}</MenubarShortcut>
           </MenubarItem>
           <MenubarItem
-            onClick={() => setSaveWorkflowDialogOpen(true)}
+            onClick={() => {
+              closeMobileMenu();
+              setSaveWorkflowDialogOpen(true);
+            }}
             data-save-workflow-dialog-trigger
           >
             Save Workflow
             <MenubarShortcut>{getShortcutDisplay("save-workflow")}</MenubarShortcut>
           </MenubarItem>
           <MenubarItem
-            onClick={() => setWorkflowLibraryOpen(true)}
+            onClick={() => {
+              closeMobileMenu();
+              setWorkflowLibraryOpen(true);
+            }}
             data-workflow-library-trigger
           >
             Open Workflow Library
@@ -290,33 +300,70 @@ export function AppMenubar({
       <MenubarMenu>
         <MenubarTrigger>Edit</MenubarTrigger>
         <MenubarContent>
-          <MenubarItem onClick={handleUndo} disabled={!canUndo}>
+          <MenubarItem
+            onClick={() => {
+              closeMobileMenu();
+              handleUndo();
+            }}
+            disabled={!canUndo}
+          >
             Undo
             <MenubarShortcut>{getShortcutDisplay("undo")}</MenubarShortcut>
           </MenubarItem>
-          <MenubarItem onClick={handleRedo} disabled={!canRedo}>
+          <MenubarItem
+            onClick={() => {
+              closeMobileMenu();
+              handleRedo();
+            }}
+            disabled={!canRedo}
+          >
             Redo
             <MenubarShortcut>{getShortcutDisplay("redo")}</MenubarShortcut>
           </MenubarItem>
           <MenubarSeparator />
-          <MenubarItem onClick={onCut}>
+          <MenubarItem
+            onClick={() => {
+              closeMobileMenu();
+              onCut();
+            }}
+          >
             Cut
             <MenubarShortcut>{getShortcutDisplay("cut")}</MenubarShortcut>
           </MenubarItem>
-          <MenubarItem onClick={onCopy}>
+          <MenubarItem
+            onClick={() => {
+              closeMobileMenu();
+              onCopy();
+            }}
+          >
             Copy
             <MenubarShortcut>{getShortcutDisplay("copy")}</MenubarShortcut>
           </MenubarItem>
-          <MenubarItem onClick={onPaste}>
+          <MenubarItem
+            onClick={() => {
+              closeMobileMenu();
+              onPaste();
+            }}
+          >
             Paste
             <MenubarShortcut>{getShortcutDisplay("paste")}</MenubarShortcut>
           </MenubarItem>
           <MenubarSeparator />
-          <MenubarItem onClick={onSelectAll}>
+          <MenubarItem
+            onClick={() => {
+              closeMobileMenu();
+              onSelectAll();
+            }}
+          >
             Select All
             <MenubarShortcut>{getShortcutDisplay("select-all")}</MenubarShortcut>
           </MenubarItem>
-          <MenubarItem onClick={onDelete}>
+          <MenubarItem
+            onClick={() => {
+              closeMobileMenu();
+              onDelete();
+            }}
+          >
             Delete Selected
             <MenubarShortcut>{getShortcutDisplay("delete")}</MenubarShortcut>
           </MenubarItem>
@@ -326,29 +373,47 @@ export function AppMenubar({
       <MenubarMenu>
         <MenubarTrigger>View</MenubarTrigger>
         <MenubarContent>
-          <MenubarItem onClick={handleZoomIn}>
+          <MenubarItem
+            onClick={() => {
+              closeMobileMenu();
+              handleZoomIn();
+            }}>
             Zoom In
             <MenubarShortcut>{getShortcutDisplay("zoom-in")}</MenubarShortcut>
           </MenubarItem>
-          <MenubarItem onClick={handleZoomOut}>
+          <MenubarItem
+            onClick={() => {
+              closeMobileMenu();
+              handleZoomOut();
+            }}>
             Zoom Out
             <MenubarShortcut>{getShortcutDisplay("zoom-out")}</MenubarShortcut>
           </MenubarItem>
-          <MenubarItem onClick={handleFitView}>
+          <MenubarItem
+            onClick={() => {
+              closeMobileMenu();
+              handleFitView();
+            }}>
             Fit View
             <MenubarShortcut>{getShortcutDisplay("fit-view")}</MenubarShortcut>
           </MenubarItem>
           <MenubarSeparator />
           <MenubarCheckboxItem
             checked={showGrid}
-            onCheckedChange={handleToggleGrid}
+            onCheckedChange={() => {
+              closeMobileMenu();
+              handleToggleGrid();
+            }}
           >
             Show Grid
             <MenubarShortcut>{getShortcutDisplay("toggle-grid")}</MenubarShortcut>
           </MenubarCheckboxItem>
           <MenubarCheckboxItem
             checked={showMinimap}
-            onCheckedChange={handleToggleMinimap}
+            onCheckedChange={() => {
+              closeMobileMenu();
+              handleToggleMinimap();
+            }}
           >
             Show Minimap
             <MenubarShortcut>{getShortcutDisplay("toggle-minimap")}</MenubarShortcut>
@@ -360,11 +425,19 @@ export function AppMenubar({
               <MenubarSub>
                 <MenubarSubTrigger>Boring</MenubarSubTrigger>
                 <MenubarSubContent>
-                  <MenubarItem onClick={() => setTheme('light')}>
+                  <MenubarItem
+                    onClick={() => {
+                      closeMobileMenu();
+                      setTheme('light');
+                    }}>
                     Light
                     {theme === 'light' && <Check className="h-4 w-4 ml-auto" />}
                   </MenubarItem>
-                  <MenubarItem onClick={() => setTheme('dark')}>
+                  <MenubarItem
+                    onClick={() => {
+                      closeMobileMenu();
+                      setTheme('dark');
+                    }}>
                     Dark
                     {theme === 'dark' && <Check className="h-4 w-4 ml-auto" />}
                   </MenubarItem>
@@ -373,13 +446,21 @@ export function AppMenubar({
               <MenubarSub>
                 <MenubarSubTrigger>Less Boring</MenubarSubTrigger>
                 <MenubarSubContent>
-                  <MenubarItem onClick={() => setTheme('tokyo-night-light')}>
+                  <MenubarItem
+                    onClick={() => {
+                      closeMobileMenu();
+                      setTheme('tokyo-night-light');
+                    }}>
                     Light
                     {theme === 'tokyo-night-light' && (
                       <Check className="h-4 w-4 ml-auto" />
                     )}
                   </MenubarItem>
-                  <MenubarItem onClick={() => setTheme('tokyo-night-dark')}>
+                  <MenubarItem
+                    onClick={() => {
+                      closeMobileMenu();
+                      setTheme('tokyo-night-dark');
+                    }}>
                     Dark
                     {theme === 'tokyo-night-dark' && (
                       <Check className="h-4 w-4 ml-auto" />
@@ -396,7 +477,10 @@ export function AppMenubar({
         <MenubarTrigger>Help</MenubarTrigger>
         <MenubarContent>
           <MenubarItem
-            onClick={() => setHelpDialogOpen(true)}
+            onClick={() => {
+              closeMobileMenu();
+              setHelpDialogOpen(true);
+            }}
             data-help-dialog-trigger
           >
             Documentation
@@ -404,6 +488,7 @@ export function AppMenubar({
           </MenubarItem>
           <MenubarItem
             onClick={() => {
+              closeMobileMenu();
               setHelpDialogOpen(true);
               setTimeout(() => {
                 const shortcutsTab = document.querySelector(
@@ -419,7 +504,11 @@ export function AppMenubar({
             </MenubarShortcut>
           </MenubarItem>
           <MenubarSeparator />
-          <MenubarItem onClick={() => setAboutDialogOpen(true)}>
+          <MenubarItem
+            onClick={() => {
+              closeMobileMenu();
+              setAboutDialogOpen(true);
+            }}>
             About IFCflow
           </MenubarItem>
         </MenubarContent>
@@ -433,7 +522,10 @@ export function AppMenubar({
         variant={isRunning ? "destructive" : "default"}
         size="sm"
         className="gap-1"
-        onClick={handleRunWorkflow}
+        onClick={() => {
+          closeMobileMenu();
+          handleRunWorkflow();
+        }}
         data-testid="run-workflow-button"
       >
         {isRunning ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
