@@ -18,6 +18,7 @@ import ReactFlow, {
   type NodeChange,
   applyNodeChanges,
   type OnInit,
+  type SelectionMode,
 } from "reactflow";
 import "reactflow/dist/style.css";
 import { Sidebar } from "@/components/sidebar";
@@ -144,6 +145,8 @@ function FlowWithProvider() {
     setIsSettingsLoaded(true);
   }, []); // Only run once on mount
 
+
+
   // Current workflow state
   const [currentWorkflow, setCurrentWorkflow] = useState<Workflow | null>(null);
 
@@ -173,6 +176,8 @@ function FlowWithProvider() {
 
   // Auto-save timer
   const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+
 
   // Focused viewer state
   const [focusedViewerId, setFocusedViewerId] = useState<string | null>(null);
@@ -260,48 +265,85 @@ function FlowWithProvider() {
   useHotkeys(
     findShortcut("copy") || "ctrl+c,cmd+c",
     (e) => {
-      // Only prevent default if we have selected nodes to copy
+      console.log('[DEBUG] Copy hotkey triggered');
+
+      const activeElement = document.activeElement;
+      console.log('[DEBUG] Active element:', activeElement?.tagName, activeElement?.className);
+
+      // Check if we're in a form field
+      const isInFormField = activeElement && (
+        activeElement.tagName === 'INPUT' ||
+        activeElement.tagName === 'TEXTAREA' ||
+        (activeElement as HTMLElement).isContentEditable
+      );
+      console.log('[DEBUG] Is in form field:', isInFormField);
+
       const selectedNodes = nodes.filter((node) => node.selected);
-      if (selectedNodes.length > 0) {
+      console.log('[DEBUG] Selected nodes count:', selectedNodes.length);
+
+      // Handle copy if we're not in a form field and have selected nodes
+      if (!isInFormField && selectedNodes.length > 0) {
+        console.log('[DEBUG] Executing handleCopy');
         e.preventDefault();
+        e.stopPropagation();
         handleCopy();
+      } else {
+        console.log('[DEBUG] Copy not executed - form field:', isInFormField, 'selected:', selectedNodes.length);
       }
     },
-    { enableOnFormTags: true, preventDefault: false }
+    { enableOnFormTags: false }
   );
 
   // Cut (Ctrl+X)
   useHotkeys(
     findShortcut("cut") || "ctrl+x,cmd+x",
     (e) => {
-      // Only prevent default if we have selected nodes to cut
+      console.log('[DEBUG] Cut hotkey triggered');
+
+      const activeElement = document.activeElement;
+      const isInFormField = activeElement && (
+        activeElement.tagName === 'INPUT' ||
+        activeElement.tagName === 'TEXTAREA' ||
+        (activeElement as HTMLElement).isContentEditable
+      );
+
       const selectedNodes = nodes.filter((node) => node.selected);
-      if (selectedNodes.length > 0) {
+      console.log('[DEBUG] Cut - selected nodes:', selectedNodes.length);
+
+      if (!isInFormField && selectedNodes.length > 0) {
+        console.log('[DEBUG] Executing handleCut');
         e.preventDefault();
+        e.stopPropagation();
         handleCut();
       }
     },
-    { enableOnFormTags: true, preventDefault: false }
+    { enableOnFormTags: false }
   );
 
   // Paste (Ctrl+V)
   useHotkeys(
     findShortcut("paste") || "ctrl+v,cmd+v",
     (e) => {
-      // Only prevent default if we have something to paste and focus is not on a form element
+      console.log('[DEBUG] Paste hotkey triggered');
+      console.log('[DEBUG] Clipboard:', clipboard);
+
       const activeElement = document.activeElement;
-      const isFormElement = activeElement && (
+      const isInFormField = activeElement && (
         activeElement.tagName === 'INPUT' ||
         activeElement.tagName === 'TEXTAREA' ||
         (activeElement as HTMLElement).isContentEditable
       );
 
-      if (!isFormElement && clipboard && clipboard.nodes.length > 0) {
+      if (!isInFormField && clipboard && clipboard.nodes.length > 0) {
+        console.log('[DEBUG] Executing handlePaste');
         e.preventDefault();
+        e.stopPropagation();
         handlePaste();
+      } else {
+        console.log('[DEBUG] Paste not executed - form field:', isInFormField, 'clipboard:', clipboard?.nodes?.length || 0);
       }
     },
-    { enableOnFormTags: true, preventDefault: false }
+    { enableOnFormTags: false }
   );
 
   // Delete (Delete key)
@@ -630,15 +672,8 @@ function FlowWithProvider() {
   const onNodeClick = useCallback(
     (event: React.MouseEvent, node: Node) => {
       setSelectedNode(node);
-      // Ensure the clicked node is marked as selected in the nodes array
-      setNodes((nds) =>
-        nds.map((n) => ({
-          ...n,
-          selected: n.id === node.id,
-        }))
-      );
     },
-    [setNodes]
+    []
   );
 
   const onNodeDoubleClick = useCallback((event: React.MouseEvent, node: Node) => {
@@ -1011,6 +1046,52 @@ function FlowWithProvider() {
     });
   }, [isMobile, placementMode, selectedNodeType, reactFlowInstance, nodes, edges, saveToHistory, setNodes, toast]);
 
+  // Keyboard shortcuts for copy/paste/delete
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      // Ignore if typing in form fields
+      const target = event.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.contentEditable === 'true') {
+        return;
+      }
+
+      const isMac = navigator.platform.toUpperCase().includes('MAC');
+      const cmdOrCtrl = isMac ? event.metaKey : event.ctrlKey;
+
+      if (cmdOrCtrl) {
+        switch (event.key.toLowerCase()) {
+          case 'c':
+          case 'x':
+            event.preventDefault();
+            handleCopy();
+            break;
+          case 'v':
+            event.preventDefault();
+            handlePaste();
+            break;
+          case 'a':
+            event.preventDefault();
+            handleSelectAll();
+            break;
+        }
+      }
+
+      // Handle Delete/Backspace
+      if (event.key === 'Delete' || event.key === 'Backspace') {
+        const selectedNodes = nodes.filter((node) => node.selected);
+        if (selectedNodes.length > 0) {
+          event.preventDefault();
+          handleDelete();
+        }
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [nodes, handleCopy, handlePaste, handleSelectAll, handleDelete]);
+
   return (
     <div className="flex h-screen w-full bg-background">
       {/* Unified Sidebar - Mobile & Desktop */}
@@ -1124,60 +1205,72 @@ function FlowWithProvider() {
             focusedViewerId={focusedViewerId}
             setFocusedViewerId={setFocusedViewerId}
           >
-            <ReactFlow
-              nodes={nodes}
-              edges={edges}
-              onNodesChange={handleNodesChange}
-              onEdgesChange={onEdgesChange}
-              onConnect={onConnect}
-              onDrop={onDrop}
-              onDragOver={onDragOver}
-              onNodeClick={onNodeClick}
-              onNodeDoubleClick={onNodeDoubleClick}
-              onPaneClick={(event) => {
-                // Handle mobile node placement first
-                if (isMobile && placementMode && selectedNodeType) {
-                  handleCanvasClick(event);
-                  return;
-                }
+            {/* Container for ReactFlow */}
+            <div className="flex-1 h-full w-full">
+              <ReactFlow
+                nodes={nodes}
+                edges={edges}
+                onNodesChange={handleNodesChange}
+                onEdgesChange={onEdgesChange}
+                onConnect={onConnect}
+                onDrop={onDrop}
+                onDragOver={onDragOver}
+                onNodeClick={onNodeClick}
+                onNodeDoubleClick={onNodeDoubleClick}
+                autoPanOnConnect={false}
+                autoPanOnNodeDrag={false}
+                onPaneClick={(event) => {
+                  // Handle mobile node placement first
+                  if (isMobile && placementMode && selectedNodeType) {
+                    handleCanvasClick(event);
+                    return;
+                  }
 
-                setEditingNode(null);
-                // Exit 3D focus mode when clicking on canvas
-                if (focusedViewerId) {
-                  setFocusedViewerId(null);
-                }
+                  setEditingNode(null);
+                  // Exit 3D focus mode when clicking on canvas
+                  if (focusedViewerId) {
+                    setFocusedViewerId(null);
+                  }
 
-                // Close sidebar on mobile when clicking canvas (only if not in placement mode)
-                if (isMobile && sidebarOpen && !placementMode) {
-                  setSidebarOpen(false);
-                }
-              }}
-              nodeTypes={nodeTypes}
-              edgeTypes={edgeTypes}
-              snapToGrid={isSettingsLoaded ? showGrid : false}
-              snapGrid={snapGrid}
-              minZoom={0.1}
-              maxZoom={2}
-              proOptions={proOptions}
-              style={isMobile && placementMode ? placementStyle : defaultStyle}
-              // Disable interactions when viewer is in focus mode or in placement mode
-              panOnDrag={!focusedViewerId && !(isMobile && placementMode)}
-              zoomOnScroll={!focusedViewerId && !(isMobile && placementMode)}
-              zoomOnPinch={!focusedViewerId && !(isMobile && placementMode)}
-              zoomOnDoubleClick={!focusedViewerId && !(isMobile && placementMode)}
-              elementsSelectable={!focusedViewerId && !(isMobile && placementMode)}
-              nodesConnectable={!focusedViewerId && !(isMobile && placementMode)}
-              nodesDraggable={!focusedViewerId && !(isMobile && placementMode)}
-            >
-              <Controls />
-              {isSettingsLoaded && showGrid && <Background color="#aaa" gap={16} />}
-              {isSettingsLoaded && showMinimap && <MiniMap />}
-              <Panel position="bottom-right">
-                <div className="bg-card rounded-md p-2 text-xs text-muted-foreground">
-                  {currentWorkflow ? currentWorkflow.name : "IFCflow - v0.1.0"}
-                </div>
-              </Panel>
-            </ReactFlow>
+                  // Close sidebar on mobile when clicking canvas (only if not in placement mode)
+                  if (isMobile && sidebarOpen && !placementMode) {
+                    setSidebarOpen(false);
+                  }
+                }}
+                nodeTypes={nodeTypes}
+                edgeTypes={edgeTypes}
+                snapToGrid={isSettingsLoaded ? showGrid : false}
+                snapGrid={snapGrid}
+                minZoom={0.1}
+                maxZoom={2}
+                proOptions={proOptions}
+                style={isMobile && placementMode ? placementStyle : defaultStyle}
+                // Multi-selection configuration
+                multiSelectionKeyCode="Meta"
+                selectionOnDrag={true}
+                selectNodesOnDrag={false}
+                selectionMode={"partial" as SelectionMode}
+                nodesFocusable={true}
+                edgesFocusable={true}
+                // Disable interactions when viewer is in focus mode or in placement mode
+                panOnDrag={!focusedViewerId && !(isMobile && placementMode)}
+                zoomOnScroll={!focusedViewerId && !(isMobile && placementMode)}
+                zoomOnPinch={!focusedViewerId && !(isMobile && placementMode)}
+                zoomOnDoubleClick={!focusedViewerId && !(isMobile && placementMode)}
+                elementsSelectable={!(isMobile && placementMode)}
+                nodesConnectable={!focusedViewerId && !(isMobile && placementMode)}
+                nodesDraggable={!focusedViewerId && !(isMobile && placementMode)}
+              >
+                <Controls />
+                {isSettingsLoaded && showGrid && <Background color="#aaa" gap={16} />}
+                {isSettingsLoaded && showMinimap && <MiniMap />}
+                <Panel position="bottom-right">
+                  <div className="bg-card rounded-md p-2 text-xs text-muted-foreground">
+                    {currentWorkflow ? currentWorkflow.name : "IFCflow - v0.1.0"}
+                  </div>
+                </Panel>
+              </ReactFlow>
+            </div>
           </ViewerFocusProvider>
         </div>
       </div>
