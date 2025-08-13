@@ -123,6 +123,14 @@ export function getDefaultShortcuts(): KeyboardShortcut[] {
       action: () => {},
     },
     {
+      id: "group",
+      name: "Group Selected",
+      description: "Group selected nodes",
+      keys: `${mod}+shift+g`,
+      category: "edit",
+      action: () => {},
+    },
+    {
       id: "delete",
       name: "Delete",
       description: "Delete selected nodes",

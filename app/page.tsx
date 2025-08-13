@@ -346,6 +346,16 @@ function FlowWithProvider() {
     { enableOnFormTags: false }
   );
 
+  // Group selected nodes (Ctrl+Shift+G)
+  useHotkeys(
+    findShortcut("group") || "ctrl+shift+g,cmd+shift+g",
+    (e) => {
+      e.preventDefault();
+      handleGroup();
+    },
+    { enableOnFormTags: false }
+  );
+
   // Delete (Delete key)
   useHotkeys(
     "delete,backspace",
@@ -453,15 +463,21 @@ function FlowWithProvider() {
     // Save current state to history before deletion
     saveToHistory(nodes, edges);
 
-    const selectedNodeIds = selectedNodes.map((node) => node.id);
+    const idsToDelete = new Set<string>();
+    selectedNodes.forEach((node) => {
+      idsToDelete.add(node.id);
+      if (node.type === "groupNode") {
+        nodes.forEach((n) => {
+          if (n.parentNode === node.id) {
+            idsToDelete.add(n.id);
+          }
+        });
+      }
+    });
 
-    // Remove selected nodes
-    const remainingNodes = nodes.filter((node) => !node.selected);
-    // Remove edges connected to deleted nodes
+    const remainingNodes = nodes.filter((node) => !idsToDelete.has(node.id));
     const remainingEdges = edges.filter(
-      (edge) =>
-        !selectedNodeIds.includes(edge.source) &&
-        !selectedNodeIds.includes(edge.target)
+      (edge) => !idsToDelete.has(edge.source) && !idsToDelete.has(edge.target)
     );
 
     setNodes(remainingNodes);
@@ -469,7 +485,7 @@ function FlowWithProvider() {
 
     toast({
       title: "Deleted",
-      description: `${selectedNodes.length} node(s) deleted`,
+      description: `${idsToDelete.size} node(s) deleted`,
     });
   }, [nodes, edges, saveToHistory, setNodes, setEdges, toast]);
 
@@ -529,6 +545,63 @@ function FlowWithProvider() {
       description: `${newNodes.length} node(s) and ${newEdges.length} connection(s) pasted`,
     });
   }, [clipboard, nodes, edges, saveToHistory, setNodes, setEdges, toast]);
+
+  // Handle grouping selected nodes
+  const handleGroup = useCallback(() => {
+    const selectedNodes = nodes.filter(
+      (n) => n.selected && n.type !== "groupNode"
+    );
+    if (selectedNodes.length === 0) return;
+
+    saveToHistory(nodes, edges);
+
+    const padding = 40;
+    const minX = Math.min(...selectedNodes.map((n) => n.position.x));
+    const minY = Math.min(...selectedNodes.map((n) => n.position.y));
+    const maxX = Math.max(
+      ...selectedNodes.map((n) => n.position.x + (n.width || 0))
+    );
+    const maxY = Math.max(
+      ...selectedNodes.map((n) => n.position.y + (n.height || 0))
+    );
+
+    const groupId = `group-${Date.now()}`;
+    const position = { x: minX - padding, y: minY - padding };
+    const width = maxX - minX + padding * 2;
+    const height = maxY - minY + padding * 2;
+
+    const groupNode: Node = {
+      id: groupId,
+      type: "groupNode",
+      position,
+      data: { label: "Group", backgroundColor: "rgba(0,0,0,0.05)" },
+      style: { width, height },
+      selected: true,
+    };
+
+    const updatedNodes = nodes.map((n) => {
+      if (selectedNodes.some((sn) => sn.id === n.id)) {
+        return {
+          ...n,
+          parentNode: groupId,
+          position: {
+            x: n.position.x - position.x,
+            y: n.position.y - position.y,
+          },
+          extent: "parent",
+          selected: false,
+        };
+      }
+      return n;
+    });
+
+    setNodes([...updatedNodes, groupNode]);
+
+    toast({
+      title: "Group Created",
+      description: `${selectedNodes.length} node(s) grouped`,
+    });
+  }, [nodes, edges, saveToHistory, setNodes, toast]);
 
   // Updated node changes handler with history
   const handleNodesChange = useCallback(
@@ -1093,6 +1166,12 @@ function FlowWithProvider() {
             event.preventDefault();
             handleSelectAll();
             break;
+          case 'g':
+            if (event.shiftKey) {
+              event.preventDefault();
+              handleGroup();
+            }
+            break;
         }
       }
 
@@ -1110,7 +1189,7 @@ function FlowWithProvider() {
     return () => {
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [nodes, handleCopy, handlePaste, handleSelectAll, handleDelete]);
+  }, [nodes, handleCopy, handlePaste, handleSelectAll, handleDelete, handleGroup]);
 
   return (
     <div className="flex h-screen w-full bg-background">
@@ -1183,6 +1262,7 @@ function FlowWithProvider() {
           onCut={handleCut}
           onPaste={handlePaste}
           onDelete={handleDelete}
+          onGroup={handleGroup}
           onToggleSidebar={handleSidebarToggle}
           sidebarOpen={sidebarOpen}
         />
