@@ -299,6 +299,8 @@ export function FlowCanvas({
         snapGrid={[15, 15]}
         minZoom={0.1}
         maxZoom={2}
+        panOnDrag={[1, 2]}
+        selectionOnDrag
       >
         <Controls />
         {showGrid && <Background color="#aaa" gap={16} />}

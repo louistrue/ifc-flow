@@ -317,4 +317,11 @@ body {
   .react-flow:focus-visible {
     outline: none !important;
   }
+
+  /* Lasso multi-select styling */
+  .react-flow__selection {
+    border: 1px dashed hsl(var(--primary));
+    background-color: hsl(var(--primary) / 0.08);
+    border-radius: 4px;
+  }
 }
