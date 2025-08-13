@@ -164,15 +164,40 @@ space_properties = {}
 
 # Pre-build storey lookup map for better performance
 storey_lookup = {}
+space_storey_lookup = {}
+
+# Build element-to-storey mapping
 for rel in model.by_type("IfcRelContainedInSpatialStructure"):
     if rel.RelatingStructure.is_a("IfcBuildingStorey"):
         storey_name = rel.RelatingStructure.Name
         for element in rel.RelatedElements:
             storey_lookup[element.GlobalId] = storey_name
 
+# Build space-to-storey mapping (spaces are usually aggregated in storeys)
+for rel in model.by_type("IfcRelAggregates"):
+    if rel.RelatingObject.is_a("IfcBuildingStorey"):
+        storey_name = rel.RelatingObject.Name
+        for obj in rel.RelatedObjects:
+            if obj.is_a("IfcSpace"):
+                space_storey_lookup[obj.GlobalId] = storey_name
+
+# Also check if spaces are contained in storeys (alternative relationship)
+for rel in model.by_type("IfcRelContainedInSpatialStructure"):
+    if rel.RelatingStructure.is_a("IfcBuildingStorey"):
+        storey_name = rel.RelatingStructure.Name
+        for element in rel.RelatedElements:
+            if element.is_a("IfcSpace"):
+                space_storey_lookup[element.GlobalId] = storey_name
+
+print(f"Built storey lookup maps: {len(storey_lookup)} elements, {len(space_storey_lookup)} spaces")
+
 def get_storey_for_element(element):
     """Find which building storey contains this element (optimized)"""
     return storey_lookup.get(element.GlobalId, None)
+
+def get_storey_for_space(space):
+    """Find which building storey contains this space (optimized)"""
+    return space_storey_lookup.get(space.GlobalId, None)
 
 # Pre-fetch all spatial containment relationships for performance
 print("Pre-fetching spatial containment relationships...")
@@ -265,12 +290,16 @@ for space in spaces:
             "percentage": int((processed_count / len(spaces)) * 100)
         })
     
+    # Get storey for the space using the correct lookup
+    space_storey = get_storey_for_space(space)
+    
     # Initialize space data with cached properties
     space_elements_map[space_id] = {
         "name": space_name,
         "type": space_type,
         "description": space.Description or "",
         "longName": space.LongName or "",
+        "storey": space_storey,
         "elements": [],
         "properties": space_psets_cache.get(space_id, {}),
         "quantities": space_quantities_cache.get(space_id, {})
@@ -291,8 +320,7 @@ for space in spaces:
             for elem in contained_elements
         ]
         
-        # Get storey once for the space (not for each element)
-        space_storey = storey_lookup.get(space_id, None)
+
         
         # Batch update element_space_map
         for elem in contained_elements:

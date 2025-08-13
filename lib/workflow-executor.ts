@@ -694,6 +694,26 @@ export class WorkflowExecutor {
             inputType = "quantityResults";
             itemCount = Object.keys(processedData.groups).length; // Count the number of groups
           }
+          // CHECK: Room assignment results
+          else if (processedData.elementSpaceMap && processedData.spaceElementsMap && processedData.summary) {
+            inputType = "roomAssignment";
+            itemCount = processedData.summary.totalSpaces || 0;
+          }
+          // CHECK: Space metrics results
+          else if (processedData.spaces && processedData.totals && processedData.totals.totalArea !== undefined) {
+            inputType = "spaceMetrics";
+            itemCount = processedData.totals.spaceCount || 0;
+          }
+          // CHECK: Circulation analysis results
+          else if (processedData.circulationArea !== undefined && processedData.programArea !== undefined && processedData.circulationRatio !== undefined) {
+            inputType = "circulation";
+            itemCount = (processedData.circulationSpaces || 0) + (processedData.programSpaces || 0);
+          }
+          // CHECK: Occupancy analysis results
+          else if (processedData.spaces && Array.isArray(processedData.spaces) && processedData.summary && processedData.summary.totalOccupancy !== undefined) {
+            inputType = "occupancy";
+            itemCount = processedData.spaces.length;
+          }
           // Fallback for generic objects
           else {
             inputType = "object";

@@ -48,7 +48,6 @@ const spaceMetrics = [
 ];
 
 export const AnalysisNode = memo(({ data, id, isConnectable }: NodeProps<AnalysisNodeData>) => {
-  const [isConfigOpen, setIsConfigOpen] = useState(false);
   const [progressMessages, setProgressMessages] = useState<string[]>([]);
   const { setNodes } = useReactFlow();
 
@@ -85,11 +84,6 @@ export const AnalysisNode = memo(({ data, id, isConnectable }: NodeProps<Analysi
     }
   }, [isLoading, data.progressMessages]);
 
-  const handleDoubleClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
-    event.stopPropagation();
-    setIsConfigOpen(true);
-  }, []);
-
   const handleMetricSelect = useCallback((metricId: string) => {
     setNodes((nodes) =>
       nodes.map((node) => {
@@ -109,7 +103,6 @@ export const AnalysisNode = memo(({ data, id, isConnectable }: NodeProps<Analysi
         return node;
       })
     );
-    setIsConfigOpen(false);
   }, [id, setNodes]);
 
   const getStatusIcon = () => {
@@ -130,10 +123,7 @@ export const AnalysisNode = memo(({ data, id, isConnectable }: NodeProps<Analysi
 
   return (
     <>
-      <div
-        className="relative group"
-        onDoubleClick={handleDoubleClick}
-      >
+      <div className="relative group">
         {/* Main node container with gradient border effect */}
         <div className={`
           absolute inset-0 rounded-xl opacity-75 blur-sm
@@ -271,14 +261,7 @@ export const AnalysisNode = memo(({ data, id, isConnectable }: NodeProps<Analysi
               </div>
             )}
 
-            {/* Action hint */}
-            {!isLoading && (
-              <div className="mt-3 text-center">
-                <div className="text-[10px] text-gray-400 dark:text-gray-500">
-                  Double-click for settings
-                </div>
-              </div>
-            )}
+
 
             {/* Result preview (if any) */}
             {hasResults && (
@@ -329,84 +312,7 @@ export const AnalysisNode = memo(({ data, id, isConnectable }: NodeProps<Analysi
         </div>
       </div>
 
-      {/* Configuration modal */}
-      {isConfigOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={() => setIsConfigOpen(false)}>
-          <div
-            className="bg-white dark:bg-gray-900 rounded-xl shadow-2xl max-w-md w-full p-6"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                Space Analysis Settings
-              </h3>
-              <button
-                onClick={() => setIsConfigOpen(false)}
-                className="p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-              >
-                <svg className="h-5 w-5 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
 
-            <div className="space-y-3">
-              <div className="text-sm text-gray-600 dark:text-gray-400 mb-3">
-                Select the type of space analysis to perform:
-              </div>
-
-              {spaceMetrics.map((metric) => {
-                const Icon = metric.icon;
-                return (
-                  <button
-                    key={metric.id}
-                    onClick={() => handleMetricSelect(metric.id)}
-                    className={`
-                      w-full flex items-center gap-3 p-3 rounded-lg
-                      transition-all duration-200
-                      ${currentMetric === metric.id
-                        ? 'bg-gradient-to-r ' + metric.color + ' text-white shadow-md'
-                        : 'bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700'
-                      }
-                    `}
-                  >
-                    <div className={`
-                      p-2 rounded-lg
-                      ${currentMetric === metric.id
-                        ? 'bg-white/20'
-                        : 'bg-gradient-to-br ' + metric.color + ' text-white'
-                      }
-                    `}>
-                      <Icon className="h-5 w-5" />
-                    </div>
-                    <div className="flex-1 text-left">
-                      <div className="font-medium">
-                        {metric.label}
-                      </div>
-                      <div className={`text-xs ${currentMetric === metric.id ? 'text-white/80' : 'text-gray-500 dark:text-gray-400'}`}>
-                        {metric.description}
-                      </div>
-                    </div>
-                    {currentMetric === metric.id && (
-                      <div className="h-2 w-2 rounded-full bg-white animate-pulse" />
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-
-            <div className="mt-6 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
-              <div className="flex gap-2">
-                <Sparkles className="h-4 w-4 text-blue-600 dark:text-blue-400 flex-shrink-0 mt-0.5" />
-                <div className="text-xs text-blue-700 dark:text-blue-300">
-                  <p className="font-medium mb-1">Pro Tip:</p>
-                  <p>Connect an IFC node to analyze spatial relationships. Results can be viewed in a Watch node or used in Property nodes to add space information to elements.</p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </>
   );
 });

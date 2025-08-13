@@ -30,7 +30,7 @@ interface WatchNodeData {
   height?: number;
 }
 
-// Define QuantityResults interface (might need to move to a shared types file)
+// Define interfaces for different analysis result types
 interface QuantityResults {
   groups: Record<string, number>;
   unit: string;
@@ -39,10 +39,110 @@ interface QuantityResults {
   error?: string;
 }
 
+interface RoomAssignmentResults {
+  elementSpaceMap: Record<string, {
+    spaceId: string;
+    spaceName: string;
+    spaceType: string;
+    storey?: string;
+  }>;
+  spaceElementsMap: Record<string, {
+    name: string;
+    type: string;
+    description: string;
+    longName: string;
+    elements: Array<{
+      id: string;
+      type: string;
+      name: string;
+    }>;
+    properties: Record<string, any>;
+    quantities: Record<string, number>;
+  }>;
+  zones: Record<string, {
+    name: string;
+    description: string;
+    spaces: Array<{ id: string; name: string }>;
+    type: string;
+  }>;
+  summary: {
+    totalSpaces: number;
+    totalZones: number;
+    assignedElements: number;
+    unassignedElements: number;
+    spaces: Array<{ id: string; name: string }>;
+  };
+}
+
+interface SpaceMetricsResults {
+  spaces: Record<string, {
+    name: string;
+    type: string;
+    area: number;
+    volume: number;
+    height: number;
+    occupancy: number;
+    elementCount: number;
+  }>;
+  totals: {
+    totalArea: number;
+    totalVolume: number;
+    totalOccupancy: number;
+    averageArea: number;
+    spaceCount: number;
+  };
+}
+
+interface CirculationResults {
+  circulationArea: number;
+  programArea: number;
+  totalArea: number;
+  circulationRatio: number;
+  circulationSpaces: number;
+  programSpaces: number;
+  details: {
+    circulation: Array<{ id: string; name: string; type: string }>;
+    program: Array<{ id: string; name: string; type: string }>;
+  };
+}
+
+interface OccupancyResults {
+  spaces: Array<{
+    spaceId: string;
+    spaceName: string;
+    spaceType: string;
+    area: number;
+    occupancy: number;
+    occupancyFactor: number;
+  }>;
+  summary: {
+    totalOccupancy: number;
+    totalArea: number;
+    averageOccupancyDensity: number;
+    spaceCount: number;
+  };
+}
+
 type WatchNodeProps = NodeProps<WatchNodeData>;
 
 export const WatchNode = memo(
   ({ data, id, selected, isConnectable }: WatchNodeProps) => {
+    // Colors for pie chart - updated for better contrast and distinction
+    const COLORS = [
+      '#0088FE', // bright blue
+      '#FF8042', // bright orange
+      '#00C49F', // teal
+      '#FFBB28', // yellow
+      '#9370DB', // medium purple
+      '#FF6B6B', // coral red
+      '#4CAF50', // green
+      '#F44336', // red
+      '#3F51B5', // indigo
+      '#9C27B0', // purple
+      '#009688', // teal
+      '#FFC107', // amber
+    ];
+
     // Track copy status for button feedback
     const [copied, setCopied] = useState(false);
     const [isResizing, setIsResizing] = useState(false);
@@ -399,6 +499,543 @@ export const WatchNode = memo(
       return null;
     };
 
+    // Render room assignment results
+    const renderRoomAssignmentResults = (): JSX.Element | null => {
+      if (inputData.type !== "roomAssignment" || !inputData.value) {
+        return null;
+      }
+
+      const data = inputData.value as RoomAssignmentResults;
+      const { elementSpaceMap, spaceElementsMap, zones, summary } = data;
+
+      if (displayMode === "chart") {
+        // Show zones if available, otherwise show element distribution by space
+        if (Object.keys(zones).length > 0) {
+          // Zone-based visualization
+          const zoneData = Object.entries(zones).map(([zoneId, zone], index) => ({
+            name: zone.name.length > 20 ? `${zone.name.substring(0, 20)}...` : zone.name,
+            value: zone.spaces.length,
+            fill: COLORS[index % COLORS.length],
+            fullName: zone.name,
+            type: zone.type
+          }));
+
+          return (
+            <div className="space-y-3">
+              <div className="text-xs mb-1 flex justify-between">
+                <span className="flex items-center gap-1">
+                  <BarChart2 className="h-3 w-3" />
+                  <span>Zones & Their Spaces</span>
+                </span>
+                <span>{Object.keys(zones).length} zones</span>
+              </div>
+              <div style={{ width: '100%', height: Math.min(contentHeight - 50, 220) }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={zoneData}
+                      cx="50%"
+                      cy="50%"
+                      outerRadius={60}
+                      innerRadius={30}
+                      fill="#8884d8"
+                      dataKey="value"
+                      label={({ name, percent }) => percent >= 0.08 ? name : null}
+                    >
+                      {zoneData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.fill} />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      formatter={(value, name, props) => [
+                        `${value} spaces`,
+                        props.payload.fullName
+                      ]}
+                    />
+                    <Legend
+                      formatter={(value, entry) => (
+                        <span style={{ color: 'inherit' }}>
+                          {entry.payload.fullName} ({entry.payload.value})
+                        </span>
+                      )}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          );
+        } else {
+          // Element distribution by top spaces (bar chart style)
+          const spaceElementCounts = Object.entries(spaceElementsMap)
+            .map(([spaceId, space]) => ({
+              name: space.name.length > 15 ? `${space.name.substring(0, 15)}...` : space.name,
+              elements: space.elements.length,
+              fullName: space.name,
+              type: space.type
+            }))
+            .sort((a, b) => b.elements - a.elements)
+            .slice(0, 8); // Top 8 spaces
+
+          return (
+            <div className="space-y-3">
+              <div className="text-xs mb-1 flex justify-between">
+                <span className="flex items-center gap-1">
+                  <BarChart2 className="h-3 w-3" />
+                  <span>Elements per Space (Top 8)</span>
+                </span>
+              </div>
+              <div className="space-y-1.5">
+                {spaceElementCounts.map((space, i) => (
+                  <div key={i} className="space-y-0.5">
+                    <div className="flex justify-between text-xs">
+                      <span className="truncate max-w-[120px]" title={space.fullName}>
+                        {space.name}
+                      </span>
+                      <span className="font-medium">{space.elements} elements</span>
+                    </div>
+                    <div className="w-full bg-gray-100 dark:bg-gray-700 rounded-full h-2">
+                      <div
+                        className={`h-2 rounded-full`}
+                        style={{
+                          width: `${Math.max(5, (space.elements / Math.max(...spaceElementCounts.map(s => s.elements))) * 100)}%`,
+                          backgroundColor: COLORS[i % COLORS.length]
+                        }}
+                      ></div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        }
+      }
+
+      return (
+        <div className="space-y-3">
+          <div className="text-xs mb-2 flex justify-between">
+            <span className="flex items-center gap-1">
+              <BarChart2 className="h-3 w-3" />
+              <span>Room Assignment Results</span>
+            </span>
+          </div>
+
+          {/* Summary stats */}
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            <div className="bg-blue-50 dark:bg-blue-900 p-2 rounded">
+              <div className="font-medium text-blue-800 dark:text-blue-200">Spaces</div>
+              <div className="text-lg font-bold text-blue-600 dark:text-blue-300">{summary.totalSpaces}</div>
+            </div>
+            <div className="bg-green-50 dark:bg-green-900 p-2 rounded">
+              <div className="font-medium text-green-800 dark:text-green-200">Assigned Elements</div>
+              <div className="text-lg font-bold text-green-600 dark:text-green-300">{summary.assignedElements}</div>
+            </div>
+          </div>
+
+          {/* Spaces table */}
+          <div className="overflow-auto" style={{ maxHeight: `${contentHeight - 120}px` }}>
+            <table className="w-full text-xs">
+              <thead className="bg-gray-100 dark:bg-gray-800 dark:text-gray-200">
+                <tr>
+                  <th className="p-1 text-left">Space</th>
+                  <th className="p-1 text-left">Type</th>
+                  <th className="p-1 text-right">Elements</th>
+                </tr>
+              </thead>
+              <tbody>
+                {Object.entries(spaceElementsMap).slice(0, 20).map(([spaceId, space], i) => (
+                  <tr key={spaceId} className={i % 2 === 0 ? 'bg-gray-50 dark:bg-gray-700' : ''}>
+                    <td className="p-1 border-t border-gray-200 dark:border-gray-600 truncate max-w-[100px]" title={space.name}>
+                      {space.name}
+                    </td>
+                    <td className="p-1 border-t border-gray-200 dark:border-gray-600">{space.type}</td>
+                    <td className="p-1 border-t border-gray-200 dark:border-gray-600 text-right">{space.elements.length}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {Object.keys(spaceElementsMap).length > 20 && (
+              <div className="text-xs text-gray-500 mt-1 px-1">
+                ... and {Object.keys(spaceElementsMap).length - 20} more spaces
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    };
+
+    // Render space metrics results
+    const renderSpaceMetricsResults = (): JSX.Element | null => {
+      if (inputData.type !== "spaceMetrics" || !inputData.value) {
+        return null;
+      }
+
+      const data = inputData.value as SpaceMetricsResults;
+      const { spaces, totals } = data;
+
+      if (displayMode === "chart") {
+        // Bubble chart style visualization showing area vs occupancy
+        const spaceEntries = Object.entries(spaces)
+          .filter(([id, space]) => space.area > 0) // Only spaces with area
+          .sort((a, b) => b[1].area - a[1].area)
+          .slice(0, 12); // Top 12 spaces
+
+        const maxArea = Math.max(...spaceEntries.map(([id, space]) => space.area));
+        const maxOccupancy = Math.max(...spaceEntries.map(([id, space]) => space.occupancy));
+
+        return (
+          <div className="space-y-3">
+            <div className="text-xs mb-1 flex justify-between">
+              <span className="flex items-center gap-1">
+                <BarChart2 className="h-3 w-3" />
+                <span>Area vs Occupancy (Top 12)</span>
+              </span>
+              <span>m² / people</span>
+            </div>
+            <div className="grid grid-cols-1 gap-2 text-xs" style={{ maxHeight: `${contentHeight - 60}px`, overflowY: 'auto' }}>
+              {spaceEntries.map(([spaceId, space], i) => {
+                const areaPercent = (space.area / maxArea) * 100;
+                const occupancyPercent = maxOccupancy > 0 ? (space.occupancy / maxOccupancy) * 100 : 0;
+                const bubbleSize = Math.max(8, Math.min(24, areaPercent / 4));
+
+                return (
+                  <div key={spaceId} className="flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-800 rounded">
+                    <div className="flex items-center gap-2 flex-1">
+                      <div
+                        className="rounded-full flex items-center justify-center text-white text-xs font-bold"
+                        style={{
+                          width: `${bubbleSize}px`,
+                          height: `${bubbleSize}px`,
+                          backgroundColor: COLORS[i % COLORS.length],
+                          minWidth: `${bubbleSize}px`
+                        }}
+                      >
+                        {space.occupancy}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium truncate" title={space.name}>
+                          {space.name.length > 20 ? `${space.name.substring(0, 20)}...` : space.name}
+                        </div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400">
+                          {space.type}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="font-medium">{space.area.toFixed(1)} m²</div>
+                      <div className="text-xs text-gray-500 dark:text-gray-400">
+                        {space.occupancy > 0 ? `${(space.area / space.occupancy).toFixed(1)} m²/p` : '—'}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      }
+
+      return (
+        <div className="space-y-3">
+          <div className="text-xs mb-2 flex justify-between">
+            <span className="flex items-center gap-1">
+              <BarChart2 className="h-3 w-3" />
+              <span>Space Metrics</span>
+            </span>
+          </div>
+
+          {/* Summary stats */}
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            <div className="bg-blue-50 dark:bg-blue-900 p-2 rounded">
+              <div className="font-medium text-blue-800 dark:text-blue-200">Total Area</div>
+              <div className="text-lg font-bold text-blue-600 dark:text-blue-300">{totals.totalArea.toFixed(0)} m²</div>
+            </div>
+            <div className="bg-green-50 dark:bg-green-900 p-2 rounded">
+              <div className="font-medium text-green-800 dark:text-green-200">Occupancy</div>
+              <div className="text-lg font-bold text-green-600 dark:text-green-300">{totals.totalOccupancy}</div>
+            </div>
+          </div>
+
+          {/* Spaces table */}
+          <div className="overflow-auto" style={{ maxHeight: `${contentHeight - 120}px` }}>
+            <table className="w-full text-xs">
+              <thead className="bg-gray-100 dark:bg-gray-800 dark:text-gray-200">
+                <tr>
+                  <th className="p-1 text-left">Space</th>
+                  <th className="p-1 text-right">Area</th>
+                  <th className="p-1 text-right">Occupancy</th>
+                </tr>
+              </thead>
+              <tbody>
+                {Object.entries(spaces).slice(0, 20).map(([spaceId, space], i) => (
+                  <tr key={spaceId} className={i % 2 === 0 ? 'bg-gray-50 dark:bg-gray-700' : ''}>
+                    <td className="p-1 border-t border-gray-200 dark:border-gray-600 truncate max-w-[100px]" title={space.name}>
+                      {space.name}
+                    </td>
+                    <td className="p-1 border-t border-gray-200 dark:border-gray-600 text-right">{space.area.toFixed(1)} m²</td>
+                    <td className="p-1 border-t border-gray-200 dark:border-gray-600 text-right">{space.occupancy}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      );
+    };
+
+    // Render circulation analysis results
+    const renderCirculationResults = (): JSX.Element | null => {
+      if (inputData.type !== "circulation" || !inputData.value) {
+        return null;
+      }
+
+      const data = inputData.value as CirculationResults;
+      const { circulationArea, programArea, totalArea, circulationRatio, circulationSpaces, programSpaces } = data;
+
+      if (displayMode === "chart") {
+        // Show individual circulation and program spaces with their areas
+        const allSpaces = [
+          ...data.details.circulation.map(space => ({ ...space, category: 'Circulation', color: '#FF8042' })),
+          ...data.details.program.map(space => ({ ...space, category: 'Program', color: '#0088FE' }))
+        ].sort((a, b) => {
+          // Sort by category first, then by name
+          if (a.category !== b.category) {
+            return a.category === 'Circulation' ? -1 : 1;
+          }
+          return a.name.localeCompare(b.name);
+        });
+
+        return (
+          <div className="space-y-3">
+            <div className="text-xs mb-1 flex justify-between">
+              <span className="flex items-center gap-1">
+                <BarChart2 className="h-3 w-3" />
+                <span>Circulation vs Program Spaces</span>
+              </span>
+              <span>{allSpaces.length} spaces</span>
+            </div>
+
+            {/* Summary ratio bar */}
+            <div className="w-full h-6 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden flex">
+              <div
+                className="bg-orange-500 flex items-center justify-center text-white text-xs font-medium"
+                style={{ width: `${(circulationRatio * 100)}%` }}
+              >
+                {circulationRatio > 0.15 ? `${(circulationRatio * 100).toFixed(1)}%` : ''}
+              </div>
+              <div
+                className="bg-blue-500 flex items-center justify-center text-white text-xs font-medium"
+                style={{ width: `${((1 - circulationRatio) * 100)}%` }}
+              >
+                {(1 - circulationRatio) > 0.15 ? `${((1 - circulationRatio) * 100).toFixed(1)}%` : ''}
+              </div>
+            </div>
+
+            {/* Space list */}
+            <div className="space-y-1" style={{ maxHeight: `${contentHeight - 100}px`, overflowY: 'auto' }}>
+              {allSpaces.slice(0, 15).map((space, i) => (
+                <div key={`${space.category}-${space.id}`} className="flex items-center gap-2 p-1.5 bg-gray-50 dark:bg-gray-800 rounded text-xs">
+                  <div
+                    className="w-3 h-3 rounded-full flex-shrink-0"
+                    style={{ backgroundColor: space.color }}
+                  ></div>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium truncate" title={space.name}>
+                      {space.name.length > 25 ? `${space.name.substring(0, 25)}...` : space.name}
+                    </div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400">
+                      {space.type || space.category}
+                    </div>
+                  </div>
+                  <div className="text-xs font-medium text-gray-600 dark:text-gray-300">
+                    {space.category}
+                  </div>
+                </div>
+              ))}
+              {allSpaces.length > 15 && (
+                <div className="text-xs text-gray-500 text-center py-1">
+                  ... and {allSpaces.length - 15} more spaces
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      }
+
+      return (
+        <div className="space-y-3">
+          <div className="text-xs mb-2 flex justify-between">
+            <span className="flex items-center gap-1">
+              <BarChart2 className="h-3 w-3" />
+              <span>Circulation Analysis</span>
+            </span>
+          </div>
+
+          {/* Summary stats */}
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            <div className="bg-orange-50 dark:bg-orange-900 p-2 rounded">
+              <div className="font-medium text-orange-800 dark:text-orange-200">Circulation</div>
+              <div className="text-lg font-bold text-orange-600 dark:text-orange-300">{circulationArea.toFixed(0)} m²</div>
+              <div className="text-xs text-orange-600 dark:text-orange-400">{(circulationRatio * 100).toFixed(1)}%</div>
+            </div>
+            <div className="bg-blue-50 dark:bg-blue-900 p-2 rounded">
+              <div className="font-medium text-blue-800 dark:text-blue-200">Program</div>
+              <div className="text-lg font-bold text-blue-600 dark:text-blue-300">{programArea.toFixed(0)} m²</div>
+              <div className="text-xs text-blue-600 dark:text-blue-400">{((programArea / totalArea) * 100).toFixed(1)}%</div>
+            </div>
+          </div>
+
+          {/* Space counts */}
+          <div className="flex justify-between text-xs bg-gray-50 dark:bg-gray-800 p-2 rounded">
+            <span>Circulation Spaces: <strong>{circulationSpaces}</strong></span>
+            <span>Program Spaces: <strong>{programSpaces}</strong></span>
+          </div>
+        </div>
+      );
+    };
+
+    // Render occupancy analysis results
+    const renderOccupancyResults = (): JSX.Element | null => {
+      if (inputData.type !== "occupancy" || !inputData.value) {
+        return null;
+      }
+
+      const data = inputData.value as OccupancyResults;
+      const { spaces, summary } = data;
+
+      if (displayMode === "chart") {
+        // Horizontal bar chart showing occupancy density by individual spaces
+        const spacesWithDensity = spaces
+          .filter(space => space.area > 0 && space.occupancy > 0)
+          .map(space => ({
+            ...space,
+            density: space.area / space.occupancy, // m² per person
+            efficiency: space.occupancyFactor // Lower factor = higher efficiency
+          }))
+          .sort((a, b) => a.density - b.density) // Sort by density (most efficient first)
+          .slice(0, 10);
+
+        const maxDensity = Math.max(...spacesWithDensity.map(s => s.density));
+
+        return (
+          <div className="space-y-3">
+            <div className="text-xs mb-1 flex justify-between">
+              <span className="flex items-center gap-1">
+                <BarChart2 className="h-3 w-3" />
+                <span>Space Efficiency (Top 10)</span>
+              </span>
+              <span>m²/person</span>
+            </div>
+
+            {/* Efficiency legend */}
+            <div className="flex gap-4 text-xs">
+              <div className="flex items-center gap-1">
+                <div className="w-3 h-3 bg-green-500 rounded"></div>
+                <span>High Efficiency (≤5 m²/p)</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <div className="w-3 h-3 bg-yellow-500 rounded"></div>
+                <span>Medium (5-15 m²/p)</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <div className="w-3 h-3 bg-red-500 rounded"></div>
+                <span>Low (>15 m²/p)</span>
+              </div>
+            </div>
+
+            <div className="space-y-2" style={{ maxHeight: `${contentHeight - 120}px`, overflowY: 'auto' }}>
+              {spacesWithDensity.map((space, i) => {
+                const densityPercent = (space.density / maxDensity) * 100;
+                const getEfficiencyColor = (density: number) => {
+                  if (density <= 5) return '#10B981'; // green
+                  if (density <= 15) return '#F59E0B'; // yellow
+                  return '#EF4444'; // red
+                };
+
+                return (
+                  <div key={space.spaceId} className="space-y-1">
+                    <div className="flex justify-between items-center text-xs">
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium truncate" title={space.spaceName}>
+                          {space.spaceName.length > 20 ? `${space.spaceName.substring(0, 20)}...` : space.spaceName}
+                        </div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400">
+                          {space.spaceType} • {space.occupancy} people
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className="font-bold" style={{ color: getEfficiencyColor(space.density) }}>
+                          {space.density.toFixed(1)} m²/p
+                        </div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400">
+                          {space.area.toFixed(0)} m²
+                        </div>
+                      </div>
+                    </div>
+                    <div className="w-full bg-gray-100 dark:bg-gray-700 rounded-full h-2">
+                      <div
+                        className="h-2 rounded-full"
+                        style={{
+                          width: `${Math.max(5, densityPercent)}%`,
+                          backgroundColor: getEfficiencyColor(space.density)
+                        }}
+                      ></div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      }
+
+      return (
+        <div className="space-y-3">
+          <div className="text-xs mb-2 flex justify-between">
+            <span className="flex items-center gap-1">
+              <BarChart2 className="h-3 w-3" />
+              <span>Occupancy Analysis</span>
+            </span>
+          </div>
+
+          {/* Summary stats */}
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            <div className="bg-purple-50 dark:bg-purple-900 p-2 rounded">
+              <div className="font-medium text-purple-800 dark:text-purple-200">Total Occupancy</div>
+              <div className="text-lg font-bold text-purple-600 dark:text-purple-300">{summary.totalOccupancy}</div>
+            </div>
+            <div className="bg-green-50 dark:bg-green-900 p-2 rounded">
+              <div className="font-medium text-green-800 dark:text-green-200">Avg Density</div>
+              <div className="text-lg font-bold text-green-600 dark:text-green-300">{summary.averageOccupancyDensity.toFixed(1)} m²/p</div>
+            </div>
+          </div>
+
+          {/* Spaces table */}
+          <div className="overflow-auto" style={{ maxHeight: `${contentHeight - 120}px` }}>
+            <table className="w-full text-xs">
+              <thead className="bg-gray-100 dark:bg-gray-800 dark:text-gray-200">
+                <tr>
+                  <th className="p-1 text-left">Space</th>
+                  <th className="p-1 text-right">Area</th>
+                  <th className="p-1 text-right">Occupancy</th>
+                </tr>
+              </thead>
+              <tbody>
+                {spaces.slice(0, 20).map((space, i) => (
+                  <tr key={space.spaceId} className={i % 2 === 0 ? 'bg-gray-50 dark:bg-gray-700' : ''}>
+                    <td className="p-1 border-t border-gray-200 dark:border-gray-600 truncate max-w-[100px]" title={space.spaceName}>
+                      {space.spaceName}
+                    </td>
+                    <td className="p-1 border-t border-gray-200 dark:border-gray-600 text-right">{space.area.toFixed(1)} m²</td>
+                    <td className="p-1 border-t border-gray-200 dark:border-gray-600 text-right">{space.occupancy}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      );
+    };
+
     // Enhanced function to render quantity results with better grouping visualization
     const renderQuantityResults = (): JSX.Element | null => {
       if (inputData.type !== "quantityResults" || !inputData.value) {
@@ -456,21 +1093,7 @@ export const WatchNode = memo(
         return "bg-blue-200 dark:bg-blue-300";
       };
 
-      // Colors for pie chart - updated for better contrast and distinction
-      const COLORS = [
-        '#0088FE', // bright blue
-        '#FF8042', // bright orange
-        '#00C49F', // teal
-        '#FFBB28', // yellow
-        '#9370DB', // medium purple
-        '#FF6B6B', // coral red
-        '#4CAF50', // green
-        '#F44336', // red
-        '#3F51B5', // indigo
-        '#9C27B0', // purple
-        '#009688', // teal
-        '#FFC107', // amber
-      ];
+
 
       // Custom tooltip for pie chart
       const CustomTooltip = ({ active, payload }: any) => {
@@ -693,9 +1316,25 @@ export const WatchNode = memo(
         );
       }
 
-      // Special handling for property results
+      // Special handling for different analysis result types
       if (inputData.type === "propertyResults") {
         return renderPropertyResults();
+      }
+
+      if (inputData.type === "roomAssignment" && (displayMode === "table" || displayMode === "chart")) {
+        return renderRoomAssignmentResults();
+      }
+
+      if (inputData.type === "spaceMetrics" && (displayMode === "table" || displayMode === "chart")) {
+        return renderSpaceMetricsResults();
+      }
+
+      if (inputData.type === "circulation" && (displayMode === "table" || displayMode === "chart")) {
+        return renderCirculationResults();
+      }
+
+      if (inputData.type === "occupancy" && (displayMode === "table" || displayMode === "chart")) {
+        return renderOccupancyResults();
       }
 
       // Special handling for quantity results - use for both table and chart modes
