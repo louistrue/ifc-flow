@@ -104,11 +104,17 @@ self.onmessage = async (event) => {
         break;
 
       case "exportIfc":
+        // Handle the export data properly
+        const exportData = {
+          model: event.data.model,
+          fileName: event.data.fileName,
+          arrayBuffer: event.data.arrayBuffer
+        };
         console.log("Starting to export modified IFC file...", {
-          filename: data.fileName,
-          elementCount: data.model.elements.length,
+          filename: exportData.fileName,
+          elementCount: exportData.model?.elements?.length || 0,
         });
-        await handleExportIfc({ ...data, messageId });
+        await handleExportIfc({ ...exportData, messageId });
         break;
 
       case "extractGeometry":
@@ -639,6 +645,13 @@ async function handleExportIfc(data) {
   const { model, fileName, messageId, arrayBuffer } = data;
 
   try {
+    // Validate inputs
+    if (!model) {
+      throw new Error("No model data provided for export");
+    }
+    if (!arrayBuffer) {
+      throw new Error("No IFC file buffer provided for export");
+    }
     self.postMessage({
       type: "progress",
       message: "Preparing to export modified IFC file...",
@@ -867,7 +880,9 @@ async function handleExportIfc(data) {
                             print(f"Skipping property change - missing property name or pset name")
                             continue
                         
-                        print(f"Modifying {element.is_a()}{change.get('elementName', '')} (GlobalId: {change.get('globalId', 'unknown')}) - Setting {pset_name}.{prop_name} = {prop_value}")
+                        # Only log first few modifications to reduce noise
+                        if modified_count < 3:
+                            print(f"Modifying {element.is_a()} (GlobalId: {change.get('globalId', 'unknown')[:8]}...) - Setting {pset_name}.{prop_name} = {prop_value}")
                         
                         # Wrap the entire property modification in a try-except block
                         try:
@@ -969,7 +984,8 @@ async function handleExportIfc(data) {
                             else:
                                 # Create new property set
                                 try:
-                                    print(f"Creating new property set {pset_name} for {element.is_a()}")
+                                    if modified_count < 3:
+                                        print(f"Creating new property set {pset_name} for {element.is_a()}")
                                     
                                     # Create property
                                     new_prop = None
@@ -1020,7 +1036,12 @@ async function handleExportIfc(data) {
                 except Exception as e:
                     print(f"Error handling element {change['globalId']}: {e}")
             
-            print(f"Modified {modified_count} elements with property changes")
+            # Print summary
+            if modified_count > 0:
+                print(f"✓ Successfully modified {modified_count} elements with property changes")
+            else:
+                print(f"⚠ Warning: No elements were modified (0 property changes applied)")
+                print(f"  Check that the element GlobalIds match and values are not None")
             
             # Save the IFC file
             print(f"Writing modified IFC file to {temp_path}")
@@ -1077,16 +1098,16 @@ async function handleExportIfc(data) {
         messageId,
       });
 
+      if (!ifcBase64) {
+        throw new Error("No IFC data received from Python export");
+      }
+
       // Create a download URL from the base64 data
       const binaryString = atob(ifcBase64);
       const bytes = new Uint8Array(binaryString.length);
       for (let i = 0; i < binaryString.length; i++) {
         bytes[i] = binaryString.charCodeAt(i);
       }
-      const blob = new Blob([bytes], { type: "application/ifc" });
-
-      // Clean up
-      namespace.destroy();
 
       // Final progress update
       self.postMessage({
@@ -1096,13 +1117,17 @@ async function handleExportIfc(data) {
         messageId,
       });
 
-      // Send the result back for download
+      // Send the result back for download as ArrayBuffer
+      const bufferCopy = bytes.buffer.slice(0);
       self.postMessage({
         type: "ifcExported",
         fileName: fileName || "exported.ifc",
-        data: blob,
+        data: bufferCopy,
         messageId,
       });
+
+      // Clean up after sending
+      namespace.destroy();
     } catch (pythonError) {
       console.error("Python execution error during export:", pythonError);
       throw new Error(`Python export error: ${pythonError.message}`);

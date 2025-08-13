@@ -887,14 +887,18 @@ export class WorkflowExecutor {
       case "pythonNode": {
         console.log("Processing pythonNode", { node, inputValues });
 
-        // Python nodes can work with or without input
-        const model = inputValues.input as IfcModel;
+        // Python nodes can work with various input types
+        // Try to get the model from the last loaded model if input is not a model
+        let model: IfcModel | null = null;
 
-        // Validate we have a model with a file for the IFC context
-        if (inputValues.input && (!model || !model.name)) {
-          console.warn(`Invalid model provided to python node ${nodeId}`);
-          result = null;
-          break;
+        // Check if input is a model
+        if (inputValues.input && inputValues.input.name && inputValues.input.elements) {
+          model = inputValues.input as IfcModel;
+        } else {
+          // Input is not a model (could be analysis results, etc.)
+          // Get the last loaded model for IFC context
+          model = getLastLoadedModel();
+          console.log(`Python node using last loaded model: ${model?.name}`);
         }
 
         this.updateNodeDataInList(nodeId, {
@@ -945,9 +949,13 @@ export class WorkflowExecutor {
           result = "";
         } else {
           let exportInput = inputValues.input;
+          const exportFormat = node.data.properties?.format || "csv";
+          const exportFileName = node.data.properties?.fileName || "export";
+
+          console.log(`Export node: format=${exportFormat}, fileName=${exportFileName}`);
 
           // Check if this is GLB export and we need to extract geometry
-          if (node.data.properties?.format === "glb") {
+          if (exportFormat === "glb") {
             console.log("GLB export detected - checking if geometry extraction is needed");
 
             // Check if input has geometry data
@@ -969,17 +977,22 @@ export class WorkflowExecutor {
 
           result = await exportData(
             exportInput,
-            node.data.properties?.format || "csv",
-            node.data.properties?.fileName || "export"
+            exportFormat,
+            exportFileName
           );
+
+          console.log(`Export result for format ${exportFormat}:`, typeof result, result?.length || result);
+
+          // Only download directly for non-IFC formats
+          // IFC format is handled by event listener
           if (
             result !== undefined &&
-            node.data.properties?.format?.toLowerCase() !== "ifc"
+            exportFormat.toLowerCase() !== "ifc"
           ) {
             downloadExportedFile(
               result,
-              node.data.properties?.format || "csv",
-              node.data.properties?.fileName || "export"
+              exportFormat,
+              exportFileName
             );
           }
         }

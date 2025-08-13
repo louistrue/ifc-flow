@@ -874,6 +874,35 @@ export function manageProperties(
     targetPset,
   });
 
+  // Check if propertyValue is a mapping object (element-specific values)
+  const isMapping = propertyValue &&
+    typeof propertyValue === 'object' &&
+    !Array.isArray(propertyValue) &&
+    (propertyValue.mappings || propertyValue.elements);
+
+  let elementValueMap: Record<string, any> = {};
+  let elementsModified = 0;
+
+  if (isMapping) {
+    console.log("Detected element-specific value mapping");
+
+    // Handle different mapping formats
+    if (propertyValue.mappings) {
+      // Format: { mappings: { GlobalId: value } }
+      elementValueMap = propertyValue.mappings;
+    } else if (propertyValue.elements && Array.isArray(propertyValue.elements)) {
+      // Format: { elements: [{ GlobalId: "...", SpaceName: "..." }] }
+      propertyValue.elements.forEach((elem: any) => {
+        if (elem.GlobalId) {
+          // Use the property that matches propertyName, or a common field
+          elementValueMap[elem.GlobalId] = elem[propertyName] || elem.SpaceName || elem.value;
+        }
+      });
+    }
+
+    console.log(`Found ${Object.keys(elementValueMap).length} element-specific values in mapping`);
+  }
+
   // Debug the first element to understand structure
   if (elements && elements.length > 0) {
     console.log("First element structure:", {
@@ -917,7 +946,7 @@ export function manageProperties(
   const effectiveTargetPset = explicitPset || targetPset;
 
   // Create a new array to return
-  return elements.map((element) => {
+  const result = elements.map((element) => {
     // Clone the element to avoid modifying the original
     const updatedElement = { ...element };
 
@@ -1060,10 +1089,26 @@ export function manageProperties(
 
       case "set":
       case "add":
+        // Determine the value to use for this specific element
+        let valueToSet = propertyValue;
+
+        if (isMapping) {
+          // Look up the element-specific value by GlobalId
+          const globalId = element.properties?.GlobalId;
+          if (globalId && elementValueMap[globalId] !== undefined) {
+            valueToSet = elementValueMap[globalId];
+            elementsModified++;
+          } else {
+            // Skip this element if no mapping exists for it
+            // Don't log this as it's expected for elements not in the mapping
+            break;
+          }
+        }
+
         // Set or add the property
         if (element.properties) {
           // Always update the direct properties for convenient access
-          element.properties[actualPropertyName] = propertyValue;
+          element.properties[actualPropertyName] = valueToSet;
         }
 
         // Determine where to store the property
@@ -1080,14 +1125,14 @@ export function manageProperties(
 
           // Add the property to the target pset
           element.psets[effectiveTargetPset][actualPropertyName] =
-            propertyValue;
+            valueToSet;
         }
 
         // Store property info for UI feedback
         updatedElement.propertyInfo = {
           name: actualPropertyName,
           exists: true,
-          value: propertyValue,
+          value: valueToSet,
           psetName:
             effectiveTargetPset !== "any" ? effectiveTargetPset : "properties",
         };
@@ -1149,6 +1194,13 @@ export function manageProperties(
 
     return updatedElement;
   });
+
+  // Log summary if using mapping
+  if (isMapping && elementsModified > 0) {
+    console.log(`✓ Set "${actualPropertyName}" for ${elementsModified} elements in "${effectiveTargetPset}"`);
+  }
+
+  return result;
 }
 
 // Classification functions
@@ -1794,7 +1846,7 @@ export async function runPythonScript(
   if (!ifcWorker) throw new Error("IFC worker is not available");
 
   let arrayBuffer: ArrayBuffer | undefined = undefined;
-  
+
   // Only try to get file and arrayBuffer if model is provided
   if (model && model.name) {
     const file = getIfcFile(model.name);
@@ -1839,12 +1891,12 @@ export async function runPythonScript(
       },
     });
 
-        // Only pass arrayBuffer as transferable if it exists
+    // Only pass arrayBuffer as transferable if it exists
     const message = {
       action: "runPython",
       messageId,
-      data: { 
-        script: code, 
+      data: {
+        script: code,
         arrayBuffer,
         inputData,
         properties

@@ -790,9 +790,75 @@ function FlowWithProvider() {
 
   // Listen for export completion events
   useEffect(() => {
-    const handleExportComplete = (event: CustomEvent) => {
-      const data = event.detail;
-      downloadExportedFile(data, "export", "workflow-export");
+    const handleExportComplete = async (event: CustomEvent) => {
+      const { model, exportFileName, originalFileName } = event.detail;
+
+      try {
+        // Get the original IFC file buffer
+        const originalFile = getIfcFile(originalFileName);
+        if (!originalFile) {
+          toast({
+            title: "Export Error",
+            description: "Original IFC file not found. Please reload the file and try again.",
+            variant: "destructive",
+          });
+          return;
+        }
+
+        // Convert file to ArrayBuffer if needed
+        const arrayBuffer = await originalFile.arrayBuffer();
+
+        // Create a new worker for the export
+        const worker = new Worker('/ifcWorker.js');
+
+        // Set up message handler for export result
+        worker.onmessage = (e) => {
+          if (e.data.type === 'ifcExported') {
+            // Download the exported IFC file
+            // The worker sends an ArrayBuffer, convert to Blob
+            const blob = new Blob([e.data.data], { type: 'application/x-step' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = e.data.fileName || exportFileName;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+
+            toast({
+              title: "Export Successful",
+              description: `IFC file exported as ${e.data.fileName || exportFileName}`,
+            });
+
+            worker.terminate();
+          } else if (e.data.type === 'error') {
+            toast({
+              title: "Export Error",
+              description: e.data.message || "Failed to export IFC file",
+              variant: "destructive",
+            });
+            worker.terminate();
+          }
+        };
+
+        // Send export request to worker
+        worker.postMessage({
+          action: 'exportIfc',
+          model: model,
+          fileName: exportFileName,
+          arrayBuffer: arrayBuffer,
+          messageId: Date.now().toString()
+        }, [arrayBuffer]);
+
+      } catch (error) {
+        console.error("Error exporting IFC:", error);
+        toast({
+          title: "Export Error",
+          description: error instanceof Error ? error.message : "Failed to export IFC file",
+          variant: "destructive",
+        });
+      }
     };
 
     const eventListenerWrapper = (event: Event) => {
