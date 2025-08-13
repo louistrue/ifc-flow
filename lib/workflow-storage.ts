@@ -54,27 +54,33 @@ export class WorkflowStorage {
       return workflow;
     }
 
+    // Clean the workflow data before saving
+    const cleanedWorkflow = {
+      ...workflow,
+      flowData: cleanWorkflowData(workflow.flowData)
+    };
+
     const workflows = this.getWorkflows();
-    const existingIndex = workflows.findIndex((w) => w.id === workflow.id);
+    const existingIndex = workflows.findIndex((w) => w.id === cleanedWorkflow.id);
 
     if (existingIndex >= 0) {
       // Update existing workflow
       workflows[existingIndex] = {
-        ...workflow,
+        ...cleanedWorkflow,
         updatedAt: new Date().toISOString(),
       };
     } else {
       // Add new workflow
       workflows.push({
-        ...workflow,
-        id: workflow.id || crypto.randomUUID(),
+        ...cleanedWorkflow,
+        id: cleanedWorkflow.id || crypto.randomUUID(),
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       });
     }
 
     localStorage.setItem(this.storageKey, JSON.stringify(workflows));
-    return workflow;
+    return cleanedWorkflow;
   }
 
   // Delete a workflow
@@ -111,7 +117,13 @@ export class WorkflowStorage {
       return;
     }
 
-    const json = JSON.stringify(workflow, null, 2);
+    // Clean the workflow data before exporting
+    const cleanedWorkflow = {
+      ...workflow,
+      flowData: cleanWorkflowData(workflow.flowData)
+    };
+
+    const json = JSON.stringify(cleanedWorkflow, null, 2);
     const blob = new Blob([json], { type: "application/json" });
     const url = URL.createObjectURL(blob);
 
@@ -160,6 +172,70 @@ export class WorkflowStorage {
       reader.readAsText(file);
     });
   }
+}
+
+// Utility function to clean workflow data before saving
+// Removes IFC model data and other heavy data from nodes
+export function cleanWorkflowData(flowData: any): any {
+  if (!flowData) return flowData;
+
+  // Create a deep copy to avoid mutating the original
+  const cleanedData = JSON.parse(JSON.stringify(flowData));
+
+  // Clean nodes if they exist
+  if (cleanedData.nodes && Array.isArray(cleanedData.nodes)) {
+    cleanedData.nodes = cleanedData.nodes.map((node: any) => {
+      // Create a clean copy of the node
+      const cleanNode = { ...node };
+
+      // Clean the node data
+      if (cleanNode.data) {
+        const cleanData = { ...cleanNode.data };
+
+        // For IFC nodes, remove the actual model data
+        if (node.type === 'ifcNode') {
+          // Remove heavy data properties
+          delete cleanData.model;
+          delete cleanData.modelInfo;
+          delete cleanData.file;
+          delete cleanData.fileHandle;
+          delete cleanData.modelState;
+          delete cleanData.elements;
+
+          // Keep only essential properties for restoration
+          cleanData.isEmptyNode = true; // Mark as empty for loading
+          if (cleanData.properties?.filename) {
+            cleanData.fileName = cleanData.properties.filename; // Preserve filename for reference
+          }
+        }
+
+        // For other nodes that might have cached IFC data
+        if (cleanData.modelInfo) {
+          delete cleanData.modelInfo;
+        }
+        if (cleanData.inputData?.value && cleanData.inputData.type === 'ifcModel') {
+          // Clear the actual model data but keep the type info
+          cleanData.inputData = {
+            ...cleanData.inputData,
+            value: null,
+            isCleared: true
+          };
+        }
+
+        // Remove any execution results or temporary data
+        delete cleanData.executionResult;
+        delete cleanData.error;
+        delete cleanData.isLoading;
+        delete cleanData.progress;
+
+        cleanNode.data = cleanData;
+      }
+
+      return cleanNode;
+    });
+  }
+
+  return cleanedData;
 }
 
 // Create a singleton instance

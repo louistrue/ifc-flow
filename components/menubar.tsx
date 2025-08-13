@@ -26,6 +26,7 @@ import { WorkflowLibrary } from "@/components/workflow-library";
 import { useToast } from "@/hooks/use-toast";
 import { useIsMobile } from "@/hooks/use-mobile";
 import type { Workflow } from "@/lib/workflow-storage";
+import { cleanWorkflowData } from "@/lib/workflow-storage";
 import {
   formatKeyCombination,
   useKeyboardShortcuts,
@@ -502,7 +503,7 @@ export function AppMenubar({
         onOpenChange={setSaveWorkflowDialogOpen}
         onSave={handleSaveToLibrary}
         onSaveLocally={handleSaveLocally}
-        flowData={getFlowObject()}
+        flowData={cleanWorkflowData(getFlowObject())}
         existingWorkflow={currentWorkflow}
       />
 

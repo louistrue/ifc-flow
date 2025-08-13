@@ -15,6 +15,8 @@ interface ExtendedIfcNodeData extends BaseIfcNodeData {
     totalElements?: number;
   };
   error?: string | null;
+  isEmptyNode?: boolean;
+  fileName?: string;
 }
 
 export const IfcNode = memo(({ id, data, isConnectable }: NodeProps<ExtendedIfcNodeData>) => {
@@ -350,9 +352,24 @@ export const IfcNode = memo(({ id, data, isConnectable }: NodeProps<ExtendedIfcN
           )}
         </div>
       )}
-      {!data.isLoading && !data.error && !data.properties?.file && (
+      {!data.isLoading && !data.error && !data.properties?.file && !data.isEmptyNode && (
         <div className="p-3 text-xs text-muted-foreground">
           {isDraggingOver ? "Drop IFC file here" : "No file selected"}
+        </div>
+      )}
+      {!data.isLoading && !data.error && data.isEmptyNode && (
+        <div className="p-3">
+          <div className="text-xs text-orange-600 dark:text-orange-400 font-medium">
+            IFC file needs to be reloaded
+          </div>
+          {data.fileName && (
+            <div className="text-xs text-muted-foreground mt-1">
+              Original file: {data.fileName}
+            </div>
+          )}
+          <div className="text-xs text-muted-foreground mt-1">
+            Drag & drop or click to load IFC file
+          </div>
         </div>
       )}
       <Handle

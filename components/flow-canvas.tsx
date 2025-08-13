@@ -63,6 +63,8 @@ export function FlowCanvas({
   }, []);
 
   // Handle dropping files or nodes on the canvas
+
+
   const onDrop = useCallback(
     async (event: React.DragEvent) => {
       event.preventDefault();
@@ -71,15 +73,23 @@ export function FlowCanvas({
 
       const reactFlowBounds = reactFlowWrapper.current.getBoundingClientRect();
 
-      // Get the position where the item was dropped
-      const position = reactFlowInstance.project({
-        x: event.clientX - reactFlowBounds.left,
-        y: event.clientY - reactFlowBounds.top,
+      // Get the cursor position in flow coordinates
+      // Use screenToFlowPosition for consistent coordinate transformation
+      const cursorPosition = reactFlowInstance.screenToFlowPosition({
+        x: event.clientX,
+        y: event.clientY,
       });
 
       // Check if a node is being dropped from the sidebar
       const nodeType = event.dataTransfer.getData("application/reactflow");
       if (nodeType && nodeType !== "") {
+        // Position the node with its top-left corner at the cursor position
+        // No offset needed - we want exact cursor positioning
+        const position = {
+          x: cursorPosition.x,
+          y: cursorPosition.y,
+        };
+
         // Create a new node
         const newNode = {
           id: `${nodeType}-${Date.now()}`,
@@ -102,6 +112,12 @@ export function FlowCanvas({
           try {
             // Create a new IFC node
             const newNodeId = `ifcNode-${Date.now()}`;
+
+            // Position the node at the drop location
+            const position = {
+              x: cursorPosition.x,
+              y: cursorPosition.y,
+            };
 
             // Add the node first with a loading state
             reactFlowInstance.addNodes({

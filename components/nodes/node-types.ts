@@ -8,10 +8,13 @@ export interface BaseNodeData {
 export interface AnalysisNodeData extends BaseNodeData {
     properties?: {
         analysisType?: string;
-        tolerance?: string;
         metric?: string;
         [key: string]: any;
     };
+    isLoading?: boolean;
+    error?: string | null;
+    result?: any;
+    progressMessages?: string[];
 }
 
 // Classification node data

@@ -1,3 +1,4 @@
+import type { NodeTypes } from "reactflow"
 import { IfcNode } from "./ifc-node"
 import { GeometryNode } from "./geometry-node"
 import { FilterNode } from "./filter-node"
@@ -14,8 +15,8 @@ import { WatchNode } from "./watch-node"
 import { ParameterNode } from "./parameter-node"
 import { PythonNode } from "./python-node"
 
-// Define custom node types
-export const nodeTypes = {
+// Define custom node types as a constant to prevent React Flow warning
+export const nodeTypes: NodeTypes = {
   ifcNode: IfcNode,
   geometryNode: GeometryNode,
   filterNode: FilterNode,
@@ -31,7 +32,7 @@ export const nodeTypes = {
   watchNode: WatchNode,
   parameterNode: ParameterNode,
   pythonNode: PythonNode,
-}
+} as const
 
 export {
   IfcNode,
