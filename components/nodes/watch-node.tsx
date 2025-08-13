@@ -553,9 +553,9 @@ export const WatchNode = memo(
                       ]}
                     />
                     <Legend
-                      formatter={(value, entry) => (
+                      formatter={(value) => (
                         <span style={{ color: 'inherit' }}>
-                          {entry.payload.fullName} ({entry.payload.value})
+                          {value}
                         </span>
                       )}
                     />
@@ -938,7 +938,7 @@ export const WatchNode = memo(
               </div>
               <div className="flex items-center gap-1">
                 <div className="w-3 h-3 bg-red-500 rounded"></div>
-                <span>Low (>15 m²/p)</span>
+                <span>Low (&gt;15 m²/p)</span>
               </div>
             </div>
 

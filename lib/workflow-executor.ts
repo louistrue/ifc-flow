@@ -981,7 +981,10 @@ export class WorkflowExecutor {
             exportFileName
           );
 
-          console.log(`Export result for format ${exportFormat}:`, typeof result, result?.length || result);
+          console.log(`Export result for format ${exportFormat}:`, typeof result,
+            typeof result === 'string' ? result.length :
+              result instanceof ArrayBuffer ? result.byteLength :
+                result);
 
           // Only download directly for non-IFC formats
           // IFC format is handled by event listener
