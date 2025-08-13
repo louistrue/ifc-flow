@@ -84,7 +84,7 @@ export const nodeCategories = [
         id: "transformNode",
         label: "Transform",
         icon: <Move className="h-4 w-4 mr-2" />,
-        status: "working",
+        status: "wip",
       },
       {
         id: "clusterNode",
@@ -96,7 +96,7 @@ export const nodeCategories = [
         id: "spatialNode",
         label: "Spatial Query",
         icon: <Layers className="h-4 w-4 mr-2" />,
-        status: "working",
+        status: "wip",
       },
     ],
   },
