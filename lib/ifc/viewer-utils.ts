@@ -11,6 +11,12 @@ export interface ViewerOptions {
   highlightColor?: string;
 }
 
+// Event types for viewer lifecycle
+export interface ViewerEvents {
+  modelLoaded: { modelName: string; elementCount: number };
+  modelCleared: {};
+}
+
 // The main viewer class that handles 3D rendering
 export class IfcViewer {
   private scene: THREE.Scene;
@@ -26,6 +32,14 @@ export class IfcViewer {
   private animationFrameId: number | null = null;
   // Material cache
   private materials: Record<string, THREE.Material> = {};
+
+  // Geometry indexing for real-time access
+  private expressIdToMeshes: Map<number, THREE.Mesh[]> = new Map();
+  private meshToExpressId: Map<THREE.Mesh, number> = new Map();
+  private originalMaterials: Map<THREE.Mesh, THREE.Material> = new Map();
+
+  // Event callbacks
+  private eventCallbacks: Partial<Record<keyof ViewerEvents, (data: any) => void>> = {};
 
   constructor(
     private container: HTMLElement,
@@ -152,8 +166,20 @@ export class IfcViewer {
           if (geometryHandle) {
             const threeMesh = this.createThreeMesh(geometryHandle, placedGeometry);
             if (threeMesh) {
-              // Associate the mesh with the original product ID if needed for picking/highlighting later
-              // threeMesh.userData = { expressID: flatMesh.expressID };
+              // Associate the mesh with the original product ID for indexing
+              const expressId = flatMesh.expressID;
+              threeMesh.userData = { expressID: expressId };
+
+              // Build the geometry index
+              if (!this.expressIdToMeshes.has(expressId)) {
+                this.expressIdToMeshes.set(expressId, []);
+              }
+              this.expressIdToMeshes.get(expressId)!.push(threeMesh);
+              this.meshToExpressId.set(threeMesh, expressId);
+
+              // Store original material for restoration
+              this.originalMaterials.set(threeMesh, threeMesh.material as THREE.Material);
+
               this.ifcModelGroup.add(threeMesh);
             }
             geometryHandle.delete(); // Clean up geometry handle
@@ -172,6 +198,13 @@ export class IfcViewer {
       if (this.ifcModelGroup.children.length > 0) {
         this.scene.add(this.ifcModelGroup);
         console.log(`IFC model group with ${this.ifcModelGroup.children.length} meshes added to scene.`);
+        console.log(`Indexed ${this.expressIdToMeshes.size} unique elements with geometry.`);
+
+        // Emit model loaded event
+        this.emitEvent('modelLoaded', {
+          modelName: file.name,
+          elementCount: this.expressIdToMeshes.size
+        });
       } else {
         console.warn("No valid meshes were generated from the IFC geometry data.");
         this.ifcModelGroup = null;
@@ -431,7 +464,15 @@ export class IfcViewer {
   // Clear the scene
   clear(): void {
     console.log("Clearing viewer scene...");
-    // Dispose materials first
+
+    // Dispose cloned materials first
+    this.originalMaterials.forEach((originalMaterial, mesh) => {
+      if (mesh.userData.hasCustomMaterial && mesh.material && 'dispose' in mesh.material) {
+        (mesh.material as THREE.Material).dispose();
+      }
+    });
+
+    // Dispose cached materials
     Object.values(this.materials).forEach(material => material.dispose());
     this.materials = {};
 
@@ -449,6 +490,11 @@ export class IfcViewer {
       this.ifcModelGroup = null; // Set to null after disposal
     }
 
+    // Clear geometry indexes
+    this.expressIdToMeshes.clear();
+    this.meshToExpressId.clear();
+    this.originalMaterials.clear();
+
     // Close the model in web-ifc API if it's open and we have an instance
     // Use a local check for ifcAPI as it might be null if constructor failed
     const localIfcApi = this.ifcAPI;
@@ -463,6 +509,10 @@ export class IfcViewer {
     this.modelID = null; // Always reset modelID
 
     this.selectedElements.clear(); // Clear selection set
+
+    // Emit cleared event
+    this.emitEvent('modelCleared', {});
+
     console.log("Viewer scene cleared.");
   }
 
@@ -496,5 +546,356 @@ export class IfcViewer {
   // Public method to resize the viewer
   resize(): void {
     this.handleResize();
+  }
+
+  // === PUBLIC GEOMETRY ACCESS APIs ===
+
+  /**
+   * Get the main model group containing all meshes
+   */
+  getModelGroup(): THREE.Group | null {
+    return this.ifcModelGroup;
+  }
+
+  /**
+   * Get all meshes for a specific IFC element by expressId
+   */
+  getMeshesForElement(expressId: number): THREE.Mesh[] {
+    return this.expressIdToMeshes.get(expressId) || [];
+  }
+
+  /**
+   * Get the world matrix for an element (uses first mesh if multiple)
+   */
+  getWorldMatrixForElement(expressId: number): THREE.Matrix4 | null {
+    const meshes = this.getMeshesForElement(expressId);
+    if (meshes.length === 0) return null;
+
+    const matrix = new THREE.Matrix4();
+    meshes[0].updateMatrixWorld(true);
+    matrix.copy(meshes[0].matrixWorld);
+    return matrix;
+  }
+
+  /**
+   * Get the world-space bounding box for an element
+   */
+  getBoundingBoxForElement(expressId: number): THREE.Box3 | null {
+    const meshes = this.getMeshesForElement(expressId);
+    if (meshes.length === 0) return null;
+
+    const box = new THREE.Box3();
+    meshes.forEach(mesh => {
+      mesh.updateMatrixWorld(true);
+      const meshBox = new THREE.Box3().setFromObject(mesh);
+      box.union(meshBox);
+    });
+
+    return box.isEmpty() ? null : box;
+  }
+
+  /**
+   * Hide elements by expressId
+   */
+  hide(expressIds: number[]): void {
+    expressIds.forEach(expressId => {
+      const meshes = this.getMeshesForElement(expressId);
+      meshes.forEach(mesh => {
+        mesh.visible = false;
+      });
+    });
+  }
+
+  /**
+   * Show elements by expressId
+   */
+  show(expressIds: number[]): void {
+    expressIds.forEach(expressId => {
+      const meshes = this.getMeshesForElement(expressId);
+      meshes.forEach(mesh => {
+        mesh.visible = true;
+      });
+    });
+  }
+
+  /**
+   * Isolate elements (hide all others)
+   */
+  isolate(expressIds: number[]): void {
+    const isolateSet = new Set(expressIds);
+
+    // Hide all elements not in the isolate set
+    this.expressIdToMeshes.forEach((meshes, expressId) => {
+      const shouldShow = isolateSet.has(expressId);
+      meshes.forEach(mesh => {
+        mesh.visible = shouldShow;
+      });
+    });
+  }
+
+  /**
+   * Show all elements
+   */
+  showAll(): void {
+    this.expressIdToMeshes.forEach(meshes => {
+      meshes.forEach(mesh => {
+        mesh.visible = true;
+      });
+    });
+  }
+
+  /**
+   * Set color for specific elements
+   */
+  setColor(expressIds: number[], color: THREE.ColorRepresentation): void {
+    const threeColor = new THREE.Color(color);
+
+    expressIds.forEach(expressId => {
+      const meshes = this.getMeshesForElement(expressId);
+      meshes.forEach(mesh => {
+        // Clone material if it's shared to avoid affecting other elements
+        if (mesh.material && 'color' in mesh.material) {
+          const material = mesh.material as THREE.MeshLambertMaterial;
+          if (!mesh.userData.hasCustomMaterial) {
+            mesh.material = material.clone();
+            mesh.userData.hasCustomMaterial = true;
+          }
+          (mesh.material as THREE.MeshLambertMaterial).color.copy(threeColor);
+        }
+      });
+    });
+  }
+
+  /**
+   * Reset colors to original materials
+   */
+  resetColors(expressIds?: number[]): void {
+    const targetIds = expressIds || Array.from(this.expressIdToMeshes.keys());
+
+    targetIds.forEach(expressId => {
+      const meshes = this.getMeshesForElement(expressId);
+      meshes.forEach(mesh => {
+        const originalMaterial = this.originalMaterials.get(mesh);
+        if (originalMaterial && mesh.userData.hasCustomMaterial) {
+          // Dispose the cloned material
+          if (mesh.material && 'dispose' in mesh.material) {
+            (mesh.material as THREE.Material).dispose();
+          }
+          mesh.material = originalMaterial;
+          mesh.userData.hasCustomMaterial = false;
+        }
+      });
+    });
+  }
+
+  // Store original positions for spatial clustering
+  private originalPositions: Map<THREE.Mesh, THREE.Vector3> | null = null;
+
+  /**
+   * Apply spatial clustering - move elements to separate positions
+   */
+  applySpatialClustering(clusters: Array<{
+    key: string;
+    displayName: string;
+    elementIds: number[];
+    color: string;
+    position: { x: number; y: number; z: number };
+  }>): void {
+    console.log('Applying spatial clustering to viewer');
+
+    // Store original positions if not already stored
+    if (!this.originalPositions) {
+      this.originalPositions = new Map();
+      this.expressIdToMeshes.forEach((meshes, expressId) => {
+        meshes.forEach(mesh => {
+          this.originalPositions!.set(mesh, mesh.position.clone());
+        });
+      });
+    }
+
+    // Hide all meshes that are NOT part of any cluster to avoid confusion
+    const clusteredElementIds = new Set<number>();
+    clusters.forEach(cluster => {
+      cluster.elementIds.forEach(id => clusteredElementIds.add(id));
+    });
+
+    // Hide non-clustered elements
+    this.expressIdToMeshes.forEach((meshes, expressId) => {
+      if (!clusteredElementIds.has(expressId)) {
+        meshes.forEach(mesh => {
+          mesh.visible = false;
+        });
+      }
+    });
+
+    clusters.forEach(cluster => {
+      console.log(`Arranging cluster "${cluster.displayName}" in grid at position:`, cluster.position);
+
+      // Group meshes by element ID to keep elements together
+      const elementMeshGroups = new Map<number, THREE.Mesh[]>();
+      cluster.elementIds.forEach(expressId => {
+        const meshes = this.getMeshesForElement(expressId);
+        if (meshes.length > 0) {
+          elementMeshGroups.set(expressId, meshes);
+        }
+      });
+
+      if (elementMeshGroups.size === 0) {
+        console.warn(`No meshes found for cluster "${cluster.displayName}" with ${cluster.elementIds.length} element IDs`);
+        return;
+      }
+
+      console.log(`Found ${elementMeshGroups.size} elements with meshes for cluster "${cluster.displayName}"`);
+
+      // Calculate grid layout for elements in this cluster
+      const elementCount = elementMeshGroups.size;
+      const gridSize = Math.ceil(Math.sqrt(elementCount));
+      const elementSpacing = 8; // Reduced space between individual elements for tighter grids
+
+      // Calculate cluster base position
+      const clusterBaseX = cluster.position.x;
+      const clusterBaseZ = cluster.position.z;
+
+      // Arrange elements in a grid within this cluster
+      let elementIndex = 0;
+      elementMeshGroups.forEach((meshes, expressId) => {
+        // Calculate grid position for this element
+        const row = Math.floor(elementIndex / gridSize);
+        const col = elementIndex % gridSize;
+
+        // Center the grid around the cluster position
+        const gridOffsetX = (gridSize - 1) * elementSpacing * 0.5;
+        const gridOffsetZ = (gridSize - 1) * elementSpacing * 0.5;
+
+        const elementTargetX = clusterBaseX + (col * elementSpacing) - gridOffsetX;
+        const elementTargetZ = clusterBaseZ + (row * elementSpacing) - gridOffsetZ;
+        const elementTargetY = 0; // Ground level
+
+        // Calculate the center of all meshes for this element
+        const elementCenter = new THREE.Vector3();
+        meshes.forEach(mesh => {
+          elementCenter.add(mesh.position);
+        });
+        elementCenter.divideScalar(meshes.length);
+
+        // Calculate offset to move element to target position
+        const targetPosition = new THREE.Vector3(elementTargetX, elementTargetY, elementTargetZ);
+        const offset = targetPosition.sub(elementCenter);
+
+        // Move all meshes for this element
+        meshes.forEach((mesh, meshIndex) => {
+          const oldPosition = mesh.position.clone();
+          mesh.position.add(offset);
+
+          // Update the matrix to ensure the position change is applied
+          mesh.updateMatrix();
+          mesh.updateMatrixWorld(true);
+
+          // Debug: Log position change for first few elements
+          if (elementIndex < 3 && meshIndex < 2) {
+            console.log(`Element ${elementIndex}, Mesh ${meshIndex} moved from`, oldPosition, 'to', mesh.position.clone());
+          }
+
+          // Apply cluster color
+          if (mesh.material && 'color' in mesh.material) {
+            const material = mesh.material as THREE.MeshLambertMaterial;
+            if (!mesh.userData.hasCustomMaterial) {
+              mesh.material = material.clone();
+              mesh.userData.hasCustomMaterial = true;
+            }
+            (mesh.material as THREE.MeshLambertMaterial).color.setHex(parseInt(cluster.color.replace('#', ''), 16));
+          }
+        });
+
+        elementIndex++;
+      });
+
+      console.log(`Arranged ${elementCount} elements in ${gridSize}x${gridSize} grid for cluster "${cluster.displayName}"`);
+    });
+
+    // Force a render to show the changes
+    this.render();
+
+    console.log('Spatial clustering applied successfully');
+  }
+
+  /**
+   * Reset spatial clustering - restore original positions
+   */
+  resetSpatialClustering(): void {
+    console.log('Resetting spatial clustering');
+
+    if (this.originalPositions) {
+      this.originalPositions.forEach((originalPos, mesh) => {
+        mesh.position.copy(originalPos);
+        mesh.visible = true; // Restore visibility
+      });
+    }
+
+    // Also reset colors
+    this.resetColors();
+
+    // Force a render to show the changes
+    this.render();
+  }
+
+  /**
+   * Apply transformation to elements
+   */
+  applyTransform(
+    expressIds: number[],
+    transform: {
+      translation?: [number, number, number];
+      rotation?: [number, number, number];
+      scale?: [number, number, number];
+    }
+  ): void {
+    const { translation = [0, 0, 0], rotation = [0, 0, 0], scale = [1, 1, 1] } = transform;
+
+    expressIds.forEach(expressId => {
+      const meshes = this.getMeshesForElement(expressId);
+      meshes.forEach(mesh => {
+        // Apply transformation
+        mesh.position.add(new THREE.Vector3(...translation));
+        mesh.rotation.x += rotation[0] * Math.PI / 180;
+        mesh.rotation.y += rotation[1] * Math.PI / 180;
+        mesh.rotation.z += rotation[2] * Math.PI / 180;
+        mesh.scale.multiply(new THREE.Vector3(...scale));
+
+        mesh.updateMatrix();
+        mesh.updateMatrixWorld(true);
+      });
+    });
+  }
+
+  /**
+   * Get all indexed element IDs
+   */
+  getIndexedElementIds(): number[] {
+    return Array.from(this.expressIdToMeshes.keys());
+  }
+
+  /**
+   * Get element count
+   */
+  getElementCount(): number {
+    return this.expressIdToMeshes.size;
+  }
+
+  /**
+   * Register event callback
+   */
+  on<K extends keyof ViewerEvents>(event: K, callback: (data: ViewerEvents[K]) => void): void {
+    this.eventCallbacks[event] = callback;
+  }
+
+  /**
+   * Emit event to registered callbacks
+   */
+  private emitEvent<K extends keyof ViewerEvents>(event: K, data: ViewerEvents[K]): void {
+    const callback = this.eventCallbacks[event];
+    if (callback) {
+      callback(data);
+    }
   }
 }

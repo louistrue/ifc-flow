@@ -15,6 +15,7 @@ import { WatchNode } from "./watch-node"
 import { ParameterNode } from "./parameter-node"
 import { PythonNode } from "./python-node"
 import { DataTransformNode } from "./data-transform-node"
+import { ClusterNode } from "./cluster-node"
 
 // Define custom node types as a constant to prevent React Flow warning
 export const nodeTypes: NodeTypes = {
@@ -34,6 +35,7 @@ export const nodeTypes: NodeTypes = {
   parameterNode: ParameterNode,
   pythonNode: PythonNode,
   dataTransformNode: DataTransformNode,
+  clusterNode: ClusterNode,
 } as const
 
 export {
@@ -53,5 +55,6 @@ export {
   WatchNode,
   ParameterNode,
   PythonNode,
+  ClusterNode,
 }
 

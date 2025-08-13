@@ -12,6 +12,7 @@ import type { IfcModel } from "@/lib/ifc/ifc-loader";
 import type { NodeStatus } from "@/components/node-status-badge";
 import { NodeLoadingIndicator } from "./node-loading-indicator";
 import { GeometryNodeData as BaseGeometryNodeData } from "./node-types";
+import { hasActiveModel } from "@/lib/ifc/viewer-manager";
 
 interface GeometryNodeProgress {
   percentage: number;
@@ -26,6 +27,8 @@ interface ExtendedGeometryNodeData extends BaseGeometryNodeData {
   isLoading?: boolean;
   progress?: GeometryNodeProgress | null;
   error?: string | null;
+  hasRealGeometry?: boolean;
+  viewerElementCount?: number;
 }
 
 export const GeometryNode = memo(
@@ -34,6 +37,8 @@ export const GeometryNode = memo(
     const isLoading = data?.isLoading || false;
     const progress = data?.progress;
     const error = data?.error;
+    const hasRealGeometry = data?.hasRealGeometry || false;
+    const viewerElementCount = data?.viewerElementCount || 0;
 
     return (
       <div className="bg-white dark:bg-gray-800 border-2 border-green-500 dark:border-green-400 rounded-md w-48 shadow-md">
@@ -75,21 +80,27 @@ export const GeometryNode = memo(
               </span>
             </div>
             <div className="flex justify-between items-center">
-              <span>Use Actual Geometry:</span>
+              <span>Geometry Source:</span>
               <span className="font-medium">
-                {data.properties?.useActualGeometry ? "On" : "Off"}
+                {hasRealGeometry ? "Three.js Meshes" : "IFC Data Only"}
               </span>
             </div>
             {data.elements && (
               <div className="flex justify-between mt-1 pt-1 border-t border-gray-200">
-                <span>Extracted Elements:</span>
+                <span>Filtered Elements:</span>
                 <span className="font-medium">{data.elements.length}</span>
               </div>
             )}
-            {data.properties?.useActualGeometry && (
+            {hasRealGeometry && viewerElementCount > 0 && (
+              <div className="flex justify-between mt-1 text-xs text-green-600">
+                <span>Viewer Elements:</span>
+                <span className="font-medium">{viewerElementCount}</span>
+              </div>
+            )}
+            {!hasRealGeometry && hasActiveModel() && (
               <div className="flex justify-between mt-1 text-xs text-amber-600">
-                <span>Using simplified geometry</span>
-                <span>(cuboid approximation)</span>
+                <span>Viewer available</span>
+                <span>(enable real geometry)</span>
               </div>
             )}
           </div>

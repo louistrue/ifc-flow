@@ -16,6 +16,9 @@ import {
   runPythonScript,
 } from "@/lib/ifc-utils";
 import { performAnalysis } from "@/lib/ifc/analysis-utils";
+import { withActiveViewer, hasActiveModel } from "@/lib/ifc/viewer-manager";
+import * as THREE from "three";
+import { buildClusters, buildClustersFromElements, applyClusterColors, ClusterConfig, getClusterStats } from "@/lib/ifc/cluster-utils";
 
 // Add TypeScript interfaces at the top of the file
 interface PropertyInfo {
@@ -282,25 +285,54 @@ export class WorkflowExecutor {
         break;
 
       case "geometryNode":
-        // Check if we should use actual geometry OR if there's a downstream GLB export
+        // Check if we should use actual geometry OR if there's a downstream GLB export OR viewer
         const hasDownstreamGLB = this.hasDownstreamGLBExport(nodeId);
-        const needsActualGeometry = node.data.properties?.useActualGeometry || hasDownstreamGLB;
+        const hasDownstreamViewer = this.hasDownstreamViewer(nodeId);
+        const needsActualGeometry = node.data.properties?.useActualGeometry || hasDownstreamGLB || hasDownstreamViewer;
+        const hasViewerModel = hasActiveModel();
 
-        if (needsActualGeometry) {
+        // Update node with real-time viewer status
+        let viewerElementCount = 0;
+        if (hasViewerModel) {
+          viewerElementCount = withActiveViewer(viewer => viewer.getElementCount()) || 0;
+        }
+
+        this.updateNodeDataInList(nodeId, {
+          ...node.data,
+          hasRealGeometry: needsActualGeometry && hasViewerModel,
+          viewerElementCount
+        });
+
+        if (needsActualGeometry && hasViewerModel) {
           // Log why we're using actual geometry
           if (hasDownstreamGLB && !node.data.properties?.useActualGeometry) {
             console.log(`Automatically enabling geometry extraction for GLB export downstream from node ${nodeId}`);
           }
+          if (hasDownstreamViewer && !node.data.properties?.useActualGeometry && !hasDownstreamGLB) {
+            console.log(`Automatically enabling geometry extraction for viewer downstream from node ${nodeId}`);
+          }
 
-          // Use the full geometry extraction with web worker
+          // Use viewer-backed geometry processing
+          result = await this.executeGeometryNodeWithViewer(node, inputValues);
+        } else if (needsActualGeometry && !hasViewerModel) {
+          // Fallback to worker-based geometry extraction
+          console.log(`No active viewer model, falling back to worker-based geometry extraction for node ${nodeId}`);
           result = await this.executeGeometryNode(node);
         } else {
-          // Use the simple extraction method
+          // Use the simple extraction method (IFC data only)
           result = extractGeometry(
             inputValues.input,
             node.data.properties?.elementType || "all",
             node.data.properties?.includeOpenings !== "false"
           );
+
+          // Mark elements as having no real geometry
+          if (Array.isArray(result)) {
+            result = result.map(element => ({
+              ...element,
+              hasRealGeometry: false
+            }));
+          }
         }
         break;
 
@@ -329,24 +361,38 @@ export class WorkflowExecutor {
           console.warn(`No input provided to transform node ${nodeId}`);
           result = [];
         } else {
-          result = transformElements(
-            inputValues.input,
-            [
-              Number.parseFloat(node.data.properties?.translateX || 0),
-              Number.parseFloat(node.data.properties?.translateY || 0),
-              Number.parseFloat(node.data.properties?.translateZ || 0),
-            ],
-            [
-              Number.parseFloat(node.data.properties?.rotateX || 0),
-              Number.parseFloat(node.data.properties?.rotateY || 0),
-              Number.parseFloat(node.data.properties?.rotateZ || 0),
-            ],
-            [
-              Number.parseFloat(node.data.properties?.scaleX || 1),
-              Number.parseFloat(node.data.properties?.scaleY || 1),
-              Number.parseFloat(node.data.properties?.scaleZ || 1),
-            ]
-          );
+          const translation: [number, number, number] = [
+            Number.parseFloat(node.data.properties?.translateX || 0),
+            Number.parseFloat(node.data.properties?.translateY || 0),
+            Number.parseFloat(node.data.properties?.translateZ || 0),
+          ];
+          const rotation: [number, number, number] = [
+            Number.parseFloat(node.data.properties?.rotateX || 0),
+            Number.parseFloat(node.data.properties?.rotateY || 0),
+            Number.parseFloat(node.data.properties?.rotateZ || 0),
+          ];
+          const scale: [number, number, number] = [
+            Number.parseFloat(node.data.properties?.scaleX || 1),
+            Number.parseFloat(node.data.properties?.scaleY || 1),
+            Number.parseFloat(node.data.properties?.scaleZ || 1),
+          ];
+
+          // Check if we have elements with real geometry that can be transformed in viewer
+          const elements = Array.isArray(inputValues.input) ? inputValues.input : inputValues.input.elements || [];
+          const elementsWithRealGeometry = elements.filter((el: any) => el.hasRealGeometry);
+
+          if (elementsWithRealGeometry.length > 0 && hasActiveModel()) {
+            console.log(`Applying real-time transformation to ${elementsWithRealGeometry.length} elements in viewer`);
+
+            // Apply transformation in viewer for elements with real geometry
+            const expressIds = elementsWithRealGeometry.map((el: any) => el.expressId);
+            withActiveViewer(viewer => {
+              viewer.applyTransform(expressIds, { translation, rotation, scale });
+            });
+          }
+
+          // Always update the element metadata (for downstream nodes and exports)
+          result = transformElements(inputValues.input, translation, rotation, scale);
         }
         break;
 
@@ -1006,6 +1052,85 @@ export class WorkflowExecutor {
         result = node.data.properties?.value || "";
         break;
 
+      case "clusterNode":
+        // Clustering
+        console.log("Processing clusterNode", { node, inputValues });
+
+        if (!inputValues.input) {
+          console.warn(`No input provided to cluster node ${nodeId}`);
+          result = {
+            clusters: [],
+            totalElements: 0,
+            error: "No input data"
+          };
+        } else {
+          const elements = Array.isArray(inputValues.input) ? inputValues.input : inputValues.input.elements || [];
+          const groupBy = node.data.properties?.groupBy || 'type';
+          const property = node.data.properties?.property;
+          const pset = node.data.properties?.pset;
+
+          try {
+            const config: ClusterConfig = {
+              groupBy: groupBy as 'type' | 'level' | 'material' | 'property',
+              property,
+              pset
+            };
+
+            // Build clusters without requiring an active viewer
+            const clusterResult = buildClustersFromElements(elements, config);
+
+            if (clusterResult) {
+              // Pass through the original file reference for downstream nodes (like viewer)
+              // Need to trace back to find the original model with file reference
+              let originalFile = null;
+
+              // Check if input has file directly
+              if (inputValues.input?.file) {
+                originalFile = inputValues.input.file;
+              }
+              // Check if we need to trace back through the workflow to find the original model
+              else {
+                // Find the IFC node that started this chain
+                const ifcNodeId = this.findUpstreamIfcNode(nodeId);
+                if (ifcNodeId) {
+                  const ifcResult = this.nodeResults.get(ifcNodeId);
+                  if (ifcResult?.file) {
+                    originalFile = ifcResult.file;
+                  }
+                }
+              }
+
+              result = {
+                clusters: clusterResult.clusters,
+                config,
+                stats: clusterResult.stats,
+                totalElements: elements.length,
+                elements: elements, // Pass through elements for downstream processing
+                file: originalFile  // Pass through file reference for viewer nodes
+              };
+
+              // Store in node data for UI access
+              node.data.clusterResult = result;
+
+              console.log(`Clustering completed: ${clusterResult.clusters.length} clusters from ${elements.length} elements`);
+            } else {
+              result = {
+                clusters: [],
+                totalElements: elements.length,
+                error: "Failed to create clusters"
+              };
+            }
+          } catch (error) {
+            console.error(`Error during clustering for node ${nodeId}:`, error);
+            result = {
+              clusters: [],
+              totalElements: elements.length,
+              error: error instanceof Error ? error.message : String(error)
+            };
+          }
+        }
+        break;
+
       case "dataTransformNode":
         // Data Transform
         // console.log("Processing dataTransformNode", { node, inputValues });
@@ -1070,6 +1195,15 @@ export class WorkflowExecutor {
           result = null;
           break;
         }
+
+        // Debug: Log what the viewer node is receiving
+        console.log("ViewerNode received input:", {
+          hasFile: !!inputValues.input.file,
+          fileType: inputValues.input.file ? typeof inputValues.input.file : 'undefined',
+          isFileInstance: inputValues.input.file instanceof File,
+          fileName: inputValues.input.file?.name,
+          inputKeys: Object.keys(inputValues.input || {})
+        });
 
         // Store input data in the node for rendering
         node.data.inputData = inputValues.input;
@@ -1172,6 +1306,63 @@ export class WorkflowExecutor {
     if (this.onNodeUpdate) {
       this.onNodeUpdate(nodeId, newData);
     }
+  }
+
+  // Execute geometry node with viewer-backed real geometry
+  private async executeGeometryNodeWithViewer(node: any, inputValues: any): Promise<any> {
+    const nodeId = node.id;
+    console.log(`Executing geometry node with viewer-backed geometry for ${nodeId}`);
+
+    if (!inputValues.input) {
+      throw new Error(`No input provided to geometry node ${nodeId}`);
+    }
+
+    const model = inputValues.input;
+    if (!model || !model.elements) {
+      throw new Error(`Input to geometry node ${nodeId} is not a valid IFC model`);
+    }
+
+    const elementType = node.data.properties?.elementType || "all";
+    const includeOpenings = node.data.properties?.includeOpenings !== "false";
+
+    // Filter elements by type first (same as standard extraction)
+    let filteredElements = extractGeometry(model, elementType, includeOpenings);
+
+    // Get viewer element count and validate against viewer
+    const viewerElementCount = withActiveViewer(viewer => viewer.getElementCount()) || 0;
+    const indexedElementIds = withActiveViewer(viewer => viewer.getIndexedElementIds()) || [];
+
+    console.log(`Geometry node: ${filteredElements.length} filtered elements, ${viewerElementCount} viewer elements`);
+
+    // Mark elements with real geometry availability
+    const result = filteredElements.map(element => {
+      const hasViewerMesh = indexedElementIds.includes(element.expressId);
+      return {
+        ...element,
+        hasRealGeometry: hasViewerMesh,
+        // Add bounding box info if available in viewer
+        boundingBox: hasViewerMesh ?
+          withActiveViewer(viewer => {
+            const bbox = viewer.getBoundingBoxForElement(element.expressId);
+            return bbox ? {
+              min: bbox.min.toArray(),
+              max: bbox.max.toArray(),
+              size: bbox.getSize(new THREE.Vector3()).toArray()
+            } : null;
+          }) : null
+      };
+    });
+
+    // Update node with final results
+    this.updateNodeDataInList(nodeId, {
+      ...node.data,
+      elements: result,
+      hasRealGeometry: true,
+      viewerElementCount
+    });
+
+    console.log(`Geometry node completed: ${result.length} elements with real geometry flags`);
+    return result;
   }
 
   // Execute geometry node with actual geometry extraction
@@ -1300,6 +1491,70 @@ export class WorkflowExecutor {
     };
 
     return checkDownstream(nodeId);
+  }
+
+  private hasDownstreamViewer(nodeId: string): boolean {
+    const visited = new Set<string>();
+
+    const checkDownstream = (currentNodeId: string): boolean => {
+      if (visited.has(currentNodeId)) return false;
+      visited.add(currentNodeId);
+
+      // Find all edges that start from this node
+      const outgoingEdges = this.edges.filter(edge => edge.source === currentNodeId);
+
+      for (const edge of outgoingEdges) {
+        const targetNode = this.nodes.find(n => n.id === edge.target);
+        if (!targetNode) continue;
+
+        // Check if this target node is a viewer node
+        if (targetNode.type === "viewerNode") {
+          console.log(`Found downstream viewer from geometry node ${nodeId}`);
+          return true;
+        }
+
+        // Recursively check downstream nodes
+        if (checkDownstream(edge.target)) {
+          return true;
+        }
+      }
+
+      return false;
+    };
+
+    return checkDownstream(nodeId);
+  }
+
+  private findUpstreamIfcNode(nodeId: string): string | null {
+    const visited = new Set<string>();
+
+    const checkUpstream = (currentNodeId: string): string | null => {
+      if (visited.has(currentNodeId)) return null;
+      visited.add(currentNodeId);
+
+      // Find all edges that end at this node
+      const incomingEdges = this.edges.filter(edge => edge.target === currentNodeId);
+
+      for (const edge of incomingEdges) {
+        const sourceNode = this.nodes.find(n => n.id === edge.source);
+        if (!sourceNode) continue;
+
+        // Check if this source node is an IFC node
+        if (sourceNode.type === "ifcNode") {
+          return sourceNode.id;
+        }
+
+        // Recursively check upstream nodes
+        const upstreamIfc = checkUpstream(edge.source);
+        if (upstreamIfc) {
+          return upstreamIfc;
+        }
+      }
+
+      return null;
+    };
+
+    return checkUpstream(nodeId);
   }
 
   // Helper method to check if input data has geometry

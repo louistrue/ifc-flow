@@ -1,39 +1,135 @@
 import type { IfcElement } from "@/lib/ifc/ifc-loader"
+import { withActiveViewer, hasActiveModel } from "./viewer-manager";
+import * as THREE from "three";
 
-// Spatial query functions
+// Spatial query functions with real geometry support
 export function spatialQuery(
   elements: IfcElement[],
   referenceElements: IfcElement[],
   queryType = "contained",
   distance = 1.0,
 ): IfcElement[] {
-  console.log("Spatial query:", queryType, distance)
+  console.log("Spatial query:", queryType, distance);
 
-  // Mock implementation - in reality would use geometry calculations
+  if (!elements || elements.length === 0) {
+    console.warn("No elements for spatial query");
+    return [];
+  }
+
+  if (!referenceElements || referenceElements.length === 0) {
+    console.warn("No reference elements for spatial query");
+    return [];
+  }
+
+  // Use real geometry if available, otherwise fallback to mock logic
+  if (hasActiveModel()) {
+    return spatialQueryWithViewer(elements, referenceElements, queryType, distance);
+  } else {
+    console.warn("No active viewer model, using fallback spatial query logic");
+    return spatialQueryFallback(elements, referenceElements, queryType, distance);
+  }
+}
+
+/**
+ * Spatial query using real Three.js geometry from viewer
+ */
+function spatialQueryWithViewer(
+  elements: IfcElement[],
+  referenceElements: IfcElement[],
+  queryType: string,
+  distance: number
+): IfcElement[] {
+  return withActiveViewer(viewer => {
+    console.log(`Performing spatial query with real geometry: ${queryType}`);
+    
+    // Get bounding boxes for reference elements
+    const referenceBounds: THREE.Box3[] = [];
+    referenceElements.forEach(refElement => {
+      const bbox = viewer.getBoundingBoxForElement(refElement.expressId);
+      if (bbox) {
+        referenceBounds.push(bbox);
+      }
+    });
+
+    if (referenceBounds.length === 0) {
+      console.warn("No bounding boxes found for reference elements");
+      return [];
+    }
+
+    // Filter elements based on spatial relationship
+    return elements.filter(element => {
+      const elementBbox = viewer.getBoundingBoxForElement(element.expressId);
+      if (!elementBbox) {
+        return false; // Skip elements without geometry
+      }
+
+      return referenceBounds.some(refBbox => {
+        switch (queryType) {
+          case "contained":
+            // Element is contained within reference if its bbox is inside reference bbox
+            return refBbox.containsBox(elementBbox);
+
+          case "containing":
+            // Element contains reference if reference bbox is inside element bbox
+            return elementBbox.containsBox(refBbox);
+
+          case "intersecting":
+            // Element intersects reference if bboxes overlap
+            return elementBbox.intersectsBox(refBbox);
+
+          case "touching":
+            // Element touches reference if bboxes are adjacent (intersect but don't overlap)
+            const expanded = refBbox.clone().expandByScalar(0.01); // Small tolerance
+            return expanded.intersectsBox(elementBbox) && !refBbox.intersectsBox(elementBbox);
+
+          case "within-distance":
+            // Element is within distance if closest points are within threshold
+            const elementCenter = new THREE.Vector3();
+            const refCenter = new THREE.Vector3();
+            elementBbox.getCenter(elementCenter);
+            refBbox.getCenter(refCenter);
+            
+            const actualDistance = elementCenter.distanceTo(refCenter);
+            return actualDistance <= distance;
+
+          default:
+            console.warn(`Unknown spatial query type: ${queryType}`);
+            return false;
+        }
+      });
+    });
+  }) || [];
+}
+
+/**
+ * Fallback spatial query using mock logic (when no viewer available)
+ */
+function spatialQueryFallback(
+  elements: IfcElement[],
+  referenceElements: IfcElement[],
+  queryType: string,
+  distance: number
+): IfcElement[] {
+  // Original mock implementation for backwards compatibility
   switch (queryType) {
     case "contained":
-      // Mock: return 70% of elements
-      return elements.slice(0, Math.floor(elements.length * 0.7))
+      return elements.slice(0, Math.floor(elements.length * 0.7));
 
     case "containing":
-      // Mock: return 30% of elements
-      return elements.slice(0, Math.floor(elements.length * 0.3))
+      return elements.slice(0, Math.floor(elements.length * 0.3));
 
     case "intersecting":
-      // Mock: return 50% of elements
-      return elements.slice(0, Math.floor(elements.length * 0.5))
+      return elements.slice(0, Math.floor(elements.length * 0.5));
 
     case "touching":
-      // Mock: return 20% of elements
-      return elements.slice(0, Math.floor(elements.length * 0.2))
+      return elements.slice(0, Math.floor(elements.length * 0.2));
 
     case "within-distance":
-      // Mock: return elements based on distance parameter
-      const ratio = Math.min(1, distance / 5) // 0-5m maps to 0-100%
-      return elements.slice(0, Math.floor(elements.length * ratio))
+      const ratio = Math.min(1, distance / 5);
+      return elements.slice(0, Math.floor(elements.length * ratio));
 
     default:
-      return elements
+      return elements;
   }
 }
 

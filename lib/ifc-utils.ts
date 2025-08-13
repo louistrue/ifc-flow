@@ -1751,18 +1751,194 @@ export async function exportData(
       return excelBuffer;
     }
     case "glb": {
+      // Try to export from active viewer first (real geometry)
+      const { withActiveViewer, hasActiveModel } = await import('./ifc/viewer-manager');
+
+      if (hasActiveModel()) {
+        console.log("Exporting GLB from active viewer with real geometry");
+
+        const viewerResult = withActiveViewer(viewer => {
+          const modelGroup = viewer.getModelGroup();
+          if (!modelGroup) {
+            console.warn("No model group available in viewer for GLB export");
+            return null;
+          }
+
+          // Filter elements if we have a specific set to export
+          let elementsToExport: number[] = [];
+          if (Array.isArray(rows) && rows.length > 0 && rows[0].expressId !== undefined) {
+            elementsToExport = rows.map((el: any) => el.expressId).filter(id => id !== undefined);
+            console.log(`Exporting ${elementsToExport.length} specific elements to GLB`);
+          }
+
+          // Create a temporary scene for export
+          const exportScene = new Scene();
+
+          if (elementsToExport.length > 0) {
+            // Export specific elements
+            elementsToExport.forEach(expressId => {
+              const meshes = viewer.getMeshesForElement(expressId);
+              meshes.forEach(mesh => {
+                // Clone the mesh for export (to avoid modifying original)
+                const clonedMesh = mesh.clone();
+                clonedMesh.updateMatrixWorld(true);
+                exportScene.add(clonedMesh);
+              });
+            });
+          } else {
+            // Export entire model
+            console.log("Exporting entire model to GLB");
+            modelGroup.traverse(child => {
+              if (child instanceof Mesh) {
+                const clonedMesh = child.clone();
+                clonedMesh.updateMatrixWorld(true);
+                exportScene.add(clonedMesh);
+              }
+            });
+          }
+
+          return exportScene;
+        });
+
+        if (viewerResult) {
+          const exporter = new GLTFExporter();
+          const res = await exporter.parseAsync(viewerResult, { binary: true });
+
+          // Clean up temporary scene
+          viewerResult.traverse(child => {
+            if (child instanceof Mesh) {
+              child.geometry?.dispose();
+              if (Array.isArray(child.material)) {
+                child.material.forEach(mat => mat.dispose());
+              } else if (child.material) {
+                child.material.dispose();
+              }
+            }
+          });
+
+          if (res instanceof ArrayBuffer) {
+            return res;
+          }
+          return new TextEncoder().encode(JSON.stringify(res)).buffer as ArrayBuffer;
+        }
+      }
+
+      // Fallback to original method if no viewer available
+      console.log("No active viewer, falling back to element geometry data for GLB export");
       const scene = new Scene();
+      let validMeshCount = 0;
+
       rows.forEach((element: any) => {
         if (element.geometry && element.geometry.vertices) {
-          const geo = new BufferGeometry();
-          const verts = new Float32Array(element.geometry.vertices);
-          geo.setAttribute("position", new BufferAttribute(verts, 3));
-          const mesh = new Mesh(geo, new MeshStandardMaterial());
-          scene.add(mesh);
+          try {
+            // Validate geometry data structure
+            const vertices = element.geometry.vertices;
+            if (!Array.isArray(vertices) && !(vertices instanceof Float32Array)) {
+              console.warn("Invalid vertices data type for element", element.id);
+              return;
+            }
+
+            // Ensure vertices array length is divisible by 3
+            const vertArray = Array.isArray(vertices) ? new Float32Array(vertices) : vertices;
+            if (vertArray.length % 3 !== 0) {
+              console.warn(`Invalid vertices count (${vertArray.length}) for element ${element.id}, must be divisible by 3`);
+              return;
+            }
+
+            if (vertArray.length === 0) {
+              console.warn("Empty vertices array for element", element.id);
+              return;
+            }
+
+            const geo = new BufferGeometry();
+            geo.setAttribute("position", new BufferAttribute(vertArray, 3));
+
+            // Add normals if available, otherwise compute them
+            if (element.geometry.normals && element.geometry.normals.length === vertArray.length) {
+              const normalArray = Array.isArray(element.geometry.normals) ?
+                new Float32Array(element.geometry.normals) : element.geometry.normals;
+              geo.setAttribute("normal", new BufferAttribute(normalArray, 3));
+            } else {
+              geo.computeVertexNormals();
+            }
+
+            // Add indices if available
+            if (element.geometry.indices && element.geometry.indices.length > 0) {
+              const indexArray = Array.isArray(element.geometry.indices) ?
+                new Uint32Array(element.geometry.indices) : element.geometry.indices;
+              geo.setIndex(new BufferAttribute(indexArray, 1));
+            }
+
+            const material = new MeshStandardMaterial({
+              color: element.geometry.color || 0x888888,
+              metalness: 0.1,
+              roughness: 0.8
+            });
+
+            const mesh = new Mesh(geo, material);
+
+            // Apply transformation if available
+            if (element.transformedGeometry) {
+              const { translation = [0, 0, 0], rotation = [0, 0, 0], scale = [1, 1, 1] } = element.transformedGeometry;
+              mesh.position.set(...translation);
+              mesh.rotation.set(
+                rotation[0] * Math.PI / 180,
+                rotation[1] * Math.PI / 180,
+                rotation[2] * Math.PI / 180
+              );
+              mesh.scale.set(...scale);
+            }
+
+            scene.add(mesh);
+            validMeshCount++;
+          } catch (error) {
+            console.warn(`Failed to create mesh for element ${element.id}:`, error);
+          }
         }
       });
+
+      if (validMeshCount === 0) {
+        console.warn("No valid geometry found for GLB export, creating placeholder");
+        // Create a simple placeholder cube
+        const geo = new BufferGeometry();
+        const vertices = new Float32Array([
+          -1, -1, -1, 1, -1, -1, 1, 1, -1, -1, 1, -1, // front face
+          -1, -1, 1, 1, -1, 1, 1, 1, 1, -1, 1, 1, // back face
+        ]);
+        const indices = new Uint32Array([
+          0, 1, 2, 0, 2, 3,  // front
+          4, 6, 5, 4, 7, 6,  // back
+          0, 4, 7, 0, 7, 3,  // left
+          1, 5, 6, 1, 6, 2,  // right
+          3, 7, 6, 3, 6, 2,  // top
+          0, 1, 5, 0, 5, 4   // bottom
+        ]);
+
+        geo.setAttribute("position", new BufferAttribute(vertices, 3));
+        geo.setIndex(new BufferAttribute(indices, 1));
+        geo.computeVertexNormals();
+
+        const mesh = new Mesh(geo, new MeshStandardMaterial({ color: 0x888888 }));
+        scene.add(mesh);
+      }
+
+      console.log(`Created GLB scene with ${validMeshCount} valid meshes`);
+
       const exporter = new GLTFExporter();
       const res = await exporter.parseAsync(scene, { binary: true });
+
+      // Clean up scene
+      scene.traverse(child => {
+        if (child instanceof Mesh) {
+          child.geometry?.dispose();
+          if (Array.isArray(child.material)) {
+            child.material.forEach(mat => mat.dispose());
+          } else if (child.material) {
+            child.material.dispose();
+          }
+        }
+      });
+
       if (res instanceof ArrayBuffer) {
         return res;
       }

@@ -1034,6 +1034,60 @@ export function NodePropertyRenderer({
         />
       );
 
+    case "clusterNode":
+      return (
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium mb-2">Group By</label>
+            <select
+              value={properties?.groupBy || "type"}
+              onChange={(e) => setProperties({ ...properties, groupBy: e.target.value })}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="type">Element Type</option>
+              <option value="level">Building Level</option>
+              <option value="material">Material</option>
+              <option value="property">Custom Property</option>
+            </select>
+          </div>
+
+          {properties?.groupBy === "property" && (
+            <>
+              <div>
+                <label className="block text-sm font-medium mb-2">Property Name</label>
+                <input
+                  type="text"
+                  value={properties?.property || ""}
+                  onChange={(e) => setProperties({ ...properties, property: e.target.value })}
+                  placeholder="e.g., FireRating, LoadBearing"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-2">Property Set (Optional)</label>
+                <input
+                  type="text"
+                  value={properties?.pset || ""}
+                  onChange={(e) => setProperties({ ...properties, pset: e.target.value })}
+                  placeholder="e.g., Pset_WallCommon"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Leave empty to search all property sets
+                </p>
+              </div>
+            </>
+          )}
+
+          <div className="text-xs text-gray-600 bg-blue-50 p-3 rounded">
+            <p className="font-medium mb-1">Clustering Info:</p>
+            <p>• Groups elements by the selected criteria</p>
+            <p>• Applies colors and enables visibility control</p>
+            <p>• Requires an active 3D viewer with loaded model</p>
+          </div>
+        </div>
+      );
+
     default:
       return (
         <div className="text-center text-sm text-muted-foreground py-4">

@@ -11,6 +11,7 @@ import { CuboidIcon as Cube, Loader2, AlertCircle, CheckCircle, Focus, MousePoin
 import { IfcViewer } from "@/lib/ifc/viewer-utils";
 import { ViewerNodeData as BaseViewerNodeData } from "./node-types";
 import { useViewerFocus } from "@/components/contexts/viewer-focus-context";
+import { viewerManager } from "@/lib/ifc/viewer-manager";
 
 // Extend the base ViewerNodeData with additional properties
 interface ExtendedViewerNodeData extends BaseViewerNodeData {
@@ -47,22 +48,37 @@ export const ViewerNode = memo(
       }
     }, [id, isInFocusMode, elementCount, errorMessage, isLoading, setFocusedViewerId]);
 
-    // Keyboard event handling when in focus mode
+    // Enhanced keyboard and mouse event handling when in focus mode
     useEffect(() => {
       if (!isInFocusMode) return;
 
       const handleKeyDown = (e: KeyboardEvent) => {
         // Prevent canvas shortcuts when viewer is in focus
-        if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' ', 'PageUp', 'PageDown'].includes(e.key)) {
+        if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' ', 'PageUp', 'PageDown', 'Escape'].includes(e.key)) {
           e.stopPropagation();
+        }
+
+        // Exit focus mode on Escape key
+        if (e.key === 'Escape') {
+          setFocusedViewerId(null);
+        }
+      };
+
+      const handleMouseDown = (e: MouseEvent) => {
+        // If clicking outside the viewer area while in focus mode, exit focus mode
+        if (viewerRef.current && !viewerRef.current.contains(e.target as Node)) {
+          setFocusedViewerId(null);
         }
       };
 
       document.addEventListener('keydown', handleKeyDown, true);
+      document.addEventListener('mousedown', handleMouseDown, true);
+
       return () => {
         document.removeEventListener('keydown', handleKeyDown, true);
+        document.removeEventListener('mousedown', handleMouseDown, true);
       };
-    }, [isInFocusMode]);
+    }, [isInFocusMode, setFocusedViewerId]);
 
     // Handle window mouse events for resizing
     const startResize = useCallback(
@@ -116,15 +132,19 @@ export const ViewerNode = memo(
       // Create a new viewer instance
       const newViewer = new IfcViewer(viewerRef.current, {
         backgroundColor: "#f5f5f5",
-        showGrid: true,
-        showAxes: true,
+        showGrid: false,
+        showAxes: false,
       });
 
       setViewer(newViewer);
 
+      // Register with viewer manager
+      viewerManager.registerViewer(id, newViewer);
+
       // Clean up on unmount
       return () => {
         if (newViewer) {
+          viewerManager.unregisterViewer(id);
           newViewer.dispose();
         }
         setViewer(null);
@@ -139,10 +159,18 @@ export const ViewerNode = memo(
       }
     }, [width, height, viewer]);
 
-    // Handle input data changes - Expecting File object
+    // Handle input data changes - Can be File object or clustered data
     useEffect(() => {
-      console.log("ViewerNode: Input data effect triggered.", { hasViewer: !!viewer, inputData: data.inputData });
+      console.log("ViewerNode: Input data effect triggered.", {
+        hasViewer: !!viewer,
+        inputData: data.inputData,
+        hasClusters: !!data.inputData?.clusters,
+        clusterCount: data.inputData?.clusters?.length || 0
+      });
+
       const fileInput = data.inputData?.file;
+      const clusterData = data.inputData?.clusters;
+
       // Create an identifier for the potential new file (or null if no valid file)
       const inputFileIdentifier = fileInput instanceof File ? `${fileInput.name}_${fileInput.lastModified}_${fileInput.size}` : null;
 
@@ -198,6 +226,47 @@ export const ViewerNode = memo(
           setElementCount(1); // Indicate model loaded
           setLoadedFileIdentifier(newFileIdentifier); // Store identifier of the successfully loaded file
           setErrorMessage(null);
+
+          // Apply spatial clustering if we have cluster data with positions
+          if (clusterData && Array.isArray(clusterData)) {
+            console.log(`Applying spatial clustering to ${clusterData.length} clusters`);
+
+            // Check if clusters have position data for spatial clustering
+            const hasPositions = clusterData.some(cluster => cluster.position);
+
+            if (hasPositions) {
+              try {
+                viewer.applySpatialClustering(clusterData.filter(cluster =>
+                  cluster.elementIds && cluster.color && cluster.position
+                ));
+                console.log('Spatial clustering applied successfully - elements moved to separate piles');
+              } catch (error) {
+                console.warn('Failed to apply spatial clustering:', error);
+                // Fallback to color clustering
+                clusterData.forEach(cluster => {
+                  if (cluster.elementIds && cluster.color) {
+                    try {
+                      viewer.setColor(cluster.elementIds, cluster.color);
+                    } catch (colorError) {
+                      console.warn(`Failed to apply color to cluster "${cluster.displayName}":`, colorError);
+                    }
+                  }
+                });
+              }
+            } else {
+              // Fallback to color clustering if no position data
+              console.log('No position data found, applying color clustering instead');
+              clusterData.forEach(cluster => {
+                if (cluster.elementIds && cluster.color) {
+                  try {
+                    viewer.setColor(cluster.elementIds, cluster.color);
+                  } catch (error) {
+                    console.warn(`Failed to apply color to cluster "${cluster.displayName}":`, error);
+                  }
+                }
+              });
+            }
+          }
         })
         .catch(error => {
           console.error(`Error loading IFC (${file.name}) in viewer node:`, error);
@@ -210,8 +279,8 @@ export const ViewerNode = memo(
           setIsLoading(false); // Ensure loading is set to false
         });
 
-      // Depend on the file object identifier and the viewer instance
-    }, [data.inputData?.file, viewer, loadedFileIdentifier]); // Added loadedFileIdentifier to dependencies
+      // Depend on the file object identifier, cluster data, and the viewer instance
+    }, [data.inputData?.file, data.inputData?.clusters, viewer, loadedFileIdentifier]); // Added cluster data to dependencies
 
     // Used to determine if we should disable dragging - when resizing
     const nodeDraggable = !isResizing;
@@ -219,7 +288,7 @@ export const ViewerNode = memo(
     return (
       <div
         className={`bg-white dark:bg-gray-800 border-2 ${isInFocusMode
-          ? "border-cyan-400 dark:border-cyan-300 shadow-xl shadow-cyan-400/50 ring-4 ring-cyan-300/20"
+          ? "border-cyan-400 dark:border-cyan-300 shadow-2xl shadow-cyan-400/60 ring-4 ring-cyan-300/30"
           : selected
             ? "border-cyan-600 dark:border-cyan-400"
             : "border-cyan-500 dark:border-cyan-400"
@@ -228,7 +297,8 @@ export const ViewerNode = memo(
           width: `${width}px`,
           zIndex: isInFocusMode ? 1000 : 'auto',
           ...(isInFocusMode && {
-            filter: 'drop-shadow(0 0 12px rgba(34, 211, 238, 0.5)) drop-shadow(0 0 20px rgba(34, 211, 238, 0.2))', // Layered neon glow
+            filter: 'drop-shadow(0 0 16px rgba(34, 211, 238, 0.6)) drop-shadow(0 0 24px rgba(34, 211, 238, 0.3))', // Enhanced neon glow
+            transform: 'scale(1.02)', // Slight scale up for focus
           })
         }}
         data-id={id}
@@ -265,7 +335,27 @@ export const ViewerNode = memo(
               zIndex: isInFocusMode ? 50 : 'auto' // Ensure viewer is on top when in focus mode
             }}
             onDoubleClick={handleViewerDoubleClick}
-            // Minimal event handling - let Three.js controls work naturally
+            // Enhanced event handling for focus mode
+            onMouseDown={(e) => {
+              if (isInFocusMode) {
+                e.stopPropagation(); // Prevent ReactFlow drag when in focus mode
+              }
+            }}
+            onMouseMove={(e) => {
+              if (isInFocusMode) {
+                e.stopPropagation(); // Prevent ReactFlow interactions when in focus mode
+              }
+            }}
+            onMouseUp={(e) => {
+              if (isInFocusMode) {
+                e.stopPropagation(); // Prevent ReactFlow interactions when in focus mode
+              }
+            }}
+            onWheel={(e) => {
+              if (isInFocusMode) {
+                e.stopPropagation(); // Prevent ReactFlow zoom when in focus mode
+              }
+            }}
             onContextMenu={(e) => {
               if (isInFocusMode) {
                 e.stopPropagation(); // Prevent ReactFlow context menu
@@ -328,7 +418,7 @@ export const ViewerNode = memo(
             {/* Instructions for focus mode */}
             {isInFocusMode && (
               <div className="mt-1 text-[10px] text-blue-600 dark:text-blue-400 text-center">
-                Click canvas to exit 3D focus mode
+                Press ESC or click outside to exit 3D focus mode
               </div>
             )}
             {errorMessage && !isLoading && (
