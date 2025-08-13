@@ -13,6 +13,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { DataTransformEditor } from "./property-editors/data-transform-editor";
 
 interface NodePropertyRendererProps {
   node: any;
@@ -1023,6 +1024,14 @@ export function NodePropertyRenderer({
             </div>
           </div>
         </div>
+      );
+
+    case "dataTransformNode":
+      return (
+        <DataTransformEditor
+          properties={properties}
+          setProperties={setProperties}
+        />
       );
 
     default:

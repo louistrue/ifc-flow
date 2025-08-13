@@ -882,7 +882,8 @@ async function handleExportIfc(data) {
                         
                         # Only log first few modifications to reduce noise
                         if modified_count < 3:
-                            print(f"Modifying {element.is_a()} (GlobalId: {change.get('globalId', 'unknown')[:8]}...) - Setting {pset_name}.{prop_name} = {prop_value}")
+                            pass  # Reduced logging
+                            # print(f"Modifying {element.is_a()} (GlobalId: {change.get('globalId', 'unknown')[:8]}...) - Setting {pset_name}.{prop_name} = {prop_value}")
                         
                         # Wrap the entire property modification in a try-except block
                         try:
@@ -985,7 +986,8 @@ async function handleExportIfc(data) {
                                 # Create new property set
                                 try:
                                     if modified_count < 3:
-                                        print(f"Creating new property set {pset_name} for {element.is_a()}")
+                                        pass  # Reduced logging
+                                        # print(f"Creating new property set {pset_name} for {element.is_a()}")
                                     
                                     # Create property
                                     new_prop = None

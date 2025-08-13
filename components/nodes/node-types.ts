@@ -140,6 +140,37 @@ export interface TransformNodeData extends BaseNodeData {
     };
 }
 
+// Data Transform node data
+export interface DataTransformNodeData extends BaseNodeData {
+    properties?: {
+        mode?: 'steps' | 'expression';
+        steps?: TransformStep[];
+        expression?: string;
+        restrictToIncomingElements?: boolean;
+        [key: string]: any;
+    };
+    results?: any;
+    preview?: {
+        inputCount: number;
+        outputCount: number;
+        sampleOutput: any[];
+        warnings: string[];
+    };
+}
+
+export interface TransformStep {
+    id: string;
+    type: 'filter' | 'map' | 'pick' | 'omit' | 'flatten' | 'groupBy' | 'unique' | 'sort' | 'limit' | 'toMapping' | 'join' | 'rename';
+    enabled: boolean;
+    config: Record<string, any>;
+}
+
+export interface FilterCondition {
+    path: string;
+    operator: 'equals' | 'notEquals' | 'contains' | 'startsWith' | 'endsWith' | 'in' | 'notIn' | 'gt' | 'gte' | 'lt' | 'lte' | 'exists' | 'notExists';
+    value: any;
+}
+
 // Viewer node data
 export interface ViewerNodeData extends BaseNodeData {
     properties?: {

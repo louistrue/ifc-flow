@@ -867,12 +867,12 @@ export function manageProperties(
 ): IfcElement[] {
   const { action, propertyName, propertyValue, targetPset = "any" } = options;
 
-  console.log(`Managing properties:`, {
-    action,
-    propertyName,
-    propertyValue,
-    targetPset,
-  });
+  // console.log(`Managing properties:`, {
+  //   action,
+  //   propertyName,
+  //   propertyValue,
+  //   targetPset,
+  // });
 
   // Check if propertyValue is a mapping object (element-specific values)
   const isMapping = propertyValue &&
@@ -884,7 +884,7 @@ export function manageProperties(
   let elementsModified = 0;
 
   if (isMapping) {
-    console.log("Detected element-specific value mapping");
+    // console.log("Detected element-specific value mapping");
 
     // Handle different mapping formats
     if (propertyValue.mappings) {

@@ -22,7 +22,7 @@ import ReactFlow, {
 } from "reactflow";
 import "reactflow/dist/style.css";
 import { Sidebar } from "@/components/sidebar";
-import { PropertiesPanel } from "@/components/properties-panel/properties-panel";
+import { PropertiesDialog } from "@/components/dialogs/properties-dialog";
 import { IfcNode } from "@/components/nodes/ifc-node";
 import { GeometryNode } from "@/components/nodes/geometry-node";
 import { FilterNode } from "@/components/nodes/filter-node";
@@ -660,6 +660,13 @@ function FlowWithProvider() {
         position,
         data: {
           label: getNodeLabel(type),
+          ...(type === 'dataTransformNode' && {
+            properties: {
+              mode: 'steps',
+              steps: [],
+              restrictToIncomingElements: false,
+            }
+          }),
         },
         // CSS handles node styling now
       };
@@ -671,6 +678,12 @@ function FlowWithProvider() {
 
   const onNodeClick = useCallback(
     (event: React.MouseEvent, node: Node) => {
+      // Do not open modal on single click. Reserve for selection/drag only.
+      const isMac = navigator.platform.toUpperCase().includes('MAC');
+      const cmdOrCtrl = isMac ? (event as any).metaKey : (event as any).ctrlKey;
+      if (cmdOrCtrl) {
+        return;
+      }
       setSelectedNode(node);
     },
     []
@@ -1025,6 +1038,13 @@ function FlowWithProvider() {
       position,
       data: {
         label: getNodeLabel(selectedNodeType),
+        ...(selectedNodeType === 'dataTransformNode' && {
+          properties: {
+            mode: 'steps',
+            steps: [],
+            restrictToIncomingElements: false,
+          }
+        }),
       },
       // CSS handles node styling now
     };
@@ -1274,13 +1294,16 @@ function FlowWithProvider() {
           </ViewerFocusProvider>
         </div>
       </div>
-      {editingNode && (
-        <PropertiesPanel
-          node={editingNode}
-          setNodes={setNodes as React.Dispatch<React.SetStateAction<any[]>>}
-          setSelectedNode={setEditingNode}
-        />
-      )}
+      <PropertiesDialog
+        node={editingNode}
+        open={!!editingNode}
+        onOpenChange={(open) => {
+          if (!open) {
+            setEditingNode(null);
+          }
+        }}
+        setNodes={setNodes as React.Dispatch<React.SetStateAction<any[]>>}
+      />
       <Toaster />
     </div>
   );

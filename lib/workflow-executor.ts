@@ -434,7 +434,7 @@ export class WorkflowExecutor {
         break;
 
       case "propertyNode":
-        console.log("Processing propertyNode", { node, inputValues });
+        // console.log("Processing propertyNode", { node, inputValues });
 
         // Add debugging to see the structure of the inputs
         if (!inputValues || !inputValues.input) {
@@ -504,7 +504,7 @@ export class WorkflowExecutor {
           inputValues.valueInput !== undefined
         ) {
           // Log the original input value for debugging
-          console.log("Using value from input:", inputValues.valueInput);
+          // console.log("Using value from input:", inputValues.valueInput);
 
           // Handle different input types for valueInput
           let inputValue = inputValues.valueInput;
@@ -557,7 +557,7 @@ export class WorkflowExecutor {
           }
         }
 
-        console.log("Final value used for property:", valueToUse);
+        // console.log("Final value used for property:", valueToUse);
 
         // Manage properties using the utility function with options object
         const updatedElements = manageProperties(nodeElements, {
@@ -1004,6 +1004,61 @@ export class WorkflowExecutor {
       case "parameterNode":
         // Parameter
         result = node.data.properties?.value || "";
+        break;
+
+      case "dataTransformNode":
+        // Data Transform
+        // console.log("Processing dataTransformNode", { node, inputValues });
+
+        if (!inputValues.input) {
+          console.log("No input provided to data transform node");
+          result = null;
+          break;
+        }
+
+        try {
+          const { executeTransformPipeline } = await import('../lib/data-transform-utils');
+
+          const steps = node.data.properties?.steps || [];
+          const restrictToIncomingElements = node.data.properties?.restrictToIncomingElements || false;
+
+          const transformResult = executeTransformPipeline(steps, {
+            input: inputValues.input,
+            inputB: inputValues.inputB,
+            restrictToIncomingElements,
+          });
+
+          result = transformResult.data;
+
+          // Store preview information for the UI
+          node.data.preview = {
+            inputCount: transformResult.metadata.inputCount,
+            outputCount: transformResult.metadata.outputCount,
+            sampleOutput: Array.isArray(result) ? result.slice(0, 3) :
+              (result && typeof result === 'object' && result.mappings) ?
+                Object.entries(result.mappings).slice(0, 3) : [],
+            warnings: transformResult.metadata.warnings,
+          };
+
+          // Store results for UI access
+          node.data.results = result;
+
+          // console.log("Data transform completed", {
+          //   inputCount: transformResult.metadata.inputCount,
+          //   outputCount: transformResult.metadata.outputCount,
+          //   warnings: transformResult.metadata.warnings,
+          // });
+
+        } catch (error) {
+          console.error("Data transform error:", error);
+          result = null;
+          node.data.preview = {
+            inputCount: 0,
+            outputCount: 0,
+            sampleOutput: [],
+            warnings: [`Transform failed: ${error instanceof Error ? error.message : String(error)}`],
+          };
+        }
         break;
 
       case "viewerNode":

@@ -43,6 +43,7 @@ import {
   WorkflowIcon,
   X,
   GripVertical,
+  Shuffle,
 } from "lucide-react";
 import {
   type Workflow as WorkflowType,
@@ -136,6 +137,12 @@ export const nodeCategories = [
         id: "analysisNode",
         label: "Analysis",
         icon: <BarChart className="h-4 w-4 mr-2" />,
+        status: "new",
+      },
+      {
+        id: "dataTransformNode",
+        label: "Data Transform",
+        icon: <Shuffle className="h-4 w-4 mr-2" />,
         status: "new",
       },
     ],
