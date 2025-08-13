@@ -356,6 +356,16 @@ function FlowWithProvider() {
     { enableOnFormTags: false }
   );
 
+  // Group selected (Ctrl+G)
+  useHotkeys(
+    findShortcut("group-nodes") || "ctrl+g,cmd+g",
+    (e) => {
+      e.preventDefault();
+      handleGroup();
+    },
+    { enableOnFormTags: false }
+  );
+
   // Run Workflow (F5)
   useHotkeys(
     findShortcut("run-workflow") || "F5",
@@ -478,6 +488,58 @@ function FlowWithProvider() {
     handleCopy();
     handleDelete();
   }, [handleCopy, handleDelete]);
+
+  // Handle group
+  const handleGroup = useCallback(() => {
+    if (!reactFlowInstance) return;
+
+    const selected = nodes.filter((n) => n.selected && n.type !== 'groupNode');
+    if (selected.length === 0) return;
+
+    saveToHistory(nodes, edges);
+
+    const padding = 40;
+    const minX = Math.min(...selected.map((n) => n.position.x));
+    const minY = Math.min(...selected.map((n) => n.position.y));
+    const maxX = Math.max(
+      ...selected.map((n) => n.position.x + (n.width || 0)),
+    );
+    const maxY = Math.max(
+      ...selected.map((n) => n.position.y + (n.height || 0)),
+    );
+
+    const groupId = `group-${Date.now()}`;
+    const groupPosition = { x: minX - padding / 2, y: minY - padding / 2 };
+    const groupNode = {
+      id: groupId,
+      type: 'groupNode' as const,
+      position: groupPosition,
+      data: { label: 'Group', color: '#f3f4f6' },
+      style: { width: maxX - minX + padding, height: maxY - minY + padding },
+      selectable: true,
+      draggable: true,
+      connectable: false,
+      selected: true,
+    };
+
+    const updatedNodes = nodes.map((n) => {
+      if (selected.find((s) => s.id === n.id)) {
+        return {
+          ...n,
+          position: {
+            x: n.position.x - groupPosition.x,
+            y: n.position.y - groupPosition.y,
+          },
+          parentNode: groupId,
+          extent: 'parent',
+          selected: false,
+        };
+      }
+      return n;
+    });
+
+    setNodes([...updatedNodes, groupNode]);
+  }, [reactFlowInstance, nodes, edges, saveToHistory, setNodes]);
 
   // Handle paste
   const handlePaste = useCallback(() => {
@@ -1183,6 +1245,7 @@ function FlowWithProvider() {
           onCut={handleCut}
           onPaste={handlePaste}
           onDelete={handleDelete}
+          onGroup={handleGroup}
           onToggleSidebar={handleSidebarToggle}
           sidebarOpen={sidebarOpen}
         />

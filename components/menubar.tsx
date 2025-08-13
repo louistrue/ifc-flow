@@ -58,6 +58,7 @@ interface AppMenubarProps {
   onCut: () => void;
   onPaste: () => void;
   onDelete: () => void;
+  onGroup: () => void;
   onToggleSidebar: () => void;
   sidebarOpen?: boolean;
 }
@@ -85,6 +86,7 @@ export function AppMenubar({
   onCut,
   onPaste,
   onDelete,
+  onGroup,
   onToggleSidebar,
   sidebarOpen = false,
 }: AppMenubarProps) {
@@ -311,6 +313,10 @@ export function AppMenubar({
           <MenubarItem onClick={onPaste}>
             Paste
             <MenubarShortcut>{getShortcutDisplay("paste")}</MenubarShortcut>
+          </MenubarItem>
+          <MenubarItem onClick={onGroup}>
+            Group Selected
+            <MenubarShortcut>{getShortcutDisplay("group-nodes")}</MenubarShortcut>
           </MenubarItem>
           <MenubarSeparator />
           <MenubarItem onClick={onSelectAll}>

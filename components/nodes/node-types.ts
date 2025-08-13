@@ -185,4 +185,12 @@ export interface WatchNodeData extends BaseNodeData {
         watchType?: string;
         [key: string]: any;
     };
-} 
+}
+
+// Group node data
+export interface GroupNodeData extends BaseNodeData {
+    color?: string;
+    properties?: {
+        [key: string]: any;
+    };
+}

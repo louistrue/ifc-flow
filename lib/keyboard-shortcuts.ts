@@ -131,6 +131,14 @@ export function getDefaultShortcuts(): KeyboardShortcut[] {
       action: () => {},
     },
     {
+      id: "group-nodes",
+      name: "Group Selected",
+      description: "Group selected nodes",
+      keys: `${mod}+g`,
+      category: "edit",
+      action: () => {},
+    },
+    {
       id: "run-workflow",
       name: "Run Workflow",
       description: "Run the current workflow",
@@ -166,7 +174,7 @@ export function getDefaultShortcuts(): KeyboardShortcut[] {
       id: "toggle-grid",
       name: "Toggle Grid",
       description: "Toggle grid visibility",
-      keys: `${mod}+g`,
+      keys: `${mod}+shift+g`,
       category: "view",
       action: () => {},
     },
