@@ -346,6 +346,21 @@ function FlowWithProvider() {
     { enableOnFormTags: false }
   );
 
+  // Group (Ctrl+G)
+  useHotkeys(
+    findShortcut("group") || "ctrl+g,cmd+g",
+    (e) => {
+      const selectedNodes = nodes.filter(
+        (node) => node.selected && node.type !== "groupNode"
+      );
+      if (selectedNodes.length > 0) {
+        e.preventDefault();
+        handleGroup();
+      }
+    },
+    { enableOnFormTags: false }
+  );
+
   // Delete (Delete key)
   useHotkeys(
     "delete,backspace",
@@ -529,6 +544,63 @@ function FlowWithProvider() {
       description: `${newNodes.length} node(s) and ${newEdges.length} connection(s) pasted`,
     });
   }, [clipboard, nodes, edges, saveToHistory, setNodes, setEdges, toast]);
+
+  // Handle grouping of selected nodes
+  const handleGroup = useCallback(() => {
+    const selectedNodes = nodes.filter(
+      (node) => node.selected && node.type !== "groupNode"
+    );
+    if (selectedNodes.length === 0) return;
+
+    saveToHistory(nodes, edges);
+
+    const padding = 40;
+    const minX = Math.min(...selectedNodes.map((n) => n.position.x));
+    const minY = Math.min(...selectedNodes.map((n) => n.position.y));
+    const maxX = Math.max(
+      ...selectedNodes.map((n) => n.position.x + (n.width || 0))
+    );
+    const maxY = Math.max(
+      ...selectedNodes.map((n) => n.position.y + (n.height || 0))
+    );
+
+    const groupId = `group-${Date.now()}`;
+    const groupPosition = { x: minX - padding / 2, y: minY - padding / 2 };
+    const groupWidth = maxX - minX + padding;
+    const groupHeight = maxY - minY + padding;
+
+    const updatedNodes = nodes.map((node) => {
+      if (selectedNodes.some((sn) => sn.id === node.id)) {
+        return {
+          ...node,
+          selected: false,
+          position: {
+            x: node.position.x - groupPosition.x,
+            y: node.position.y - groupPosition.y,
+          },
+          parentNode: groupId,
+          extent: "parent",
+        };
+      }
+      return node;
+    });
+
+    const groupNode: Node = {
+      id: groupId,
+      type: "groupNode",
+      position: groupPosition,
+      data: { label: "Group", backgroundColor: "rgba(0,0,0,0.03)" },
+      style: { width: groupWidth, height: groupHeight },
+      selected: true,
+    };
+
+    setNodes([groupNode, ...updatedNodes]);
+
+    toast({
+      title: "Group created",
+      description: `${selectedNodes.length} node(s) grouped`,
+    });
+  }, [nodes, edges, saveToHistory, setNodes, toast]);
 
   // Updated node changes handler with history
   const handleNodesChange = useCallback(
@@ -1182,6 +1254,7 @@ function FlowWithProvider() {
           onCopy={handleCopy}
           onCut={handleCut}
           onPaste={handlePaste}
+          onGroup={handleGroup}
           onDelete={handleDelete}
           onToggleSidebar={handleSidebarToggle}
           sidebarOpen={sidebarOpen}
