@@ -1880,13 +1880,13 @@ export async function exportData(
             // Apply transformation if available
             if (element.transformedGeometry) {
               const { translation = [0, 0, 0], rotation = [0, 0, 0], scale = [1, 1, 1] } = element.transformedGeometry;
-              mesh.position.set(...translation);
+              mesh.position.set(translation[0], translation[1], translation[2]);
               mesh.rotation.set(
                 rotation[0] * Math.PI / 180,
                 rotation[1] * Math.PI / 180,
                 rotation[2] * Math.PI / 180
               );
-              mesh.scale.set(...scale);
+              mesh.scale.set(scale[0], scale[1], scale[2]);
             }
 
             scene.add(mesh);

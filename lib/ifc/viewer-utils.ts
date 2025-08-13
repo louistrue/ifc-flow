@@ -814,7 +814,7 @@ export class IfcViewer {
     });
 
     // Force a render to show the changes
-    this.render();
+    this.renderer.render(this.scene, this.camera);
 
     console.log('Spatial clustering applied successfully');
   }
@@ -836,7 +836,122 @@ export class IfcViewer {
     this.resetColors();
 
     // Force a render to show the changes
-    this.render();
+    this.renderer.render(this.scene, this.camera);
+  }
+
+  /**
+   * Set wireframe mode for all materials
+   */
+  setWireframeMode(enabled: boolean): void {
+    console.log(`Setting wireframe mode: ${enabled}`);
+
+    if (this.ifcModelGroup) {
+      this.ifcModelGroup.traverse((child) => {
+        if (child instanceof THREE.Mesh && child.material) {
+          if (Array.isArray(child.material)) {
+            child.material.forEach(mat => {
+              if ('wireframe' in mat) {
+                (mat as THREE.MeshBasicMaterial).wireframe = enabled;
+              }
+            });
+          } else if ('wireframe' in child.material) {
+            (child.material as THREE.MeshBasicMaterial).wireframe = enabled;
+          }
+        }
+      });
+    }
+
+    this.renderer.render(this.scene, this.camera);
+  }
+
+  /**
+   * Set X-Ray mode (transparent materials)
+   */
+  setXRayMode(enabled: boolean): void {
+    console.log(`Setting X-Ray mode: ${enabled}`);
+
+    if (this.ifcModelGroup) {
+      this.ifcModelGroup.traverse((child) => {
+        if (child instanceof THREE.Mesh && child.material) {
+          if (Array.isArray(child.material)) {
+            child.material.forEach(mat => {
+              if ('transparent' in mat && 'opacity' in mat) {
+                (mat as THREE.MeshBasicMaterial).transparent = enabled;
+                (mat as THREE.MeshBasicMaterial).opacity = enabled ? 0.3 : 1.0;
+              }
+            });
+          } else if ('transparent' in child.material && 'opacity' in child.material) {
+            (child.material as THREE.MeshBasicMaterial).transparent = enabled;
+            (child.material as THREE.MeshBasicMaterial).opacity = enabled ? 0.3 : 1.0;
+          }
+        }
+      });
+    }
+
+    this.renderer.render(this.scene, this.camera);
+  }
+
+  // Clipping plane for section views
+  private clippingPlane: THREE.Plane | null = null;
+
+  /**
+   * Enable/disable clipping plane for section views
+   */
+  enableClippingPlane(enabled: boolean): void {
+    console.log(`Setting clipping plane: ${enabled}`);
+
+    if (enabled && !this.clippingPlane) {
+      // Create a clipping plane that cuts through the middle of the model
+      this.clippingPlane = new THREE.Plane(new THREE.Vector3(1, 0, 0), 0);
+      this.renderer.localClippingEnabled = true;
+    }
+
+    if (this.ifcModelGroup) {
+      this.ifcModelGroup.traverse((child) => {
+        if (child instanceof THREE.Mesh && child.material) {
+          if (Array.isArray(child.material)) {
+            child.material.forEach(mat => {
+              if ('clippingPlanes' in mat) {
+                (mat as THREE.MeshBasicMaterial).clippingPlanes = enabled && this.clippingPlane ? [this.clippingPlane] : [];
+              }
+            });
+          } else if ('clippingPlanes' in child.material) {
+            (child.material as THREE.MeshBasicMaterial).clippingPlanes = enabled && this.clippingPlane ? [this.clippingPlane] : [];
+          }
+        }
+      });
+    }
+
+    if (!enabled) {
+      this.renderer.localClippingEnabled = false;
+    }
+
+    this.renderer.render(this.scene, this.camera);
+  }
+
+  /**
+   * Zoom in
+   */
+  zoomIn(): void {
+    this.camera.position.multiplyScalar(0.9);
+    this.controls.update();
+    this.renderer.render(this.scene, this.camera);
+  }
+
+  /**
+   * Zoom out
+   */
+  zoomOut(): void {
+    this.camera.position.multiplyScalar(1.1);
+    this.controls.update();
+    this.renderer.render(this.scene, this.camera);
+  }
+
+  /**
+   * Fit camera to model (alias for existing method)
+   */
+  fitToModel(): void {
+    this.fitCameraToModel();
   }
 
   /**

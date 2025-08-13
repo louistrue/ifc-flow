@@ -7,7 +7,7 @@ import {
   useReactFlow,
   NodeProps,
 } from "reactflow";
-import { CuboidIcon as Cube, Loader2, AlertCircle, CheckCircle, Focus, MousePointer2 } from "lucide-react";
+import { CuboidIcon as Cube, Loader2, AlertCircle, CheckCircle, Focus, Eye, Layers, Scissors } from "lucide-react";
 import { IfcViewer } from "@/lib/ifc/viewer-utils";
 import { ViewerNodeData as BaseViewerNodeData } from "./node-types";
 import { useViewerFocus } from "@/components/contexts/viewer-focus-context";
@@ -47,6 +47,8 @@ export const ViewerNode = memo(
         setFocusedViewerId(id);
       }
     }, [id, isInFocusMode, elementCount, errorMessage, isLoading, setFocusedViewerId]);
+
+
 
     // Enhanced keyboard and mouse event handling when in focus mode
     useEffect(() => {
@@ -165,7 +167,9 @@ export const ViewerNode = memo(
         hasViewer: !!viewer,
         inputData: data.inputData,
         hasClusters: !!data.inputData?.clusters,
-        clusterCount: data.inputData?.clusters?.length || 0
+        clusterCount: data.inputData?.clusters?.length || 0,
+        hasFile: !!data.inputData?.file,
+        fileName: data.inputData?.file?.name
       });
 
       const fileInput = data.inputData?.file;
@@ -287,12 +291,12 @@ export const ViewerNode = memo(
 
     return (
       <div
-        className={`bg-white dark:bg-gray-800 border-2 ${isInFocusMode
+        className={`bg-gradient-to-br from-white to-gray-50 dark:from-gray-800 dark:to-gray-900 border-2 ${isInFocusMode
           ? "border-cyan-400 dark:border-cyan-300 shadow-2xl shadow-cyan-400/60 ring-4 ring-cyan-300/30"
           : selected
-            ? "border-cyan-600 dark:border-cyan-400"
-            : "border-cyan-500 dark:border-cyan-400"
-          } rounded-md shadow-md relative transition-all duration-300`}
+            ? "border-cyan-600 dark:border-cyan-400 shadow-lg shadow-cyan-500/20"
+            : "border-cyan-500 dark:border-cyan-400 shadow-md hover:shadow-lg hover:shadow-cyan-500/10"
+          } rounded-xl shadow-md relative transition-all duration-300 overflow-hidden`}
         style={{
           width: `${width}px`,
           zIndex: isInFocusMode ? 1000 : 'auto',
@@ -325,6 +329,8 @@ export const ViewerNode = memo(
             {!isLoading && !errorMessage && elementCount > 0 && <CheckCircle className="h-4 w-4 text-green-300" />}
           </div>
         </div>
+
+
         <div className="p-3">
           <div
             ref={viewerRef}
@@ -373,9 +379,50 @@ export const ViewerNode = memo(
               </div>
             )}
             {!elementCount && !isLoading && !errorMessage && (
-              <div className="text-xs text-muted-foreground pointer-events-none text-center">
-                <MousePointer2 className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                <p>Connect IFC File</p>
+              <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-4">
+                {/* Animated 3D Cube Icon */}
+                <div className="relative mb-4">
+                  <div className="w-16 h-16 relative animate-pulse">
+                    <Cube className="w-16 h-16 text-cyan-400 opacity-60" />
+                    <div className="absolute inset-0 w-16 h-16 border-2 border-cyan-300 rounded-lg animate-ping opacity-30"></div>
+                  </div>
+                </div>
+
+                {/* Beautiful gradient text */}
+                <div className="space-y-2">
+                  <h3 className="text-lg font-semibold bg-gradient-to-r from-cyan-600 to-blue-600 bg-clip-text text-transparent">
+                    3D Viewer Ready
+                  </h3>
+                  <p className="text-sm text-gray-500 dark:text-gray-400 max-w-xs">
+                    Connect an IFC file or geometry data to start visualizing your building model in 3D
+                  </p>
+                </div>
+
+                {/* Connection indicator */}
+                <div className="mt-6 flex items-center gap-2 text-xs text-gray-400">
+                  <div className="w-2 h-2 rounded-full bg-gray-300 animate-pulse"></div>
+                  <span>Waiting for connection...</span>
+                </div>
+
+                {/* Feature highlights */}
+                <div className="mt-4 grid grid-cols-2 gap-2 text-xs text-gray-400">
+                  <div className="flex items-center gap-1">
+                    <Eye className="w-3 h-3" />
+                    <span>Multiple Views</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <Layers className="w-3 h-3" />
+                    <span>Clustering</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <Scissors className="w-3 h-3" />
+                    <span>Sectioning</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <Focus className="w-3 h-3" />
+                    <span>3D Focus</span>
+                  </div>
+                </div>
               </div>
             )}
 
@@ -400,21 +447,6 @@ export const ViewerNode = memo(
             )}
           </div>
           <div className="mt-2 text-xs">
-            <div className="flex justify-between">
-              <span>View Mode:</span>
-              <span className="font-medium">
-                {data.properties?.viewMode || "Shaded"}
-              </span>
-            </div>
-            {elementCount > 0 && !isLoading && !errorMessage && (
-              <div className="flex justify-between mt-1 text-green-700">
-                <span>Status:</span>
-                <span className="font-medium">
-                  {isInFocusMode ? "3D Focus Active" : "Model Loaded"}
-                </span>
-              </div>
-            )}
-
             {/* Instructions for focus mode */}
             {isInFocusMode && (
               <div className="mt-1 text-[10px] text-blue-600 dark:text-blue-400 text-center">

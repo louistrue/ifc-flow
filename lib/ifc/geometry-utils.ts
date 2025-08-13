@@ -7,5 +7,5 @@ export {
   transformElements 
 } from "../ifc-utils";
 
-// Re-export types
-export type { IfcModel, IfcElement } from "../ifc-utils";
+// Re-export types (excluding IfcElement and IfcModel to avoid conflicts with ifc-loader.ts)
+// Types are available from ifc-loader.ts instead
