@@ -65,16 +65,6 @@ const proOptions = { hideAttribution: true };
 const defaultStyle = { cursor: 'default' };
 const placementStyle = { cursor: 'crosshair' };
 
-// Custom node style to highlight selected nodes
-const nodeStyle = {
-  selected: {
-    boxShadow: "0 0 10px 2px rgba(59, 130, 246, 0.6)",
-    borderRadius: "6px",
-    zIndex: 10,
-  },
-  default: {},
-};
-
 // Define interfaces
 interface FlowState {
   nodes: Node[];
@@ -90,6 +80,22 @@ const generateId = () => {
   return `node-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 };
 
+// Helper to load viewer settings from localStorage synchronously
+const loadViewerSetting = (key: 'showGrid' | 'showMinimap', defaultValue: boolean): boolean => {
+  if (typeof window !== 'undefined') {
+    try {
+      const saved = localStorage.getItem('app-settings');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return parsed.viewer?.[key] ?? defaultValue;
+      }
+    } catch (e) {
+      console.error(`Error loading ${key} setting:`, e);
+    }
+  }
+  return defaultValue;
+};
+
 // Removed getViewportClass to prevent hydration mismatch
 // Using isMobile hook instead which properly handles SSR
 
@@ -102,16 +108,41 @@ function FlowWithProvider() {
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
   const { shortcuts } = useKeyboardShortcuts();
-  const { settings } = useAppSettings();
+  const { settings, updateViewerSettings } = useAppSettings();
   const { theme, setTheme } = useTheme();
   const isMobile = useIsMobile();
 
   // nodeTypes and edgeTypes are now defined outside the component
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  // View settings
-  const [showGrid, setShowGrid] = useState(settings.viewer.showGrid);
-  const [showMinimap, setShowMinimap] = useState(false);
+  // View settings - start with defaults to match server rendering
+  const [showGrid, setShowGridState] = useState(true);
+  const [showMinimap, setShowMinimapState] = useState(false);
+  const [isSettingsLoaded, setIsSettingsLoaded] = useState(false);
+
+  // Wrapper functions to update both state and localStorage
+  const setShowGrid = useCallback((value: boolean | ((prev: boolean) => boolean)) => {
+    const newValue = typeof value === 'function' ? value(showGrid) : value;
+    setShowGridState(newValue);
+    updateViewerSettings({ showGrid: newValue });
+  }, [showGrid, updateViewerSettings]);
+
+  const setShowMinimap = useCallback((value: boolean | ((prev: boolean) => boolean)) => {
+    const newValue = typeof value === 'function' ? value(showMinimap) : value;
+    setShowMinimapState(newValue);
+    updateViewerSettings({ showMinimap: newValue });
+  }, [showMinimap, updateViewerSettings]);
+
+  // Load persisted settings after mount to avoid hydration issues
+  useEffect(() => {
+    // Load settings from localStorage after component mounts
+    const gridSetting = loadViewerSetting('showGrid', true);
+    const minimapSetting = loadViewerSetting('showMinimap', false);
+
+    setShowGridState(gridSetting);
+    setShowMinimapState(minimapSetting);
+    setIsSettingsLoaded(true);
+  }, []); // Only run once on mount
 
   // Current workflow state
   const [currentWorkflow, setCurrentWorkflow] = useState<Workflow | null>(null);
@@ -129,9 +160,6 @@ function FlowWithProvider() {
   const [canRedo, setCanRedo] = useState(false);
 
   // Node movement tracking
-  const [nodeMovementStart, setNodeMovementStart] = useState<
-    Record<string, NodePosition | undefined>
-  >({});
   const [isNodeDragging, setIsNodeDragging] = useState(false);
 
   // File drop state
@@ -232,30 +260,48 @@ function FlowWithProvider() {
   useHotkeys(
     findShortcut("copy") || "ctrl+c,cmd+c",
     (e) => {
-      e.preventDefault();
-      handleCopy();
+      // Only prevent default if we have selected nodes to copy
+      const selectedNodes = nodes.filter((node) => node.selected);
+      if (selectedNodes.length > 0) {
+        e.preventDefault();
+        handleCopy();
+      }
     },
-    { enableOnFormTags: false }
+    { enableOnFormTags: true, preventDefault: false }
   );
 
   // Cut (Ctrl+X)
   useHotkeys(
     findShortcut("cut") || "ctrl+x,cmd+x",
     (e) => {
-      e.preventDefault();
-      handleCut();
+      // Only prevent default if we have selected nodes to cut
+      const selectedNodes = nodes.filter((node) => node.selected);
+      if (selectedNodes.length > 0) {
+        e.preventDefault();
+        handleCut();
+      }
     },
-    { enableOnFormTags: false }
+    { enableOnFormTags: true, preventDefault: false }
   );
 
   // Paste (Ctrl+V)
   useHotkeys(
     findShortcut("paste") || "ctrl+v,cmd+v",
     (e) => {
-      e.preventDefault();
-      handlePaste();
+      // Only prevent default if we have something to paste and focus is not on a form element
+      const activeElement = document.activeElement;
+      const isFormElement = activeElement && (
+        activeElement.tagName === 'INPUT' ||
+        activeElement.tagName === 'TEXTAREA' ||
+        (activeElement as HTMLElement).isContentEditable
+      );
+
+      if (!isFormElement && clipboard && clipboard.nodes.length > 0) {
+        e.preventDefault();
+        handlePaste();
+      }
     },
-    { enableOnFormTags: false }
+    { enableOnFormTags: true, preventDefault: false }
   );
 
   // Delete (Delete key)
@@ -330,9 +376,15 @@ function FlowWithProvider() {
     const updatedNodes = nodes.map((node) => ({
       ...node,
       selected: true,
+      // Remove style modification - CSS handles this now
     }));
     setNodes(updatedNodes);
-  }, [nodes, setNodes]);
+
+    toast({
+      title: "Select All",
+      description: `Selected ${nodes.length} nodes`,
+    });
+  }, [nodes, setNodes, toast]);
 
   // Handle copy
   const handleCopy = useCallback(() => {
@@ -408,6 +460,7 @@ function FlowWithProvider() {
           y: node.position.y + offset.y,
         },
         selected: true, // Select the pasted nodes
+        // Remove style modification - CSS handles this now
       };
     });
 
@@ -423,6 +476,7 @@ function FlowWithProvider() {
     const updatedExistingNodes = nodes.map((node) => ({
       ...node,
       selected: false,
+      // Remove style modification - CSS handles this now
     }));
 
     setNodes([...updatedExistingNodes, ...newNodes]);
@@ -437,52 +491,53 @@ function FlowWithProvider() {
   // Updated node changes handler with history
   const handleNodesChange = useCallback(
     (changes: NodeChange[]) => {
-      // Check if this is a node selection change
+      // Apply changes immediately for smooth interaction
+      onNodesChange(changes);
+
+      // Check if this is a position change (dragging)
+      const isPositionChange = changes.some(
+        (change) => change.type === "position"
+      );
+
+      // Check if dragging has ended
+      const isDragEnd = changes.some(
+        (change) =>
+          change.type === "position" &&
+          change.dragging === false &&
+          isNodeDragging
+      );
+
+      // Track drag start
+      if (isPositionChange && !isNodeDragging) {
+        const isDragStart = changes.some(
+          (change) => change.type === "position" && change.dragging === true
+        );
+        if (isDragStart) {
+          setIsNodeDragging(true);
+        }
+      }
+
+      // Save to history only when drag ends
+      if (isDragEnd) {
+        setIsNodeDragging(false);
+        // Use a small delay to ensure final position is captured
+        setTimeout(() => {
+          saveToHistory(nodes, edges);
+        }, 50);
+      }
+
+      // For non-drag changes, save to history after a delay
       const isSelectionChange = changes.every(
         (change) => change.type === "select"
       );
 
-      // Check if this is the start of a node drag
-      const isDragStart = changes.some(
-        (change) => change.type === "position" && change.dragging
-      );
-
-      // Check if this is the end of a node drag
-      const isDragEnd = changes.some(
-        (change) =>
-          change.type === "position" && !change.dragging && isNodeDragging
-      );
-
-      if (isDragStart && !isNodeDragging) {
-        // Save positions at the start of dragging
-        const startPositions: Record<string, NodePosition | undefined> = {};
-        nodes.forEach((node) => {
-          startPositions[node.id] = node.position;
-        });
-        setNodeMovementStart(startPositions);
-        setIsNodeDragging(true);
-      }
-
-      if (isDragEnd) {
-        // Save to history at the end of dragging
-        const updatedNodes = applyNodeChanges(changes, nodes);
-        saveToHistory(updatedNodes, edges);
-        setIsNodeDragging(false);
-        setNodeMovementStart({});
-      }
-
-      // Apply the changes regardless
-      onNodesChange(changes);
-
-      // Don't save to history for selection changes or during dragging
-      if (!isSelectionChange && !isNodeDragging && !isDragStart) {
-        // Auto-save timer for other changes (like resizing, etc.)
+      if (!isSelectionChange && !isPositionChange) {
+        // Auto-save timer for other changes
         if (autoSaveTimerRef.current) {
           clearTimeout(autoSaveTimerRef.current);
         }
         autoSaveTimerRef.current = setTimeout(() => {
-          const updatedNodes = applyNodeChanges(changes, nodes);
-          saveToHistory(updatedNodes, edges);
+          saveToHistory(nodes, edges);
         }, 1000);
       }
     },
@@ -564,7 +619,7 @@ function FlowWithProvider() {
         data: {
           label: getNodeLabel(type),
         },
-        style: nodeStyle.default,
+        // CSS handles node styling now
       };
 
       setNodes((nds) => nds.concat(newNode));
@@ -610,7 +665,7 @@ function FlowWithProvider() {
             fileHandle: result,
             modelState: null,
           },
-          style: nodeStyle.default,
+          // CSS handles node styling now
         };
 
         setNodes((nds) => [...nds, newNode]);
@@ -936,7 +991,7 @@ function FlowWithProvider() {
       data: {
         label: getNodeLabel(selectedNodeType),
       },
-      style: nodeStyle.default,
+      // CSS handles node styling now
     };
 
     setNodes((nds) => nds.concat(newNode));
@@ -1099,7 +1154,7 @@ function FlowWithProvider() {
               }}
               nodeTypes={nodeTypes}
               edgeTypes={edgeTypes}
-              snapToGrid
+              snapToGrid={isSettingsLoaded ? showGrid : false}
               snapGrid={snapGrid}
               minZoom={0.1}
               maxZoom={2}
@@ -1115,8 +1170,8 @@ function FlowWithProvider() {
               nodesDraggable={!focusedViewerId && !(isMobile && placementMode)}
             >
               <Controls />
-              {showGrid && <Background color="#aaa" gap={16} />}
-              {showMinimap && <MiniMap />}
+              {isSettingsLoaded && showGrid && <Background color="#aaa" gap={16} />}
+              {isSettingsLoaded && showMinimap && <MiniMap />}
               <Panel position="bottom-right">
                 <div className="bg-card rounded-md p-2 text-xs text-muted-foreground">
                   {currentWorkflow ? currentWorkflow.name : "IFCflow - v0.1.0"}

@@ -295,7 +295,7 @@ export function FlowCanvas({
         onDragOver={onDragOver}
         onNodeClick={onNodeClick}
         nodeTypes={nodeTypes}
-        snapToGrid
+        snapToGrid={showGrid}
         snapGrid={[15, 15]}
         minZoom={0.1}
         maxZoom={2}

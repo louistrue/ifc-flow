@@ -10,6 +10,7 @@ export interface AppSettings {
   }
   viewer: {
     showGrid: boolean
+    showMinimap: boolean
     snapToGrid: boolean
     gridSize: number
   }
@@ -28,6 +29,7 @@ export const defaultSettings: AppSettings = {
   },
   viewer: {
     showGrid: true,
+    showMinimap: false,
     snapToGrid: true,
     gridSize: 15,
   },
