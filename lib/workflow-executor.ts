@@ -1186,6 +1186,20 @@ export class WorkflowExecutor {
         }
         break;
 
+      case "aiNode": {
+        console.log("Processing aiNode", { node, inputValues });
+        if (inputValues.input) {
+          this.updateNodeDataInList(nodeId, {
+            ...node.data,
+            model: inputValues.input as IfcModel,
+          });
+          result = inputValues.input;
+        } else {
+          result = null;
+        }
+        break;
+      }
+
       case "viewerNode":
         // Process data for viewer node
         console.log("Processing viewerNode", { node, inputValues });
