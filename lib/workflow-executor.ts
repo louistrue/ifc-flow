@@ -17,6 +17,7 @@ import {
 } from "@/lib/ifc-utils";
 import { performAnalysis } from "@/lib/ifc/analysis-utils";
 import { withActiveViewer, hasActiveModel } from "@/lib/ifc/viewer-manager";
+import { cacheModel } from "@/lib/ifc/ai-helpers";
 import * as THREE from "three";
 import { buildClusters, buildClustersFromElements, applyClusterColors, ClusterConfig, getClusterStats } from "@/lib/ifc/cluster-utils";
 
@@ -929,6 +930,24 @@ export class WorkflowExecutor {
           }
         }
         break;
+
+      case "aiNode": {
+        console.log("Processing aiNode", { node, inputValues });
+        const model =
+          inputValues.input && inputValues.input.elements
+            ? (inputValues.input as IfcModel)
+            : null;
+        // Store model reference for chat node
+        if (model) {
+          cacheModel(model.id, model);
+        }
+        this.updateNodeDataInList(nodeId, {
+          ...node.data,
+          model,
+        });
+        result = inputValues.input || null;
+        break;
+      }
 
       case "pythonNode": {
         console.log("Processing pythonNode", { node, inputValues });
