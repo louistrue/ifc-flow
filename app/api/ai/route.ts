@@ -1,9 +1,9 @@
-import { createOpenAI } from "@ai-sdk/openai";
-import { streamText } from "ai";
+import { openai } from "@ai-sdk/openai";
+import { streamText, generateText } from "ai";
 import { getLastLoadedModel } from "@/lib/ifc-utils";
 import { countElements } from "@/lib/ai/model-helpers";
 
-const openai = createOpenAI({ apiKey: process.env.OPENAI_API_KEY || "" });
+
 
 export async function POST(req: Request) {
   const { messages = [], modelId } = await req.json();
@@ -11,10 +11,10 @@ export async function POST(req: Request) {
   const wallCount = countElements(model, "IfcWall");
   const systemMsg = `The current model contains ${wallCount} walls.`;
 
-  const result = await streamText({
-    model: openai("gpt-4o-mini"),
+  const result = await generateText({
+    model: openai("gpt-5-mini"),
     messages: [{ role: "system", content: systemMsg }, ...messages],
   });
 
-  return result.toAIStreamResponse();
+  return new Response(result.text);
 }

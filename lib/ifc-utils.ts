@@ -25,9 +25,9 @@ export interface IfcElement {
     psetName: string;
   };
   classifications?: Array<{
-    system: string;
-    code: string;
-    description: string;
+    System: string;
+    Code: string;
+    Description: string;
   }>;
   transformedGeometry?: {
     translation: [number, number, number];
@@ -71,7 +71,24 @@ export function cacheIfcFile(file: File) {
 
 // Function to get the last loaded model
 export function getLastLoadedModel(): IfcModel | null {
+  console.log("🔍 Getting last loaded model:", {
+    hasModel: !!_lastLoadedModel,
+    modelId: _lastLoadedModel?.id,
+    modelName: _lastLoadedModel?.name,
+    elementCount: _lastLoadedModel?.elements?.length
+  });
   return _lastLoadedModel;
+}
+
+// Function to set the last loaded model (for debugging/testing)
+export function setLastLoadedModel(model: IfcModel | null): void {
+  _lastLoadedModel = model;
+  console.log("📝 Set last loaded model:", {
+    hasModel: !!model,
+    modelId: model?.id,
+    modelName: model?.name,
+    elementCount: model?.elements?.length
+  });
 }
 
 // Function to retrieve a stored File object
