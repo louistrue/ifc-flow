@@ -930,6 +930,20 @@ export class WorkflowExecutor {
         }
         break;
 
+      case "aiNode": {
+        console.log("Processing aiNode", { node, inputValues });
+
+        if (inputValues.input) {
+          this.updateNodeDataInList(nodeId, {
+            ...node.data,
+            model: inputValues.input as IfcModel,
+          });
+        }
+
+        result = inputValues.input || null;
+        break;
+      }
+
       case "pythonNode": {
         console.log("Processing pythonNode", { node, inputValues });
 

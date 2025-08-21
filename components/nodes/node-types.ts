@@ -90,6 +90,13 @@ export interface PythonNodeData extends BaseNodeData {
     } | null;
 }
 
+// AI chat node data
+export interface AiNodeData extends BaseNodeData {
+    messages?: { id: string; role: 'user' | 'assistant'; content: string }[];
+    isLoading?: boolean;
+    model?: import("@/lib/ifc/ifc-loader").IfcModel | null;
+}
+
 // Property node data
 export interface PropertyNodeData extends BaseNodeData {
     properties?: {
