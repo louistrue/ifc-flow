@@ -601,72 +601,116 @@ export async function extractGeometryWithGeom(
 // Filter elements by property
 export function filterElements(
   elements: IfcElement[],
-  property: string,
-  operator: string,
-  value: string
+  options: {
+    filterType?: string;
+    pset?: string;
+    property?: string;
+    value?: string;
+    storey?: string;
+    material?: string;
+  }
 ): IfcElement[] {
-  console.log("Filtering elements:", property, operator, value);
+  const { filterType = "property", pset, property, value, storey, material } = options
+  console.log("Filtering elements:", filterType, options)
 
-  // Add a check for undefined or empty elements
   if (!elements || elements.length === 0) {
-    console.warn("No elements to filter");
-    return [];
+    console.warn("No elements to filter")
+    return []
+  }
+
+  const matchValue = (propValue: any, pattern?: string) => {
+    if (pattern === undefined || pattern === "") return true
+    const str = String(propValue)
+
+    if (pattern.startsWith("/") && pattern.endsWith("/")) {
+      try {
+        const regex = new RegExp(pattern.slice(1, -1))
+        return regex.test(str)
+      } catch {
+        return false
+      }
+    }
+
+    if (pattern.includes(",")) {
+      const values = pattern.split(",").map((v) => v.trim())
+      return values.includes(str)
+    }
+
+    return str === pattern
   }
 
   return elements.filter((element) => {
-    // Split property path (e.g., "Pset_WallCommon.FireRating")
-    const propParts = property.split(".");
+    switch (filterType) {
+      case "storey": {
+        const storeyValue =
+          (element.properties && (element.properties.Level || element.properties.Storey)) ||
+          (element.psets && element.psets.Pset_BuildingStorey && element.psets.Pset_BuildingStorey.Name)
 
-    if (propParts.length === 1) {
-      // Direct property lookup
-      let propValue = element.properties[property];
-      if (propValue === undefined) return false;
-
-      // Convert to string for comparison
-      propValue = String(propValue);
-
-      switch (operator) {
-        case "equals":
-          return propValue === value;
-        case "contains":
-          return propValue.includes(value);
-        case "startsWith":
-          return propValue.startsWith(value);
-        case "endsWith":
-          return propValue.endsWith(value);
-        default:
-          return false;
+        if (!storeyValue) return false
+        return matchValue(storeyValue, storey)
       }
-    } else if (propParts.length === 2) {
-      // Property set lookup (e.g., "Pset_WallCommon.FireRating")
-      const [psetName, propName] = propParts;
 
-      // Check in property sets
-      if (element.psets && element.psets[psetName]) {
-        let propValue = element.psets[psetName][propName];
-        if (propValue === undefined) return false;
-
-        // Convert to string for comparison
-        propValue = String(propValue);
-
-        switch (operator) {
-          case "equals":
-            return propValue === value;
-          case "contains":
-            return propValue.includes(value);
-          case "startsWith":
-            return propValue.startsWith(value);
-          case "endsWith":
-            return propValue.endsWith(value);
-          default:
-            return false;
+      case "material": {
+        let materialValue = element.properties && element.properties.Material
+        if (!materialValue && element.psets) {
+          for (const psetName in element.psets) {
+            const pset = element.psets[psetName]
+            if (pset.Material) {
+              materialValue = pset.Material
+              break
+            }
+          }
         }
+        if (!materialValue) return false
+        return matchValue(materialValue, material)
       }
-      return false;
-    }
 
-    return false;
-  });
+      case "property":
+      default: {
+        if (pset && property) {
+          const propValue = element.psets?.[pset]?.[property]
+          if (propValue === undefined) return false
+          return matchValue(propValue, value)
+        }
+        if (pset && !property) {
+          const psetObj = element.psets?.[pset]
+          if (!psetObj) return false
+          if (!value) return true
+          return Object.values(psetObj).some((v) => matchValue(v, value))
+        }
+        if (!pset && property) {
+          if (element.properties && element.properties[property] !== undefined) {
+            return matchValue(element.properties[property], value)
+          }
+          if (element.psets) {
+            for (const psetName in element.psets) {
+              const psetObj = element.psets[psetName]
+              if (psetObj[property] !== undefined) {
+                return matchValue(psetObj[property], value)
+              }
+            }
+          }
+          return false
+        }
+        // Both pset and property omitted
+        if (!value) return false
+        if (
+          element.properties &&
+          Object.values(element.properties).some((v) => matchValue(v, value))
+        )
+          return true
+        if (element.psets) {
+          for (const psetName in element.psets) {
+            const psetObj = element.psets[psetName]
+            if (Object.values(psetObj).some((v) => matchValue(v, value))) {
+              return true
+            }
+          }
+        }
+        return false
+      }
+    }
+  })
 }
 
 // Transform elements (using geometric transformations)

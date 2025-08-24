@@ -13,21 +13,39 @@ export const FilterNode = memo(({ data, isConnectable }: NodeProps<FilterNodeDat
         <div className="text-sm font-medium truncate">{data.label}</div>
       </div>
       <div className="p-3 text-xs">
-        {data.properties?.property ? (
-          <div className="space-y-1">
-            <div className="flex justify-between">
-              <span>Property:</span>
-              <span className="font-medium">{data.properties.property}</span>
+        {data.properties ? (
+          data.properties.filterType === "storey" ? (
+            <div className="space-y-1">
+              <div className="flex justify-between">
+                <span>Storey:</span>
+                <span className="font-medium">{data.properties.storey || "Any"}</span>
+              </div>
             </div>
-            <div className="flex justify-between">
-              <span>Operator:</span>
-              <span className="font-medium">{data.properties?.operator || "equals"}</span>
+          ) : data.properties.filterType === "material" ? (
+            <div className="space-y-1">
+              <div className="flex justify-between">
+                <span>Material:</span>
+                <span className="font-medium">{data.properties.material || "Any"}</span>
+              </div>
             </div>
-            <div className="flex justify-between">
-              <span>Value:</span>
-              <span className="font-medium">{data.properties?.value || ""}</span>
+          ) : data.properties.pset || data.properties.property || data.properties.value ? (
+            <div className="space-y-1">
+              <div className="flex justify-between">
+                <span>Pset:</span>
+                <span className="font-medium">{data.properties.pset || "Any"}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Property:</span>
+                <span className="font-medium">{data.properties.property || "Any"}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Value:</span>
+                <span className="font-medium">{data.properties.value || ""}</span>
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="text-muted-foreground">No filter configured</div>
+          )
         ) : (
           <div className="text-muted-foreground">No filter configured</div>
         )}

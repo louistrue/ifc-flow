@@ -348,9 +348,7 @@ export class WorkflowExecutor {
 
           result = filterElements(
             elementsToFilter || [],
-            node.data.properties?.property || "",
-            node.data.properties?.operator || "equals",
-            node.data.properties?.value || ""
+            node.data.properties || {}
           );
         }
         break;

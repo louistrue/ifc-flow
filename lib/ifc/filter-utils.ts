@@ -1,37 +1,89 @@
 import type { IfcElement } from "@/lib/ifc/ifc-loader"
 
-// Mock function to filter elements by property
+// Mock function to filter elements by various criteria
 export function filterElements(
   elements: IfcElement[],
-  property: string,
-  operator: string,
-  value: string,
+  options: {
+    filterType?: string
+    pset?: string
+    property?: string
+    value?: string
+    storey?: string
+    material?: string
+  }
 ): IfcElement[] {
-  console.log("Filtering elements:", property, operator, value)
+  const { filterType = "property", pset, property, value, storey, material } = options
+  const matchValue = (propValue: any, pattern?: string) => {
+    if (!pattern) return true
+    const str = String(propValue)
+    if (pattern.startsWith("/") && pattern.endsWith("/")) {
+      try {
+        const regex = new RegExp(pattern.slice(1, -1))
+        return regex.test(str)
+      } catch {
+        return false
+      }
+    }
+    if (pattern.includes(",")) {
+      const vals = pattern.split(",").map((v) => v.trim())
+      return vals.includes(str)
+    }
+    return str === pattern
+  }
 
   return elements.filter((element) => {
-    const propParts = property.split(".")
-    let propValue: any = element.properties
-
-    for (const part of propParts) {
-      if (!propValue || !propValue[part]) return false
-      propValue = propValue[part]
-    }
-
-    // Ensure we're working with string values for comparison
-    const stringValue = String(propValue)
-
-    switch (operator) {
-      case "equals":
-        return stringValue === value
-      case "contains":
-        return stringValue.includes(value)
-      case "startsWith":
-        return stringValue.startsWith(value)
-      case "endsWith":
-        return stringValue.endsWith(value)
-      default:
+    switch (filterType) {
+      case "storey": {
+        const storeyValue = element.properties?.Level || element.properties?.Storey
+        if (!storeyValue) return false
+        return matchValue(storeyValue, storey)
+      }
+      case "material": {
+        const materialValue = element.properties?.Material
+        if (!materialValue) return false
+        return matchValue(materialValue, material)
+      }
+      case "property":
+      default: {
+        if (pset && property) {
+          const propValue = element.psets?.[pset]?.[property]
+          if (propValue === undefined) return false
+          return matchValue(propValue, value)
+        }
+        if (pset && !property) {
+          const p = element.psets?.[pset]
+          if (!p) return false
+          if (!value) return true
+          return Object.values(p).some((v) => matchValue(v, value))
+        }
+        if (!pset && property) {
+          if (element.properties?.[property] !== undefined) {
+            return matchValue(element.properties[property], value)
+          }
+          if (element.psets) {
+            for (const name in element.psets) {
+              const p = element.psets[name]
+              if (p[property] !== undefined && matchValue(p[property], value)) {
+                return true
+              }
+            }
+          }
+          return false
+        }
+        if (!value) return false
+        if (element.properties && Object.values(element.properties).some((v) => matchValue(v, value))) {
+          return true
+        }
+        if (element.psets) {
+          for (const name in element.psets) {
+            const p = element.psets[name]
+            if (Object.values(p).some((v) => matchValue(v, value))) {
+              return true
+            }
+          }
+        }
         return false
+      }
     }
   })
 }
