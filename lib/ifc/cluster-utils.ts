@@ -306,7 +306,7 @@ export function explodeClusters(clusterSet: ClusterSet, distance: number = 50): 
   const centerPoint = new THREE.Vector3();
 
   // Calculate overall center
-  let totalBounds = new THREE.Box3();
+  const totalBounds = new THREE.Box3();
   clusterArray.forEach(cluster => {
     if (cluster.bbox) {
       totalBounds.union(cluster.bbox);

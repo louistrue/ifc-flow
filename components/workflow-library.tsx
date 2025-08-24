@@ -39,6 +39,7 @@ import {
 import { type Workflow, workflowStorage } from "@/lib/workflow-storage";
 import { useToast } from "@/hooks/use-toast";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { AspectRatio } from "@/components/ui/aspect-ratio";
 
 interface WorkflowLibraryProps {
   open: boolean;
@@ -159,7 +160,7 @@ export function WorkflowLibrary({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[900px] max-h-[80vh] overflow-hidden flex flex-col">
+      <DialogContent className="sm:max-w-[1100px] md:max-w-[1200px] h-[90vh] overflow-y-auto flex flex-col">
         <DialogHeader>
           <DialogTitle>Workflow Library</DialogTitle>
           <DialogDescription>
@@ -170,7 +171,7 @@ export function WorkflowLibrary({
         <Tabs
           value={activeTab}
           onValueChange={setActiveTab}
-          className="flex-1 overflow-hidden flex flex-col"
+          className="flex-1 overflow-auto flex flex-col"
         >
           <div className="flex justify-between items-center mb-4">
             <TabsList>
@@ -202,7 +203,7 @@ export function WorkflowLibrary({
 
           <TabsContent
             value="library"
-            className="flex-1 overflow-hidden flex flex-col gap-4"
+            className="flex-1 overflow-auto flex flex-col gap-4"
           >
             {workflows.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-[400px] text-center">
@@ -238,9 +239,16 @@ export function WorkflowLibrary({
               </div>
             ) : (
               <ScrollArea className="flex-1">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pb-4">
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 pb-4">
                   {filteredWorkflows.map((workflow) => (
-                    <Card key={workflow.id} className="overflow-hidden">
+                    <Card
+                      key={workflow.id}
+                      className="overflow-hidden group cursor-pointer hover:shadow-sm transition-shadow"
+                      onClick={() => {
+                        onLoadWorkflow(workflow);
+                        onOpenChange(false);
+                      }}
+                    >
                       <CardHeader className="pb-2">
                         <div className="flex justify-between items-start">
                           <CardTitle className="text-base">
@@ -251,7 +259,10 @@ export function WorkflowLibrary({
                               variant="ghost"
                               size="icon"
                               className="h-8 w-8"
-                              onClick={() => handleDownloadWorkflow(workflow)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDownloadWorkflow(workflow);
+                              }}
                               title="Download workflow"
                             >
                               <Download className="h-4 w-4" />
@@ -260,20 +271,34 @@ export function WorkflowLibrary({
                               variant="ghost"
                               size="icon"
                               className="h-8 w-8 text-destructive"
-                              onClick={() =>
-                                handleDeleteWorkflow(workflow.id, workflow.name)
-                              }
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteWorkflow(workflow.id, workflow.name);
+                              }}
                               title="Delete workflow"
                             >
                               <Trash2 className="h-4 w-4" />
                             </Button>
                           </div>
                         </div>
-                        <CardDescription className="line-clamp-2 min-h-[40px]">
+                        <CardDescription className="line-clamp-2 min-h-[34px] text-sm">
                           {workflow.description || "No description provided"}
                         </CardDescription>
                       </CardHeader>
                       <CardContent className="pb-2">
+                        <div className="mb-2">
+                          <AspectRatio ratio={3 / 2}>
+                            <img
+                              src={
+                                workflow.thumbnail ||
+                                "/placeholder.svg?height=200&width=300"
+                              }
+                              alt={`${workflow.name} thumbnail`}
+                              className="h-full w-full object-cover rounded-md border"
+                              loading="lazy"
+                            />
+                          </AspectRatio>
+                        </div>
                         <div className="flex items-center text-xs text-muted-foreground gap-4 mb-2">
                           <div className="flex items-center gap-1">
                             <Calendar className="h-3.5 w-3.5" />
@@ -286,8 +311,8 @@ export function WorkflowLibrary({
                             </span>
                           </div>
                         </div>
-                        <div className="flex flex-wrap gap-1 min-h-[28px]">
-                          {workflow.tags.map((tag) => (
+                        <div className="flex flex-wrap gap-1 min-h-[24px]">
+                          {workflow.tags.slice(0, 3).map((tag) => (
                             <Badge
                               key={tag}
                               variant="secondary"
@@ -297,17 +322,25 @@ export function WorkflowLibrary({
                               {tag}
                             </Badge>
                           ))}
+                          {workflow.tags.length > 3 && (
+                            <Badge variant="outline" className="text-xs">
+                              +{workflow.tags.length - 3}
+                            </Badge>
+                          )}
                         </div>
                       </CardContent>
                       <CardFooter className="pt-0">
                         <Button
-                          className="w-full"
-                          onClick={() => {
+                          size="sm"
+                          variant="secondary"
+                          className="ml-auto"
+                          onClick={(e) => {
+                            e.stopPropagation();
                             onLoadWorkflow(workflow);
                             onOpenChange(false);
                           }}
                         >
-                          Load Workflow
+                          Load
                         </Button>
                       </CardFooter>
                     </Card>

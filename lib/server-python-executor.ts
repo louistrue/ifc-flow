@@ -23,11 +23,11 @@ export async function executeServerPython(
     model: any,
     returnType: 'quantity' | 'list' | 'analysis' | 'properties'
 ): Promise<ExecutionResult> {
-    console.log('🐍 Server-side REAL Python execution starting');
+    console.log('🐍 Server-side Python execution starting');
     console.log('Code:', code.substring(0, 200) + '...');
 
     // For now, we'll use the existing Pyodide approach via a different method
-    // In production, you could use child_process with actual Python
+    // We could use child_process with actual Python
 
     try {
         // Since we can't use Workers directly, we'll execute Python differently
@@ -53,7 +53,7 @@ export async function executeServerPython(
 
 /**
  * Execute Python code with intelligent analysis
- * This provides real calculations based on the actual model data
+ * This provides calculations based on the model data
  */
 async function executeWithAnalysis(
     code: string,
@@ -62,7 +62,7 @@ async function executeWithAnalysis(
 ): Promise<any> {
     const lowerCode = code.toLowerCase();
 
-    // Handle real calculations based on actual model data
+    // Handle calculations based on actual model data
     if (!model || !model.elements) {
         throw new Error('No IFC model data available');
     }
@@ -650,29 +650,35 @@ async function executeWithAnalysis(
                 };
             }
 
-            // Return the elements themselves (only if not already handled by len() or sum())
-            // This should only happen for direct by_type queries without aggregation
-            // Return a simplified version suitable for display
-            return {
-                type: 'elements',
-                elementType: ifcType,
-                count: elements.length,
-                elements: elements.slice(0, 10).map((el: any) => ({
-                    id: el.id,
-                    expressId: el.expressId,
-                    type: el.type,
-                    name: el.properties?.Name || 'Unnamed',
-                    globalId: el.properties?.GlobalId,
-                    // Include key properties for display
-                    properties: {
-                        Name: el.properties?.Name,
-                        Description: el.properties?.Description,
-                        Tag: el.properties?.Tag
-                    }
-                })),
-                fullCount: elements.length,
-                description: `${elements.length} ${ifcType} elements found`
-            };
+            // Check if this is a material extraction query - if so, don't return elements yet
+            if (lowerCode.includes('get_material') || lowerCode.includes('material')) {
+                // Let the material extraction handler below process this
+                // Don't return here
+            } else {
+                // Return the elements themselves (only if not already handled by len() or sum())
+                // This should only happen for direct by_type queries without aggregation
+                // Return a simplified version suitable for display
+                return {
+                    type: 'elements',
+                    elementType: ifcType,
+                    count: elements.length,
+                    elements: elements.slice(0, 10).map((el: any) => ({
+                        id: el.id,
+                        expressId: el.expressId,
+                        type: el.type,
+                        name: el.properties?.Name || 'Unnamed',
+                        globalId: el.properties?.GlobalId,
+                        // Include key properties for display
+                        properties: {
+                            Name: el.properties?.Name,
+                            Description: el.properties?.Description,
+                            Tag: el.properties?.Tag
+                        }
+                    })),
+                    fullCount: elements.length,
+                    description: `${elements.length} ${ifcType} elements found`
+                };
+            }
         }
     }
 
@@ -746,7 +752,16 @@ async function executeWithAnalysis(
         const materials = new Set<string>();
         const materialData: any[] = [];
 
-        model.elements.forEach((el: any) => {
+        // Check if we're looking for materials of a specific element type
+        const typeMatch = code.match(/by_type\(['"](\w+)['"]\)/);
+        const ifcType = typeMatch ? typeMatch[1] : null;
+
+        // Filter elements by type if specified
+        const elementsToCheck = ifcType
+            ? model.elements.filter((el: any) => el.type === ifcType)
+            : model.elements;
+
+        elementsToCheck.forEach((el: any) => {
             if (el.material) {
                 const matName = typeof el.material === 'string' ? el.material : el.material.Name;
                 materials.add(matName);
@@ -758,10 +773,29 @@ async function executeWithAnalysis(
             }
         });
 
+        const uniqueMaterials = Array.from(materials);
+
+        // If the code ends with list() or is requesting a list, return in list format
+        if (returnType === 'list' || lowerCode.endsWith('list(materials)') || lowerCode.includes('list(materials)')) {
+            return {
+                type: 'list',
+                property: 'Material',
+                elementType: ifcType || 'Element',
+                totalElements: elementsToCheck.length,
+                foundCount: materialData.length,
+                uniqueCount: uniqueMaterials.length,
+                uniqueValues: uniqueMaterials,
+                description: `Found ${uniqueMaterials.length} unique materials in ${materialData.length} ${ifcType || 'element'}s`
+            };
+        }
+
+        // Otherwise return detailed material info
         return {
-            materials: Array.from(materials),
+            type: 'materials',
+            materials: uniqueMaterials,
             elementsWithMaterials: materialData.length,
-            sampleData: materialData.slice(0, 10)
+            sampleData: materialData.slice(0, 10),
+            elementType: ifcType || 'Element'
         };
     }
 

@@ -74,8 +74,7 @@ function safeStringify(value: any): string {
   }
 }
 
-// This is a simplified workflow executor
-// In a real application, this would be more sophisticated with proper error handling and progress tracking
+// TODO: error handling and progress tracking
 export class WorkflowExecutor {
   private nodes: any[] = [];
   private edges: any[] = [];
@@ -553,7 +552,7 @@ export class WorkflowExecutor {
           // console.log("Using value from input:", inputValues.valueInput);
 
           // Handle different input types for valueInput
-          let inputValue = inputValues.valueInput;
+          const inputValue = inputValues.valueInput;
 
           // If it's a complex object, try to extract a usable value
           if (typeof inputValue === "object" && inputValue !== null) {
@@ -1340,7 +1339,7 @@ export class WorkflowExecutor {
     const includeOpenings = node.data.properties?.includeOpenings !== "false";
 
     // Filter elements by type first (same as standard extraction)
-    let filteredElements = extractGeometry(model, elementType, includeOpenings);
+    const filteredElements = extractGeometry(model, elementType, includeOpenings);
 
     // Get viewer element count and validate against viewer
     const viewerElementCount = withActiveViewer(viewer => viewer.getElementCount()) || 0;

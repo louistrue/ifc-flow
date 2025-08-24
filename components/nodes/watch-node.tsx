@@ -10,6 +10,7 @@ import {
   Copy,
   Check,
   Database,
+  List,
 } from "lucide-react";
 import { formatPropertyValue } from "@/lib/ifc/property-utils";
 import React from "react";
@@ -152,6 +153,11 @@ export const WatchNode = memo(
     const [updateCounter, setUpdateCounter] = useState(0);
     const prevInputDataRef = useRef<any>(null);
     const keyRef = useRef<string>(`watch-${id}-${Date.now()}`);
+    const [isReceivingData, setIsReceivingData] = useState(false);
+    const [lastUpdateTime, setLastUpdateTime] = useState<number>(0);
+
+    // Store the actual data locally to prevent loss during re-renders
+    const [localInputData, setLocalInputData] = useState<any>(data.inputData);
 
     // For tracking display mode - extracted from properties for easier access
     const [localDisplayMode, setLocalDisplayMode] = useState(data.properties?.displayMode || "table");
@@ -160,6 +166,32 @@ export const WatchNode = memo(
     useEffect(() => {
       setLocalDisplayMode(data.properties?.displayMode || "table");
     }, [data.properties?.displayMode]);
+
+    // Initialize local data on first mount or when receiving new data from props
+    useEffect(() => {
+      // If props have data, sync it
+      if (data.inputData) {
+        // Check if it's different from what we have
+        try {
+          const isSameData = localInputData &&
+            data.inputData.type === localInputData.type &&
+            JSON.stringify(data.inputData.value) === JSON.stringify(localInputData.value);
+
+          if (!isSameData) {
+            console.log(`Syncing inputData from props for watch node ${id}`);
+            setLocalInputData(data.inputData);
+          }
+        } catch (e) {
+          // If comparison fails, update anyway
+          console.log(`Syncing inputData from props for watch node ${id} (comparison failed)`);
+          setLocalInputData(data.inputData);
+        }
+      }
+      // Important: DON'T clear local data if props are undefined
+      // This preserves the data even if parent re-renders
+    }, [data.inputData, id]); // Include id for consistency
+
+
 
     // Keyboard handler for display mode toggling
     const handleKeyDown = useCallback((e: KeyboardEvent) => {
@@ -210,14 +242,17 @@ export const WatchNode = memo(
 
     // Effect to detect actual data changes and force updates
     useEffect(() => {
-      if (!data.inputData) return;
-
+      // Always process data updates, even if undefined
       const currentInputData = data.inputData;
       const prevInputData = prevInputDataRef.current;
 
       // Do a deep comparison of the input data
       const hasChanged = () => {
-        if (!prevInputData) return true;
+        // If both are undefined, no change
+        if (!prevInputData && !currentInputData) return false;
+
+        // If one is undefined and the other isn't, it's a change
+        if (!prevInputData || !currentInputData) return true;
 
         // Compare type changes
         if (prevInputData.type !== currentInputData.type) return true;
@@ -247,7 +282,12 @@ export const WatchNode = memo(
           }
         } else {
           // For other types, do a basic comparison
-          if (JSON.stringify(prevInputData.value) !== JSON.stringify(currentInputData.value)) {
+          try {
+            if (JSON.stringify(prevInputData.value) !== JSON.stringify(currentInputData.value)) {
+              return true;
+            }
+          } catch {
+            // If stringify fails, assume changed
             return true;
           }
         }
@@ -257,8 +297,28 @@ export const WatchNode = memo(
 
       // If data has changed, update the component
       if (hasChanged()) {
-        // Store the new data
-        prevInputDataRef.current = JSON.parse(JSON.stringify(currentInputData));
+        console.log(`Watch node ${id} data changed:`, currentInputData?.type, currentInputData?.value ? 'has value' : 'no value');
+
+        // Only update local state if we have actual data
+        // Don't clear it if props become undefined
+        if (currentInputData) {
+          setLocalInputData(currentInputData);
+
+          // Show data receiving indicator
+          setIsReceivingData(true);
+          setLastUpdateTime(Date.now());
+        }
+
+        // Store the new data - handle undefined case
+        if (currentInputData) {
+          try {
+            prevInputDataRef.current = JSON.parse(JSON.stringify(currentInputData));
+          } catch {
+            prevInputDataRef.current = currentInputData;
+          }
+        } else {
+          prevInputDataRef.current = null;
+        }
 
         // Generate a new key to force remounting
         keyRef.current = `watch-${id}-${Date.now()}`;
@@ -270,6 +330,13 @@ export const WatchNode = memo(
         window.requestAnimationFrame(() => {
           setUpdateCounter(prev => prev + 1);
         });
+
+        // Hide the receiving indicator after a short delay
+        if (currentInputData) {
+          setTimeout(() => {
+            setIsReceivingData(false);
+          }, 1000);
+        }
       }
     }, [data.inputData, id]);
 
@@ -296,14 +363,56 @@ export const WatchNode = memo(
     const height = data.height || 200;
     const contentHeight = Math.max(height - 80, 80); // Subtract header and footer space
 
-    // Get real data from input connections or empty data if none available
-    const inputData = data.inputData || { type: "unknown", value: undefined };
+    // Use local state data which persists through re-renders
+    const inputData = localInputData || { type: "unknown", value: undefined };
+    if (inputData && inputData.type) {
+      console.log('👀 WatchNode input received:', {
+        type: inputData.type,
+        hasValue: !!inputData.value,
+        valueType: typeof inputData.value,
+        keys: inputData.value && typeof inputData.value === 'object' ? Object.keys(inputData.value) : undefined,
+        rows: Array.isArray(inputData.value) ? inputData.value.length : (inputData.value?.rowCount || 0),
+        sample: Array.isArray(inputData.value) ? inputData.value.slice(0, 2) : inputData.value
+      });
+    }
     // Use the local display mode for rendering
     const displayMode = localDisplayMode || data.properties?.displayMode || "table";
 
+    // Auto-switch display mode for quantity results
+    useEffect(() => {
+      if (inputData?.type === "quantityResults" && inputData?.value?.groups) {
+        // For quantity results, switch to table mode for best visualization
+        const currentMode = localDisplayMode;
+        if (currentMode !== "table" && currentMode !== "chart") {
+          console.log(`Watch node auto-switching from ${currentMode} to table mode for quantity results`);
+
+          setLocalDisplayMode("table");
+          setNodes(nodes =>
+            nodes.map(node => {
+              if (node.id === id) {
+                return {
+                  ...node,
+                  data: {
+                    ...node.data,
+                    properties: {
+                      ...node.data.properties,
+                      displayMode: "table"
+                    }
+                  }
+                };
+              }
+              return node;
+            })
+          );
+        }
+      }
+    }, [inputData?.type, inputData?.value?.groups, localDisplayMode, id, setNodes]);
+
     // Debug output - comment out in production
+    const dataSource = inputData === localInputData ? '(from local)' : '(from props)';
     console.log(`Rendering WatchNode ${id}, key: ${keyRef.current}, counter: ${updateCounter}, mode: ${displayMode}, data:`,
-      inputData.type, inputData.value ? (typeof inputData.value === 'object' ? Object.keys(inputData.value).length : inputData.value) : 'undefined');
+      inputData.type, inputData.value ? (typeof inputData.value === 'object' ? Object.keys(inputData.value).length : inputData.value) : 'undefined',
+      dataSource);
 
     // Handle window mouse events for resizing
     const startResize = useCallback(
@@ -352,9 +461,10 @@ export const WatchNode = memo(
 
     // Copy data to clipboard
     const copyToClipboard = () => {
-      if (!inputData.value) return;
+      const dataToUse = localInputData || inputData;
+      if (!dataToUse?.value) return;
 
-      const jsonString = JSON.stringify(inputData.value, null, 2);
+      const jsonString = JSON.stringify(dataToUse.value, null, 2);
       navigator.clipboard
         .writeText(jsonString)
         .then(() => {
@@ -1337,9 +1447,356 @@ export const WatchNode = memo(
         return renderOccupancyResults();
       }
 
-      // Special handling for quantity results - use for both table and chart modes
-      if (inputData.type === "quantityResults" && (displayMode === "table" || displayMode === "chart")) {
+      // Special handling for quantity results - prioritize this data type for auto-display
+      if (inputData.type === "quantityResults") {
+        // Auto-switch to table mode for quantity results if not already in compatible mode
+        if (displayMode === "raw" && inputData.value && inputData.value.groups) {
+          // For raw mode, show a simplified version
+          const { groups, unit, total } = inputData.value;
+          const groupEntries = Object.entries(groups || {});
+          return (
+            <div className="space-y-3">
+              <div className="text-xs mb-2 flex justify-between">
+                <span className="flex items-center gap-1">
+                  <BarChart2 className="h-3 w-3" />
+                  <span>AI Analysis Results</span>
+                </span>
+              </div>
+
+              <div className="bg-blue-50 dark:bg-blue-900 p-3 rounded">
+                <div className="text-sm font-medium text-blue-800 dark:text-blue-200 mb-2">
+                  Total: {total} {unit === 'count' ? 'items' : unit}
+                </div>
+                <div className="space-y-1">
+                  {groupEntries.slice(0, 5).map(([key, value]: [string, number], i) => (
+                    <div key={i} className="flex justify-between text-xs">
+                      <span>{key.replace('Ifc', '')}:</span>
+                      <span className="font-medium">{value} {unit === 'count' ? '' : unit}</span>
+                    </div>
+                  ))}
+                  {groupEntries.length > 5 && (
+                    <div className="text-xs text-gray-500 mt-1">
+                      ... and {groupEntries.length - 5} more
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        }
+
+        // For table/chart modes, use the full quantity results renderer
+        if (displayMode === "table" || displayMode === "chart") {
+          return renderQuantityResults();
+        }
+
+        // For other modes, still show quantity results as primary content
         return renderQuantityResults();
+      }
+
+      // Special handling for AI SQL results
+      if (inputData.type === "aiSqlResults") {
+        console.log("📊 [DEBUG] Watch node received aiSqlResults:", {
+          type: inputData.type,
+          hasValue: !!inputData.value,
+          valueKeys: inputData.value ? Object.keys(inputData.value) : null,
+          resultCount: inputData.value?.result?.length,
+          timestamp: inputData.value?.timestamp
+        });
+
+        const sqlData = inputData.value;
+        if (!sqlData) {
+          console.log("📊 [DEBUG] No SQL data in inputData.value");
+          return (
+            <div className="text-xs text-gray-400 flex items-center justify-center h-full italic">
+              No SQL data available
+            </div>
+          );
+        }
+
+        return (
+          <div className="space-y-3">
+            <div className="text-xs mb-2 flex justify-between">
+              <span className="flex items-center gap-1">
+                <Database className="h-3 w-3" />
+                <span>Results</span>
+              </span>
+              <span>{sqlData.rowCount || sqlData.result?.length || 0} rows</span>
+            </div>
+
+            {/* Minimal debug info */}
+            <div className="bg-yellow-50 dark:bg-yellow-900/20 p-2 rounded text-xs border border-yellow-200 dark:border-yellow-700">
+              <div className="font-medium text-yellow-800 dark:text-yellow-200 mb-1">Debug Info:</div>
+              <div className="space-y-1 text-yellow-700 dark:text-yellow-300">
+                <div>Rows: {sqlData.result?.length || 0}</div>
+                <div>Timestamp: {sqlData.timestamp ? new Date(sqlData.timestamp).toLocaleTimeString() : '—'}</div>
+              </div>
+            </div>
+
+            {/* Results table */}
+            {sqlData.result && Array.isArray(sqlData.result) && sqlData.result.length > 0 && (
+              <div className="overflow-auto" style={{ maxHeight: `${contentHeight - 150}px` }}>
+                <table className="w-full text-xs">
+                  <thead className="bg-gray-100 dark:bg-gray-800 dark:text-gray-200 sticky top-0">
+                    <tr>
+                      {Object.keys(sqlData.result[0]).map((key) => (
+                        <th key={key} className="p-1 text-left font-medium">
+                          {key}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sqlData.result.slice(0, 50).map((row, i) => (
+                      <tr key={i} className={i % 2 === 0 ? 'bg-gray-50 dark:bg-gray-700' : ''}>
+                        {Object.values(row).map((value: any, j) => (
+                          <td key={j} className="p-1 border-t border-gray-200 dark:border-gray-600">
+                            {typeof value === 'object' ? JSON.stringify(value) : String(value || '—')}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {sqlData.result.length > 50 && (
+                  <div className="text-xs text-gray-500 mt-2 text-center">
+                    Showing first 50 of {sqlData.result.length} rows
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* No results */}
+            {(!sqlData.result || !Array.isArray(sqlData.result) || sqlData.result.length === 0) && (
+              <div className="text-xs text-gray-500 text-center py-4">
+                No results returned from query
+              </div>
+            )}
+          </div>
+        );
+      }
+
+      // Special handling for full model data
+      if (inputData.type === "model" && inputData.value) {
+        const model = inputData.value;
+        const elements = model.elements || [];
+
+        if (displayMode === "chart" && model.elementCounts) {
+          // Show element type distribution
+          const chartData = Object.entries(model.elementCounts)
+            .filter(([_, count]) => count > 0)
+            .map(([type, count], index) => ({
+              name: type.replace('Ifc', ''),
+              value: count,
+              fill: COLORS[index % COLORS.length]
+            }));
+
+          return (
+            <div className="space-y-3">
+              <div className="text-xs mb-1 flex justify-between">
+                <span className="flex items-center gap-1">
+                  <Database className="h-3 w-3" />
+                  <span>Model Elements</span>
+                </span>
+                <span>{model.totalElements} total</span>
+              </div>
+              <div style={{ width: '100%', height: Math.min(contentHeight - 50, 220) }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={chartData}
+                      cx="50%"
+                      cy="50%"
+                      outerRadius={60}
+                      innerRadius={30}
+                      fill="#8884d8"
+                      dataKey="value"
+                      label={({ name, percent }) => percent >= 0.05 ? `${name}: ${(percent * 100).toFixed(0)}%` : null}
+                    >
+                      {chartData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.fill} />
+                      ))}
+                    </Pie>
+                    <Tooltip />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          );
+        }
+
+        // Table view of all elements with their properties
+        return (
+          <div className="space-y-3">
+            <div className="text-xs mb-2 flex justify-between">
+              <span className="flex items-center gap-1">
+                <Database className="h-3 w-3" />
+                <span>Full Model Data</span>
+              </span>
+              <span>{elements.length} elements</span>
+            </div>
+
+            {/* Summary stats */}
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <div className="bg-blue-50 dark:bg-blue-900 p-2 rounded">
+                <div className="font-medium text-blue-800 dark:text-blue-200">Total Elements</div>
+                <div className="text-lg font-bold text-blue-600 dark:text-blue-300">{model.totalElements}</div>
+              </div>
+              <div className="bg-green-50 dark:bg-green-900 p-2 rounded">
+                <div className="font-medium text-green-800 dark:text-green-200">Schema</div>
+                <div className="text-lg font-bold text-green-600 dark:text-green-300">{model.schema}</div>
+              </div>
+            </div>
+
+            {/* Elements table with names */}
+            <div className="overflow-auto" style={{ maxHeight: `${contentHeight - 120}px` }}>
+              <table className="w-full text-xs">
+                <thead className="bg-gray-100 dark:bg-gray-800 dark:text-gray-200 sticky top-0">
+                  <tr>
+                    <th className="p-1 text-left">Type</th>
+                    <th className="p-1 text-left">Name</th>
+                    <th className="p-1 text-left">GlobalId</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {elements.slice(0, 100).map((element: any, i: number) => (
+                    <tr key={i} className={i % 2 === 0 ? 'bg-gray-50 dark:bg-gray-700' : ''}>
+                      <td className="p-1 border-t border-gray-200 dark:border-gray-600">
+                        {element.type?.replace('Ifc', '') || 'Unknown'}
+                      </td>
+                      <td className="p-1 border-t border-gray-200 dark:border-gray-600 truncate max-w-[150px]"
+                        title={element.properties?.Name || element.Name || '—'}>
+                        {element.properties?.Name || element.Name || '—'}
+                      </td>
+                      <td className="p-1 border-t border-gray-200 dark:border-gray-600 font-mono text-[10px]">
+                        {element.properties?.GlobalId || element.GlobalId || '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {elements.length > 100 && (
+                <div className="text-xs text-gray-500 mt-2 text-center">
+                  Showing first 100 of {elements.length} elements
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      }
+
+      // Special handling for AI tool results
+      if (inputData.type === "aiToolResults" && inputData.value) {
+        return (
+          <div className="space-y-3">
+            <div className="text-xs mb-2 flex justify-between">
+              <span className="flex items-center gap-1">
+                <BarChart2 className="h-3 w-3" />
+                <span>AI Analysis Results</span>
+              </span>
+            </div>
+
+            <div className="space-y-2">
+              {inputData.value.map((result: any, i: number) => (
+                <div key={i} className="bg-gray-50 dark:bg-gray-800 rounded p-2">
+                  <div className="flex items-center gap-2 mb-1">
+                    <div className={`w-2 h-2 rounded-full ${result.type === 'count' ? 'bg-blue-500' :
+                      result.type === 'area' || result.type === 'volume' ? 'bg-green-500' :
+                        result.type === 'materials' ? 'bg-purple-500' :
+                          'bg-gray-500'
+                      }`} />
+                    <span className="text-xs font-medium capitalize">{result.type}</span>
+                  </div>
+
+                  {result.value && (
+                    <div className="text-xs">
+                      <span className="text-gray-600 dark:text-gray-400">Value: </span>
+                      <span className="font-medium">
+                        {typeof result.value === 'number' ? result.value.toLocaleString() : result.value}
+                        {result.unit && ` ${result.unit}`}
+                      </span>
+                    </div>
+                  )}
+
+                  {result.elementType && (
+                    <div className="text-xs text-gray-600 dark:text-gray-400">
+                      Type: {result.elementType.replace('Ifc', '')}
+                    </div>
+                  )}
+
+                  {result.description && (
+                    <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                      {result.description}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      }
+
+      // Special handling for list results (names, materials, etc.)
+      if (inputData.type === "list" && inputData.value) {
+        const items = inputData.value;
+        const property = (inputData as any).property || 'Item';
+        const elementType = (inputData as any).elementType || 'Element';
+
+        return (
+          <div className="space-y-3">
+            <div className="text-xs mb-2 flex justify-between">
+              <span className="flex items-center gap-1">
+                <List className="h-3 w-3" />
+                <span>{property} List</span>
+              </span>
+              <span>{items.length} {elementType.replace('Ifc', '')}s</span>
+            </div>
+
+            {/* List display */}
+            <div className="overflow-auto" style={{ maxHeight: `${contentHeight - 40}px` }}>
+              {displayMode === "chart" ? (
+                // Show as grouped cards in chart mode
+                <div className="grid grid-cols-2 gap-2">
+                  {items.slice(0, 20).map((item: any, i: number) => (
+                    <div key={i} className="bg-gray-50 dark:bg-gray-800 p-2 rounded text-xs truncate" title={String(item)}>
+                      {String(item) || '—'}
+                    </div>
+                  ))}
+                </div>
+              ) : displayMode === "raw" ? (
+                // Show as JSON in raw mode
+                <pre className="bg-gray-50 dark:bg-gray-900 p-2 rounded text-xs font-mono overflow-auto">
+                  {JSON.stringify(items, null, 2)}
+                </pre>
+              ) : (
+                // Table view (default)
+                <table className="w-full text-xs">
+                  <thead className="bg-gray-100 dark:bg-gray-800 dark:text-gray-200 sticky top-0">
+                    <tr>
+                      <th className="p-1 text-left">#</th>
+                      <th className="p-1 text-left">{property}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {items.slice(0, 100).map((item: any, i: number) => (
+                      <tr key={i} className={i % 2 === 0 ? 'bg-gray-50 dark:bg-gray-700' : ''}>
+                        <td className="p-1 border-t border-gray-200 dark:border-gray-600 text-gray-500">{i + 1}</td>
+                        <td className="p-1 border-t border-gray-200 dark:border-gray-600">
+                          {String(item) || '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+              {items.length > 100 && (
+                <div className="text-xs text-gray-500 mt-2 text-center">
+                  Showing first 100 of {items.length} items
+                </div>
+              )}
+            </div>
+          </div>
+        );
       }
 
       // Table view (default)
@@ -1537,11 +1994,22 @@ export const WatchNode = memo(
         data-nodrag={isResizing ? "true" : undefined}
         data-watch-counter={updateCounter}
       >
-        <div className="bg-teal-500 text-white px-3 py-1 flex items-center gap-2 nodrag-handle">
-          <Database className="h-4 w-4" />
+        <div className={`bg-teal-500 text-white px-3 py-1 flex items-center gap-2 nodrag-handle transition-all duration-200 ${isReceivingData ? 'bg-green-500 shadow-lg shadow-green-400/50' : ''}`}>
+          <Database className={`h-4 w-4 transition-all duration-200 ${isReceivingData ? 'animate-pulse' : ''}`} />
           <div className="text-sm font-medium truncate">
             {data.label || "Results Viewer"}
           </div>
+          {isReceivingData && (
+            <div className="flex items-center gap-1 ml-auto">
+              <div className="w-2 h-2 bg-green-200 rounded-full animate-pulse"></div>
+              <span className="text-xs font-medium">Receiving Data</span>
+            </div>
+          )}
+          {lastUpdateTime > 0 && !isReceivingData && (
+            <div className="ml-auto text-xs opacity-70">
+              Updated {new Date(lastUpdateTime).toLocaleTimeString()}
+            </div>
+          )}
         </div>
         <div className="p-3">
           <div className="text-xs mb-1 flex justify-between">
@@ -1568,7 +2036,7 @@ export const WatchNode = memo(
           </div>
           <div
             style={{ height: `${contentHeight}px` }}
-            className="overflow-auto"
+            className={`overflow-auto transition-all duration-300 ${isReceivingData ? 'bg-green-50 dark:bg-green-900/20' : ''}`}
           >
             {renderData()}
           </div>

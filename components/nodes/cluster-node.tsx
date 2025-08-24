@@ -46,7 +46,7 @@ export const ClusterNode = memo(
     const handleClusterToggle = (clusterKey: string, visible: boolean) => {
       if (clusterSet) {
         toggleClusterVisibility(clusterSet, clusterKey, visible);
-        // Note: In a real implementation, you'd want to trigger a re-render
+        // TODO: trigger a re-render
         // This could be done through a state management system or callback
       }
     };

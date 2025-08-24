@@ -2,10 +2,137 @@
 
 // Import Pyodide
 importScripts("https://cdn.jsdelivr.net/pyodide/v0.23.4/full/pyodide.js");
+// Load sql.js (SQLite WASM)
+importScripts("https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.2/sql-wasm.js");
 
 let pyodide = null;
 // Create a cache to store the loaded IFC model data
 let ifcModelCache = null;
+let pySqliteReady = false;
+
+// sql.js module and in-memory database
+let SQLModule = null;
+let sqliteDb = null;
+let currentSqlKey = null; // key for IndexedDB persistence per model
+
+async function initSqlJsModule() {
+  if (SQLModule) return SQLModule;
+  // initSqlJs is exposed by sql-wasm.js
+  // Locate WASM via CDN
+  SQLModule = await initSqlJs({
+    locateFile: (file) => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.2/${file}`,
+  });
+  return SQLModule;
+}
+
+// IndexedDB helpers to persist database bytes
+const IDB_NAME = 'ifc-sql-db';
+const IDB_STORE = 'sqlite';
+
+function idbOpen() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(IDB_NAME, 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(IDB_STORE)) {
+        db.createObjectStore(IDB_STORE);
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function idbPut(key, bytes) {
+  const db = await idbOpen();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, 'readwrite');
+    tx.oncomplete = () => { db.close(); resolve(); };
+    tx.onerror = () => { db.close(); reject(tx.error); };
+    tx.objectStore(IDB_STORE).put(bytes, key);
+  });
+}
+
+async function idbGet(key) {
+  const db = await idbOpen();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, 'readonly');
+    const req = tx.objectStore(IDB_STORE).get(key);
+    req.onsuccess = () => { const v = req.result || null; db.close(); resolve(v); };
+    req.onerror = () => { const e = req.error; db.close(); reject(e); };
+  });
+}
+
+async function buildSqlJsDb(elements, key) {
+  await initSqlJsModule();
+  sqliteDb = new SQLModule.Database();
+  // Schema: normalized columns and helpful views for LLM queries
+  sqliteDb.exec(
+    `PRAGMA journal_mode=OFF; PRAGMA synchronous=OFF; BEGIN;
+     CREATE TABLE IF NOT EXISTS elements (
+       id TEXT PRIMARY KEY,         -- Prefer GlobalId when available
+       GlobalId TEXT,               -- Explicit GlobalId
+       type TEXT,                   -- IFC type, e.g., IfcWall
+       category TEXT,               -- Normalized type without 'Ifc' prefix and StandardCase
+       Name TEXT                    -- Element name
+     );
+     CREATE INDEX IF NOT EXISTS idx_elements_type ON elements(type);
+     CREATE INDEX IF NOT EXISTS idx_elements_category ON elements(category);
+     CREATE INDEX IF NOT EXISTS idx_elements_name ON elements(Name);
+     -- Convenience view to allow queries using 'IfcElement'
+     CREATE VIEW IF NOT EXISTS IfcElement AS
+       SELECT id, GlobalId, type, category, Name FROM elements;
+     -- Optional spaces table derived from elements
+     CREATE TABLE IF NOT EXISTS ifc_spaces (
+       GlobalId TEXT PRIMARY KEY,
+       Name TEXT
+     );
+     COMMIT;`
+  );
+  // Insert elements
+  const stmt = sqliteDb.prepare("INSERT OR REPLACE INTO elements (id, GlobalId, type, category, Name) VALUES (?, ?, ?, ?, ?)");
+  const spaceStmt = sqliteDb.prepare("INSERT OR REPLACE INTO ifc_spaces (GlobalId, Name) VALUES (?, ?)");
+  try {
+    sqliteDb.exec('BEGIN');
+    for (const el of elements) {
+      const globalId = el.properties?.GlobalId || el.GlobalId || null;
+      const id = globalId || el.id || null;
+      const typeRaw = el.type || el.element_type || null;
+      const name = (el.properties && el.properties.Name) || el.Name || el.name || null;
+      if (!id || !typeRaw) continue;
+      const type = String(typeRaw);
+      const category = type.replace(/^Ifc/i, '').replace(/StandardCase$/i, '');
+      stmt.run([String(id), globalId ? String(globalId) : null, type, category, name != null ? String(name) : null]);
+      if (/^IfcSpace$/i.test(type)) {
+        if (globalId) {
+          spaceStmt.run([String(globalId), name != null ? String(name) : null]);
+        }
+      }
+    }
+    sqliteDb.exec('COMMIT');
+  } catch (e) {
+    try { sqliteDb.exec('ROLLBACK'); } catch { }
+    throw e;
+  } finally {
+    stmt.free && stmt.free();
+    spaceStmt.free && spaceStmt.free();
+  }
+  // Persist to IDB
+  const bytes = sqliteDb.export();
+  await idbPut(key, bytes);
+}
+
+async function ensureDbLoaded(key) {
+  if (sqliteDb) return sqliteDb;
+  await initSqlJsModule();
+  const bytes = await idbGet(key);
+  if (bytes) {
+    sqliteDb = new SQLModule.Database(new Uint8Array(bytes));
+    currentSqlKey = key;
+    return sqliteDb;
+  }
+  return null;
+}
 
 // Initialize Pyodide with IfcOpenShell
 async function initPyodide() {
@@ -55,10 +182,32 @@ async function initPyodide() {
       await micropip.install('https://cdn.jsdelivr.net/gh/IfcOpenShell/wasm-wheels@33b437e5fd5425e606f34aff602c42034ff5e6dc/ifcopenshell-0.8.1+latest-cp312-cp312-emscripten_3_1_58_wasm32.whl')
     `);
 
-    // Initialize the module for caching IFC models
+    // Try to enable Python sqlite3 for ifcopenshell.sql usage (if available)
+    try {
+      await pyodide.loadPackage(["sqlite3"]);
+      await pyodide.runPythonAsync(`import sqlite3\nprint('sqlite3 available')`);
+      pySqliteReady = true;
+    } catch (e) {
+      pySqliteReady = false;
+      console.warn('Python sqlite3 not available in Pyodide, using sql.js path');
+    }
+
+    // Initialize the module for caching IFC models and SQLite support
+    self.postMessage({
+      type: "progress",
+      message: "Installing SQLite support...",
+      percentage: 60,
+    });
+
+    // Initialize ifcopenshell with built-in SQLite support
     await pyodide.runPythonAsync(`
       import sys
-      import ifcopenshell      
+      import ifcopenshell
+      import ifcopenshell.sql
+      import json
+
+      # Global variables for storing SQLite databases
+      sqlite_databases = {}
     `);
 
     self.postMessage({
@@ -135,6 +284,11 @@ self.onmessage = async (event) => {
         await handleRunPython({ ...data, messageId });
         break;
 
+      case "querySqlite":
+        console.log("Starting SQLite query...", { query: data.query, modelId: data.modelId });
+        await handleSqliteQuery({ ...data, messageId });
+        break;
+
       default:
         throw new Error(`Unknown action: ${action}`);
     }
@@ -206,6 +360,7 @@ async function handleLoadIfc({ arrayBuffer, filename, messageId }) {
           import json
           import sys
           import traceback
+          import sqlite3
         `,
           { globals: namespace }
         );
@@ -256,10 +411,35 @@ async function handleLoadIfc({ arrayBuffer, filename, messageId }) {
               }
               print("Python: Result object created")
               
+              # Prefer IfcPatch Ifc2Sql when sqlite3 is available; otherwise, JS sql.js fallback
+              if sqlite3 is not None:
+                  try:
+                      print("Python: Attempt Ifc2Sql via IfcPatch")
+                      import ifcopenshell.ifcpatch
+                      sqlite_db_path = '/model.db'
+                      ifcopenshell.ifcpatch.execute({
+                          'input': 'model.ifc',
+                          'file': None,
+                          'recipe': 'Ifc2Sql',
+                          'arguments': {'sqlite_path': sqlite_db_path}
+                      })
+                      print("Python: Ifc2Sql created SQLite database successfully")
+                      sqlite_success = True
+                  except Exception as e:
+                      print(f"Python: Ifc2Sql failed: {e}")
+                      sqlite_db_path = None
+                      sqlite_success = False
+              else:
+                  print("Python: sqlite3 not available; will use sql.js in worker")
+                  sqlite_db_path = None
+                  sqlite_success = False
+
               # Store as JSON in a variable - don't return it yet
+              result_obj["sqlite_db"] = sqlite_db_path if sqlite_success else None
+              result_obj["sqlite_success"] = sqlite_success
               result_json = json.dumps(result_obj)
               print("Python: JSON serialization complete")
-              
+
               # Store a success flag
               success = True
               error_msg = None
@@ -299,6 +479,7 @@ async function handleLoadIfc({ arrayBuffer, filename, messageId }) {
         ifcModelCache = {
           filename: modelInfo.filename,
           schema: modelInfo.schema,
+          model_id: modelInfo.model_id
         };
 
         console.log("handleLoadIfc: Model info extracted and cached", {
@@ -308,6 +489,24 @@ async function handleLoadIfc({ arrayBuffer, filename, messageId }) {
           modelId: modelInfo.model_id,
           jsCache: JSON.stringify(ifcModelCache),
         });
+
+        // If Ifc2Sql created a SQLite DB, persist it to IndexedDB for client-side queries
+        try {
+          if (modelInfo.sqlite_success && modelInfo.sqlite_db) {
+            console.log("handleLoadIfc: Persisting Ifc2Sql DB to IndexedDB", {
+              sqlite_db: modelInfo.sqlite_db,
+            });
+            const dbBytes = pyodide.FS.readFile(modelInfo.sqlite_db);
+            const key = `model-sqlite-db:${modelInfo.model_id || modelInfo.filename || 'default'}`;
+            currentSqlKey = key;
+            await idbPut(key, dbBytes);
+            console.log("handleLoadIfc: SQLite DB persisted to IndexedDB");
+          } else {
+            console.log("handleLoadIfc: Ifc2Sql DB not available; sql.js fallback will build after extraction");
+          }
+        } catch (e) {
+          console.warn("handleLoadIfc: Failed to persist Ifc2Sql DB to IndexedDB", e);
+        }
 
         // Clean up
         namespace.destroy();
@@ -625,6 +824,22 @@ async function handleExtractData({ types = ["IfcWall"], messageId }) {
         messageId,
       });
       console.log("handleExtractData: Sent dataExtracted message");
+
+      // Build and persist sql.js database (client-side SQLite) ONLY if a full DB is not already saved
+      try {
+        const modelKey = (ifcModelCache && (ifcModelCache.model_id || ifcModelCache.filename)) || 'default';
+        const key = `model-sqlite-db:${modelKey}:v2`;
+        currentSqlKey = key;
+        const existing = await ensureDbLoaded(key);
+        if (!existing) {
+          await buildSqlJsDb(elements, key);
+          console.log('handleExtractData: sql.js DB built and persisted (fallback)');
+        } else {
+          console.log('handleExtractData: Existing SQLite DB found in IndexedDB; skipping fallback build');
+        }
+      } catch (e) {
+        console.warn('handleExtractData: sql.js DB ensure/build failed:', e);
+      }
     } catch (pythonError) {
       console.error("Python execution error:", pythonError);
       throw new Error(`Python error: ${pythonError.message}`);
@@ -2012,6 +2227,128 @@ except Exception as e:
     self.postMessage({
       type: "error",
       message: `Error running Python code: ${error.message}`,
+      messageId,
+    });
+  }
+}
+
+// Handle SQLite database queries
+async function handleSqliteQuery({ query, modelId, messageId }) {
+  try {
+    console.log("handleSqliteQuery: Processing query (sql.js)", { query, modelId });
+    await initSqlJsModule();
+    const key = 'model-sqlite-db';
+    await ensureDbLoaded(key);
+    if (!sqliteDb) {
+      throw new Error('SQLite database is not available in sql.js');
+    }
+    // Normalize or synthesize SQL if a natural language prompt was provided
+    let rewritten = String(query || '').trim();
+    if (!/^select\b/i.test(rewritten)) {
+      const nl = rewritten.toLowerCase();
+      // Heuristics
+      const wantCount = /\bcount\b|how many|number of/.test(nl);
+      const wantNames = /\bname\b|\bnames\b|list\b/.test(nl);
+      const wantGuids = /\bguid\b|\bifcguid\b|globalid/.test(nl);
+      const limitMatch = nl.match(/\b(\d+)\b/) || nl.match(/\b(one|two|three|four|five|six|seven|eight|nine|ten)\b/);
+      const wordToNum = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 };
+      let limit = 10;
+      if (limitMatch) {
+        const val = limitMatch[1];
+        limit = Number(val) || wordToNum[val] || limit;
+      }
+      const typeMap = [
+        ['wall', 'Wall'],
+        ['slab', 'Slab'],
+        ['beam', 'Beam'],
+        ['column', 'Column'],
+        ['door', 'Door'],
+        ['window', 'Window'],
+        ['roof', 'Roof'],
+        ['stair', 'Stair'],
+        ['space', 'Space'],
+        ['furnish', 'FurnishingElement']
+      ];
+      let cat = '';
+      for (const [k, v] of typeMap) { if (nl.includes(k)) { cat = v; break; } }
+      if (wantCount) {
+        if (cat) {
+          rewritten = `SELECT COUNT(*) AS count FROM IfcElement WHERE category='${cat}'`;
+        } else {
+          rewritten = `SELECT COUNT(*) AS count FROM IfcElement`;
+        }
+      } else if (wantGuids) {
+        if (cat) {
+          rewritten = `SELECT GlobalId, Name FROM IfcElement WHERE category='${cat}' LIMIT ${limit}`;
+        } else {
+          rewritten = `SELECT GlobalId, Name FROM IfcElement LIMIT ${limit}`;
+        }
+      } else if (wantNames || cat) {
+        if (cat) {
+          rewritten = `SELECT DISTINCT Name FROM IfcElement WHERE category='${cat}' AND Name IS NOT NULL LIMIT ${limit}`;
+        } else {
+          rewritten = `SELECT DISTINCT Name FROM IfcElement WHERE Name IS NOT NULL LIMIT ${limit}`;
+        }
+      } else {
+        // Generic fallback
+        rewritten = `SELECT * FROM IfcElement LIMIT ${limit}`;
+      }
+    }
+    // Rewrite common aliases so prompts using IfcElement.* work
+
+    // Column normalizations
+    rewritten = rewritten.replace(/\bIfcGuid\b/gi, 'GlobalId');
+
+    // Legacy table/alias prefixes from previous schemas → map to IfcElement view
+    rewritten = rewritten
+      .replace(/\bIfcBuildingElementElement\./gi, 'IfcElement.')
+      .replace(/\bIfcBuildingElement\./gi, 'IfcElement.')
+      .replace(/\bIfcObject\./gi, 'IfcElement.');
+
+    // Table/view and type normalizations
+
+    rewritten = rewritten
+      .replace(/\bFROM\s+elements\s+AS\s+IfcElement\b/gi, 'FROM IfcElement AS IfcElement')
+      .replace(/\bFROM\s+elements\b/gi, 'FROM IfcElement')
+      .replace(/\bJOIN\s+elements\b/gi, 'JOIN IfcElement')
+      .replace(/\bIfcElement\.element_type\b/gi, 'IfcElement.type')
+      .replace(/\belement_type\b/gi, 'type')
+      .replace(/\bIfcType\b/gi, 'type');
+
+    // Normalize type comparisons when users use category names (Wall, Slab, ...)
+    // type = 'Wall'  => category = 'Wall'
+    rewritten = rewritten.replace(/\btype\s*=\s*'([A-Za-z]+)'/gi, (m, val) => {
+      if (/^Ifc/i.test(val)) return m; // already full Ifc type
+      return `category='${val}'`;
+    });
+    // type IN ('Wall','Door') => category IN (...)
+    rewritten = rewritten.replace(/\btype\s+IN\s*\(([^\)]+)\)/gi, (m, list) => `category IN (${list})`);
+    // LOWER(type) = 'wall' => LOWER(category) = 'wall'
+    rewritten = rewritten.replace(/LOWER\(\s*type\s*\)/gi, 'LOWER(category)');
+    const result = sqliteDb.exec(rewritten);
+    // sql.js returns an array of result sets; map first set to list of objects
+    let rows = [];
+    if (Array.isArray(result) && result.length > 0) {
+      const r = result[0];
+      const cols = r.columns || [];
+      rows = (r.values || []).map(arr => {
+        const obj = {};
+        cols.forEach((c, i) => { obj[c] = arr[i]; });
+        return obj;
+      });
+    }
+    console.log("handleSqliteQuery: Query successful", { resultCount: rows.length });
+    self.postMessage({
+      type: "sqliteResult",
+      messageId,
+      result: rows,
+      query: rewritten,
+    });
+  } catch (error) {
+    console.error("handleSqliteQuery error:", error);
+    self.postMessage({
+      type: "error",
+      message: `Error executing SQLite query: ${error.message}`,
       messageId,
     });
   }

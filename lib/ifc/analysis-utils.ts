@@ -68,7 +68,7 @@ export async function performAnalysis(
   }
 }
 
-// Real space analysis implementation using IfcOpenShell
+// Space analysis implementation using IfcOpenShell
 async function performRealSpaceAnalysis(
   model: IfcModel,
   elements: IfcElement[],

@@ -31,7 +31,7 @@ export function spatialQuery(
 }
 
 /**
- * Spatial query using real Three.js geometry from viewer
+ * Spatial query using Three.js geometry from viewer
  */
 function spatialQueryWithViewer(
   elements: IfcElement[],

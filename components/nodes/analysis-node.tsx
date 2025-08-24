@@ -67,7 +67,7 @@ export const AnalysisNode = memo(({ data, id, isConnectable }: NodeProps<Analysi
       const nodeProgressMessages = data.progressMessages || [];
 
       if (nodeProgressMessages.length > 0) {
-        // Use real progress messages from the worker
+        // Use progress messages from the worker
         setProgressMessages(nodeProgressMessages);
       } else {
         // Use initial default messages when starting

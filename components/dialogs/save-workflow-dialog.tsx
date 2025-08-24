@@ -119,7 +119,7 @@ export function SaveWorkflowDialog({
   };
 
   // Handle save to library
-  const handleSaveToLibrary = () => {
+  const handleSaveToLibrary = async () => {
     if (!name.trim()) {
       alert("Please enter a name for your workflow");
       return;
@@ -127,7 +127,7 @@ export function SaveWorkflowDialog({
 
     const id = existingWorkflow?.id || crypto.randomUUID();
     const createdAt = existingWorkflow?.createdAt || new Date().toISOString();
-    const thumbnail = workflowStorage.generateThumbnail(flowData);
+    const thumbnail = await workflowStorage.generateThumbnail(flowData);
 
     const workflow = {
       id,

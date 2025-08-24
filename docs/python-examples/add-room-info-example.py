@@ -66,10 +66,6 @@ try:
                 result["elements_skipped"] += 1
                 continue
             
-            # Create a custom property set for space assignment
-            # Note: In a real implementation, you would use the IFC API to create proper property sets
-            # This is a simplified example showing the concept
-            
             element_info = {
                 "id": element.GlobalId,
                 "type": element.is_a(),

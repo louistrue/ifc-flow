@@ -851,7 +851,7 @@ export function NodePropertyRenderer({
               size="sm"
               className="w-full"
               onClick={() => {
-                // In a real app, this would trigger a data refresh
+                // TODO: trigger a data refresh
                 console.log("Refreshing watch data");
               }}
             >

@@ -49,6 +49,8 @@ export interface IfcModel {
   elementCounts?: Record<string, number>;
   totalElements?: number;
   elements: IfcElement[];
+  sqliteDb?: string; // Path to SQLite database file
+  sqliteSuccess?: boolean; // Whether SQLite creation was successful
 }
 
 // Global reference to the last loaded model
@@ -125,11 +127,11 @@ export function getModelPropertyNames(model?: IfcModel): string[] {
 // Worker management
 let ifcWorker: Worker | null = null;
 let isWorkerInitialized = false;
-let workerPromiseResolvers: Map<
+const workerPromiseResolvers: Map<
   string,
   { resolve: Function; reject: Function }
 > = new Map();
-let workerMessageId = 0;
+const workerMessageId = 0;
 
 // Initialize the worker
 export async function initializeWorker(): Promise<void> {
@@ -139,6 +141,10 @@ export async function initializeWorker(): Promise<void> {
 
   try {
     console.log("Initializing IFC worker...");
+    // Guard: only create Web Worker in browser context
+    if (typeof window === 'undefined' || typeof Worker === 'undefined') {
+      throw new Error('Worker is not defined');
+    }
     // Create worker
     ifcWorker = new Worker("/ifcWorker.js");
 
@@ -205,6 +211,12 @@ export async function initializeWorker(): Promise<void> {
         }
       } else if (type === "pythonResult") {
         console.log("Received python result:", data);
+        if (messageId && workerPromiseResolvers.has(messageId)) {
+          workerPromiseResolvers.get(messageId)!.resolve(data.result);
+          workerPromiseResolvers.delete(messageId);
+        }
+      } else if (type === "sqliteResult") {
+        console.log("Received SQLite result:", { query: data.query, resultCount: data.result?.length || 0 });
         if (messageId && workerPromiseResolvers.has(messageId)) {
           workerPromiseResolvers.get(messageId)!.resolve(data.result);
           workerPromiseResolvers.delete(messageId);
@@ -344,10 +356,13 @@ export async function loadIfcFile(
     const elementResult = await new Promise((resolve, reject) => {
       workerPromiseResolvers.set(messageId2, { resolve, reject });
 
-      // Request all types that have at least one element
+      // Request all types that have at least one element, plus IfcSpace for queries
       const types = Object.entries(modelInfo.element_counts)
         .filter(([_, count]) => (count as number) > 0)
         .map(([type]) => type);
+      if (!types.includes('IfcSpace')) {
+        types.push('IfcSpace');
+      }
 
       console.log("Extracting element types:", types);
 
@@ -391,6 +406,8 @@ export async function loadIfcFile(
       elementCounts: modelInfo.element_counts,
       totalElements: modelInfo.total_elements,
       elements: elements,
+      sqliteDb: modelInfo.sqlite_db,
+      sqliteSuccess: modelInfo.sqlite_success,
     };
 
     console.log("Model created successfully:", {
@@ -418,6 +435,62 @@ export async function loadIfcFile(
     throw new Error(
       `Failed to load IFC file: ${err instanceof Error ? err.message : String(err)
       }`
+    );
+  }
+}
+
+// Query the SQLite database for the given model
+export async function querySqliteDatabase(
+  model: IfcModel,
+  query: string
+): Promise<any[]> {
+  console.log("Querying SQLite database:", { modelId: model.id, query });
+
+  try {
+    // Initialize the worker if needed (browser only)
+    await initializeWorker();
+
+    if (!ifcWorker) {
+      throw new Error("IFC worker initialization failed");
+    }
+
+    // Generate a unique message ID
+    const messageId = `sqlite_${Date.now()}_${Math.random()
+      .toString(36)
+      .substr(2, 9)}`;
+
+    // Create a promise for this operation
+    const result = await new Promise((resolve, reject) => {
+      workerPromiseResolvers.set(messageId, { resolve, reject });
+
+      // Send the query to the worker
+      ifcWorker!.postMessage({
+        action: "querySqlite",
+        messageId,
+        data: {
+          query,
+          modelId: model.id,
+        },
+      });
+
+      // Set a timeout
+      setTimeout(() => {
+        if (workerPromiseResolvers.has(messageId)) {
+          reject(new Error("SQLite query timed out"));
+          workerPromiseResolvers.delete(messageId);
+        }
+      }, 30000);
+    });
+
+    const sqliteResult = result as any;
+    console.log("SQLite query result:", sqliteResult);
+
+    return sqliteResult;
+
+  } catch (error) {
+    console.error("Error querying SQLite database:", error);
+    throw new Error(
+      `Failed to query SQLite database: ${error instanceof Error ? error.message : String(error)}`
     );
   }
 }
@@ -701,7 +774,7 @@ export function transformElements(
     return [];
   }
 
-  // In a real implementation, we'd use IfcOpenShell to apply transformations
+  // TODO: se IfcOpenShell to apply transformations
   // This would require creating a new IfcLocalPlacement with a transformation matrix
 
   // For now, just return a copy of the elements with transformation info
@@ -1252,7 +1325,7 @@ export function manageClassifications(
       const enhancedElement = { ...element };
 
       // Look for classifications in properties or psets
-      let classifications = [];
+      const classifications = [];
 
       // Check in direct properties
       if (element.properties.Classification) {
@@ -1341,8 +1414,8 @@ export function spatialQuery(
     return [];
   }
 
-  // NOTE: In a real implementation, we would use IfcOpenShell to perform spatial calculations
-  // This would involve extracting geometry and using computational geometry algorithms
+  // TODO: Use IfcOpenShell to perform spatial calculations
+  // This could involve extracting geometry and using computational geometry algorithms
 
   // For demonstration, we'll simulate spatial relationships
   switch (queryType) {
@@ -1351,7 +1424,6 @@ export function spatialQuery(
       // This would require bounding box comparisons in a real implementation
       return elements.filter((element) => {
         // Simple simulation: check if the element has a containment relationship
-        // This is just a placeholder - real implementation would check geometric containment
         return element.properties.ContainedIn === referenceElements[0].id;
       });
 
@@ -1366,9 +1438,7 @@ export function spatialQuery(
 
     case "intersecting":
       // Find elements that intersect with reference elements
-      // This would require collision detection in a real implementation
       return elements.filter(() => {
-        // This is just a placeholder - real implementation would check geometric intersection
         // Randomly select about 30% of elements for demonstration
         return Math.random() < 0.3;
       });
@@ -1377,7 +1447,6 @@ export function spatialQuery(
       // Find elements that touch reference elements
       // This would require adjacency detection in a real implementation
       return elements.filter(() => {
-        // This is just a placeholder - real implementation would check for adjacency
         // Randomly select about 20% of elements for demonstration
         return Math.random() < 0.2;
       });
@@ -1386,7 +1455,6 @@ export function spatialQuery(
       // Find elements within a certain distance of reference elements
       // This would require distance calculation in a real implementation
       return elements.filter(() => {
-        // This is just a placeholder - real implementation would check distances
         // Simulate that more elements are included as distance increases
         const normalized = Math.min(1, distance / 10);
         return Math.random() < normalized;
@@ -1426,12 +1494,7 @@ export function queryRelationships(
     ? relationType
     : "containment";
 
-  // NOTE: In a real implementation, we would use IfcOpenShell to traverse relationships
-
-  // This is a placeholder - in reality we would check actual relationships
-  // For now, we'll return a subset of elements based on the relationship type
-
-  // In a real implementation, you'd do something like:
+  // TODO: Use IfcOpenShell to traverse relationships
   /*
   if (direction === "outgoing") {
     return elements.flatMap(element => {
