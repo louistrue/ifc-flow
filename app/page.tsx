@@ -16,7 +16,9 @@ import ReactFlow, {
   type Edge,
   type Node,
   type NodeChange,
+  type EdgeChange,
   applyNodeChanges,
+  applyEdgeChanges,
   type OnInit,
   type SelectionMode,
 } from "reactflow";
@@ -584,6 +586,20 @@ function FlowWithProvider() {
       }
     },
     [nodes, edges, onNodesChange, saveToHistory, isNodeDragging]
+  );
+
+  // Track edge deletions in history
+  const handleEdgesChange = useCallback(
+    (changes: EdgeChange[]) => {
+      const hasRemoval = changes.some((change) => change.type === "remove");
+      const updatedEdges = applyEdgeChanges(changes, edges);
+      onEdgesChange(changes);
+
+      if (hasRemoval) {
+        saveToHistory(nodes, updatedEdges);
+      }
+    },
+    [nodes, edges, onEdgesChange, saveToHistory]
   );
 
   const onConnect = useCallback(
@@ -1231,7 +1247,7 @@ function FlowWithProvider() {
                 nodes={nodes}
                 edges={edges}
                 onNodesChange={handleNodesChange}
-                onEdgesChange={onEdgesChange}
+                onEdgesChange={handleEdgesChange}
                 onConnect={onConnect}
                 onDrop={onDrop}
                 onDragOver={onDragOver}
