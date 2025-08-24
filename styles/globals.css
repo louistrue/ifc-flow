@@ -92,3 +92,11 @@ body {
     @apply bg-background text-foreground;
   }
 }
+/* Highlight selected edges with a cyan glow */
+.react-flow__edge.selected .react-flow__edge-path,
+.react-flow__edge:focus .react-flow__edge-path,
+.react-flow__edge:focus-visible .react-flow__edge-path {
+  stroke: #06b6d4;
+  stroke-width: 2;
+  filter: drop-shadow(0 0 6px rgba(6, 182, 212, 0.6));
+}
