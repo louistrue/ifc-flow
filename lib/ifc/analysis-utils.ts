@@ -1,4 +1,4 @@
-import type { IfcElement, IfcModel } from "@/lib/ifc/ifc-loader"
+import type { IfcElement, IfcModel } from "@/lib/ifc-utils"
 
 // Analysis functions
 export async function performAnalysis(

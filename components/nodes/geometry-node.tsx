@@ -8,7 +8,7 @@ import {
   extractGeometry,
   extractGeometryWithGeom,
 } from "@/lib/ifc/geometry-utils";
-import type { IfcModel } from "@/lib/ifc/ifc-loader";
+import type { IfcModel } from "@/lib/ifc-utils";
 import type { NodeStatus } from "@/components/node-status-badge";
 import { NodeLoadingIndicator } from "./node-loading-indicator";
 import { GeometryNodeData as BaseGeometryNodeData } from "./node-types";

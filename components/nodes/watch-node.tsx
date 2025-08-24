@@ -492,7 +492,7 @@ export const WatchNode = memo(
 
       // Extract element type counts
       const typeCounts: Record<string, number> = {};
-      inputData.value.forEach((element) => {
+      inputData.value.forEach((element: any) => {
         if (element.type) {
           typeCounts[element.type] = (typeCounts[element.type] || 0) + 1;
         }
@@ -1468,7 +1468,7 @@ export const WatchNode = memo(
                   Total: {total} {unit === 'count' ? 'items' : unit}
                 </div>
                 <div className="space-y-1">
-                  {groupEntries.slice(0, 5).map(([key, value]: [string, number], i) => (
+                  {groupEntries.slice(0, 5).map(([key, value]: [string, unknown], i) => (
                     <div key={i} className="flex justify-between text-xs">
                       <span>{key.replace('Ifc', '')}:</span>
                       <span className="font-medium">{value} {unit === 'count' ? '' : unit}</span>
@@ -1547,7 +1547,7 @@ export const WatchNode = memo(
                     </tr>
                   </thead>
                   <tbody>
-                    {sqlData.result.slice(0, 50).map((row, i) => (
+                    {sqlData.result.slice(0, 50).map((row: any, i: number) => (
                       <tr key={i} className={i % 2 === 0 ? 'bg-gray-50 dark:bg-gray-700' : ''}>
                         {Object.values(row).map((value: any, j) => (
                           <td key={j} className="p-1 border-t border-gray-200 dark:border-gray-600">
@@ -1584,8 +1584,8 @@ export const WatchNode = memo(
         if (displayMode === "chart" && model.elementCounts) {
           // Show element type distribution
           const chartData = Object.entries(model.elementCounts)
-            .filter(([_, count]) => count > 0)
-            .map(([type, count], index) => ({
+            .filter(([_, count]: [string, unknown]) => typeof count === 'number' && count > 0)
+            .map(([type, count]: [string, unknown], index) => ({
               name: type.replace('Ifc', ''),
               value: count,
               fill: COLORS[index % COLORS.length]
@@ -1825,7 +1825,7 @@ export const WatchNode = memo(
                     <tbody>
                       {Object.entries(
                         inputData.value.reduce(
-                          (acc, item) => {
+                          (acc: Record<string, number>, item: any) => {
                             const type = item.type;
                             acc[type] = (acc[type] || 0) + 1;
                             return acc;
@@ -1869,7 +1869,7 @@ export const WatchNode = memo(
                   Array ({inputData.value.length} items)
                 </div>
                 <ul className="list-disc list-inside">
-                  {inputData.value.map((item, i) => (
+                  {inputData.value.map((item: any, i: number) => (
                     <li key={i} className="mb-1">
                       {toDisplayableContent(item)}
                     </li>

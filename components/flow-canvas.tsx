@@ -13,7 +13,7 @@ import ReactFlow, {
 } from "reactflow";
 import "reactflow/dist/style.css";
 import { FileUp } from "lucide-react";
-import { loadIfcFile } from "@/lib/ifc";
+import { loadIfcFile } from "@/lib/ifc-utils";
 import { useToast } from "@/hooks/use-toast";
 
 // Import node types

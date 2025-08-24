@@ -1,4 +1,4 @@
-import type { IfcElement } from "@/lib/ifc/ifc-loader"
+import type { IfcElement } from "@/lib/ifc-utils"
 
 // Quantity extraction functions
 export function extractQuantities(

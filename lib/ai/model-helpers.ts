@@ -1,4 +1,4 @@
-import type { IfcModel } from "@/lib/ifc/ifc-loader";
+import type { IfcModel } from "@/lib/ifc-utils";
 
 // Count elements of a given IFC type in the model
 export function countElements(model: IfcModel | null | undefined, type: string): number {

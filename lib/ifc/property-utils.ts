@@ -1,4 +1,4 @@
-import type { IfcElement } from "@/lib/ifc/ifc-loader";
+import type { IfcElement } from "@/lib/ifc-utils";
 
 /**
  * Get a property value from an element using IfcOpenShell conventions

@@ -1,4 +1,4 @@
-import type { IfcElement } from "@/lib/ifc/ifc-loader"
+import type { IfcElement } from "@/lib/ifc-utils"
 import { withActiveViewer, hasActiveModel } from "./viewer-manager";
 import * as THREE from "three";
 
@@ -41,7 +41,7 @@ function spatialQueryWithViewer(
 ): IfcElement[] {
   return withActiveViewer(viewer => {
     console.log(`Performing spatial query with real geometry: ${queryType}`);
-    
+
     // Get bounding boxes for reference elements
     const referenceBounds: THREE.Box3[] = [];
     referenceElements.forEach(refElement => {
@@ -88,7 +88,7 @@ function spatialQueryWithViewer(
             const refCenter = new THREE.Vector3();
             elementBbox.getCenter(elementCenter);
             refBbox.getCenter(refCenter);
-            
+
             const actualDistance = elementCenter.distanceTo(refCenter);
             return actualDistance <= distance;
 
