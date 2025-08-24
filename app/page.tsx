@@ -16,6 +16,7 @@ import ReactFlow, {
   type Edge,
   type Node,
   type NodeChange,
+  type EdgeChange,
   applyNodeChanges,
   type OnInit,
   type SelectionMode,
@@ -351,6 +352,7 @@ function FlowWithProvider() {
     "delete,backspace",
     (e) => {
       e.preventDefault();
+      e.stopPropagation();
       handleDelete();
     },
     { enableOnFormTags: false }
@@ -448,18 +450,21 @@ function FlowWithProvider() {
   // Handle delete
   const handleDelete = useCallback(() => {
     const selectedNodes = nodes.filter((node) => node.selected);
-    if (selectedNodes.length === 0) return;
+    const selectedEdges = edges.filter((edge) => edge.selected);
+    if (selectedNodes.length === 0 && selectedEdges.length === 0) return;
 
     // Save current state to history before deletion
     saveToHistory(nodes, edges);
 
     const selectedNodeIds = selectedNodes.map((node) => node.id);
+    const selectedEdgeIds = selectedEdges.map((edge) => edge.id);
 
     // Remove selected nodes
     const remainingNodes = nodes.filter((node) => !node.selected);
-    // Remove edges connected to deleted nodes
+    // Remove edges connected to deleted nodes or explicitly selected
     const remainingEdges = edges.filter(
       (edge) =>
+        !selectedEdgeIds.includes(edge.id) &&
         !selectedNodeIds.includes(edge.source) &&
         !selectedNodeIds.includes(edge.target)
     );
@@ -469,7 +474,7 @@ function FlowWithProvider() {
 
     toast({
       title: "Deleted",
-      description: `${selectedNodes.length} node(s) deleted`,
+      description: `${selectedNodes.length} node(s) and ${selectedEdges.length} connection(s) deleted`,
     });
   }, [nodes, edges, saveToHistory, setNodes, setEdges, toast]);
 
@@ -584,6 +589,18 @@ function FlowWithProvider() {
       }
     },
     [nodes, edges, onNodesChange, saveToHistory, isNodeDragging]
+  );
+
+  const handleEdgesChange = useCallback(
+    (changes: EdgeChange[]) => {
+      const isRemoval = changes.some((change) => change.type === "remove");
+      if (isRemoval) {
+        // Save current state before edge removal
+        saveToHistory(nodes, edges);
+      }
+      onEdgesChange(changes);
+    },
+    [nodes, edges, onEdgesChange, saveToHistory]
   );
 
   const onConnect = useCallback(
@@ -1231,7 +1248,7 @@ function FlowWithProvider() {
                 nodes={nodes}
                 edges={edges}
                 onNodesChange={handleNodesChange}
-                onEdgesChange={onEdgesChange}
+                onEdgesChange={handleEdgesChange}
                 onConnect={onConnect}
                 onDrop={onDrop}
                 onDragOver={onDragOver}
