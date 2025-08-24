@@ -92,3 +92,18 @@ body {
     @apply bg-background text-foreground;
   }
 }
+
+/* Highlight selected React Flow edges with a glow effect */
+.react-flow__edge-path {
+  transition: stroke 0.2s ease, stroke-width 0.2s ease;
+}
+
+.react-flow__edge:hover .react-flow__edge-path {
+  stroke: rgb(34 211 238); /* cyan-400 */
+}
+
+.react-flow__edge.selected .react-flow__edge-path {
+  stroke: rgb(6 182 212); /* cyan-500 */
+  stroke-width: 2;
+  filter: drop-shadow(0 0 6px rgba(6, 182, 212, 0.6));
+}
