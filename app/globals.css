@@ -309,6 +309,24 @@ body {
     transition: none !important;
   }
 
+  /* React Flow selected edge styling */
+  .react-flow__edge-path {
+    transition: stroke 0.2s ease-in-out, filter 0.2s ease-in-out;
+  }
+
+  .react-flow__edge.selected .react-flow__edge-path {
+    stroke: #3b82f6 !important; /* blue-500 */
+    stroke-width: 3px;
+    filter: drop-shadow(0 0 4px rgba(59, 130, 246, 0.7))
+      drop-shadow(0 0 10px rgba(59, 130, 246, 0.5));
+  }
+
+  .dark .react-flow__edge.selected .react-flow__edge-path {
+    stroke: #93c5fd !important; /* blue-300 */
+    filter: drop-shadow(0 0 4px rgba(147, 197, 253, 0.7))
+      drop-shadow(0 0 10px rgba(147, 197, 253, 0.5));
+  }
+
   /* Remove focus outline from React Flow canvas */
   .react-flow:focus {
     outline: none !important;
