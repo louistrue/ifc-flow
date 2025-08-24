@@ -243,6 +243,30 @@ body {
     box-shadow: 0 0 0 2px rgba(20, 184, 166, 0.55), 0 0 16px rgba(20, 184, 166, 0.6), 0 0 36px rgba(20, 184, 166, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.25) !important;
   }
 
+  .react-flow__node.selected .border-indigo-500 {
+    box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.55), 0 0 16px rgba(99, 102, 241, 0.6), 0 0 36px rgba(99, 102, 241, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.25) !important;
+  }
+
+  .react-flow__node.selected .border-violet-500 {
+    box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.55), 0 0 16px rgba(139, 92, 246, 0.6), 0 0 36px rgba(139, 92, 246, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.25) !important;
+  }
+
+  .react-flow__node.selected .border-yellow-500 {
+    box-shadow: 0 0 0 2px rgba(234, 179, 8, 0.55), 0 0 16px rgba(234, 179, 8, 0.6), 0 0 36px rgba(234, 179, 8, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.25) !important;
+  }
+
+  .react-flow__node.selected .border-teal-600 {
+    box-shadow: 0 0 0 2px rgba(13, 148, 136, 0.55), 0 0 16px rgba(13, 148, 136, 0.6), 0 0 36px rgba(13, 148, 136, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.25) !important;
+  }
+
+  .react-flow__node.selected .border-cyan-400 {
+    box-shadow: 0 0 0 2px rgba(34, 211, 238, 0.55), 0 0 16px rgba(34, 211, 238, 0.6), 0 0 36px rgba(34, 211, 238, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.25) !important;
+  }
+
+  .react-flow__node.selected .border-gray-200 {
+    box-shadow: 0 0 0 2px rgba(229, 231, 235, 0.55), 0 0 16px rgba(229, 231, 235, 0.6), 0 0 36px rgba(229, 231, 235, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.25) !important;
+  }
+
   /* Dark theme tweaks: slightly lighter neon for better contrast */
   .dark .react-flow__node.selected .dark\\:border-blue-400,
   .dark .react-flow__node.selected .border-blue-500 {
@@ -264,7 +288,9 @@ body {
     box-shadow: 0 0 0 2px rgba(251, 146, 60, 0.65), 0 0 18px rgba(251, 146, 60, 0.7), 0 0 40px rgba(251, 146, 60, 0.4), inset 0 0 0 1px rgba(255, 255, 255, 0.18) !important;
   }
 
+  .dark .react-flow__node.selected .dark\\:border-cyan-300,
   .dark .react-flow__node.selected .dark\\:border-cyan-400,
+  .dark .react-flow__node.selected .border-cyan-400,
   .dark .react-flow__node.selected .border-cyan-500,
   .dark .react-flow__node.selected .border-cyan-600 {
     box-shadow: 0 0 0 2px rgba(34, 211, 238, 0.65), 0 0 18px rgba(34, 211, 238, 0.7), 0 0 40px rgba(34, 211, 238, 0.4), inset 0 0 0 1px rgba(255, 255, 255, 0.18) !important;
@@ -291,8 +317,29 @@ body {
   }
 
   .dark .react-flow__node.selected .dark\\:border-teal-400,
-  .dark .react-flow__node.selected .border-teal-500 {
+  .dark .react-flow__node.selected .border-teal-500,
+  .dark .react-flow__node.selected .border-teal-600 {
     box-shadow: 0 0 0 2px rgba(45, 212, 191, 0.65), 0 0 18px rgba(45, 212, 191, 0.7), 0 0 40px rgba(45, 212, 191, 0.4), inset 0 0 0 1px rgba(255, 255, 255, 0.18) !important;
+  }
+
+  .dark .react-flow__node.selected .dark\\:border-indigo-400,
+  .dark .react-flow__node.selected .border-indigo-500 {
+    box-shadow: 0 0 0 2px rgba(129, 140, 248, 0.65), 0 0 18px rgba(129, 140, 248, 0.7), 0 0 40px rgba(129, 140, 248, 0.4), inset 0 0 0 1px rgba(255, 255, 255, 0.18) !important;
+  }
+
+  .dark .react-flow__node.selected .dark\\:border-violet-400,
+  .dark .react-flow__node.selected .border-violet-500 {
+    box-shadow: 0 0 0 2px rgba(167, 139, 250, 0.65), 0 0 18px rgba(167, 139, 250, 0.7), 0 0 40px rgba(167, 139, 250, 0.4), inset 0 0 0 1px rgba(255, 255, 255, 0.18) !important;
+  }
+
+  .dark .react-flow__node.selected .dark\\:border-yellow-400,
+  .dark .react-flow__node.selected .border-yellow-500 {
+    box-shadow: 0 0 0 2px rgba(250, 204, 21, 0.65), 0 0 18px rgba(250, 204, 21, 0.7), 0 0 40px rgba(250, 204, 21, 0.4), inset 0 0 0 1px rgba(255, 255, 255, 0.18) !important;
+  }
+
+  .dark .react-flow__node.selected .dark\\:border-gray-700,
+  .dark .react-flow__node.selected .border-gray-200 {
+    box-shadow: 0 0 0 2px rgba(156, 163, 175, 0.65), 0 0 18px rgba(156, 163, 175, 0.7), 0 0 40px rgba(156, 163, 175, 0.4), inset 0 0 0 1px rgba(255, 255, 255, 0.18) !important;
   }
 
   /* Ensure smooth transitions for non-selected nodes */
