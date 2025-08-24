@@ -5,6 +5,13 @@ import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useEffect, useState } from "react"
 import { getModelPropertyNames } from "@/lib/ifc-utils"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
+import { Info } from "lucide-react"
 
 interface FilterEditorProps {
   properties: {
@@ -14,6 +21,7 @@ interface FilterEditorProps {
     value?: string;
     storey?: string;
     material?: string;
+    ifcClass?: string;
     [key: string]: any;
   };
   setProperties: (properties: any) => void;
@@ -41,6 +49,7 @@ export function FilterEditor({ properties, setProperties }: FilterEditorProps) {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="property">Property</SelectItem>
+            <SelectItem value="ifcClass">IFC Class</SelectItem>
             <SelectItem value="storey">Building Storey</SelectItem>
             <SelectItem value="material">Material</SelectItem>
           </SelectContent>
@@ -76,37 +85,97 @@ export function FilterEditor({ properties, setProperties }: FilterEditorProps) {
             )}
           </div>
           <div className="space-y-2">
-            <Label htmlFor="value">Value</Label>
+            <div className="flex items-center justify-between">
+              <Label htmlFor="value">Value</Label>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Info className="h-4 w-4 text-muted-foreground cursor-help" />
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    Use /regex/ or separate multiple values with ';'.
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </div>
             <Input
               id="value"
               value={properties.value || ""}
               onChange={(e) => setProperties({ ...properties, value: e.target.value })}
-              placeholder="Regex or comma-separated values"
+              placeholder="Regex or ';' separated values"
             />
           </div>
         </>
       )}
 
+      {filterType === "ifcClass" && (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <Label htmlFor="ifcClass">IFC Class</Label>
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Info className="h-4 w-4 text-muted-foreground cursor-help" />
+                </TooltipTrigger>
+                <TooltipContent>
+                  Enter IFC class name(s). Use ';' to separate multiple classes or /regex/.
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </div>
+          <Input
+            id="ifcClass"
+            value={properties.ifcClass || ""}
+            onChange={(e) => setProperties({ ...properties, ifcClass: e.target.value })}
+            placeholder="Any, regex, or enumeration"
+          />
+        </div>
+      )}
+
       {filterType === "storey" && (
         <div className="space-y-2">
-          <Label htmlFor="storey">Storey</Label>
+          <div className="flex items-center justify-between">
+            <Label htmlFor="storey">Storey</Label>
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Info className="h-4 w-4 text-muted-foreground cursor-help" />
+                </TooltipTrigger>
+                <TooltipContent>
+                  Enter storey name. Use ';' to separate multiple names or /regex/.
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </div>
           <Input
             id="storey"
             value={properties.storey || ""}
             onChange={(e) => setProperties({ ...properties, storey: e.target.value })}
-            placeholder="Any or regex / enumeration"
+            placeholder="Any, regex, or enumeration"
           />
         </div>
       )}
 
       {filterType === "material" && (
         <div className="space-y-2">
-          <Label htmlFor="material">Material</Label>
+          <div className="flex items-center justify-between">
+            <Label htmlFor="material">Material</Label>
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Info className="h-4 w-4 text-muted-foreground cursor-help" />
+                </TooltipTrigger>
+                <TooltipContent>
+                  Enter material name. Use ';' to separate multiple materials or /regex/.
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </div>
           <Input
             id="material"
             value={properties.material || ""}
             onChange={(e) => setProperties({ ...properties, material: e.target.value })}
-            placeholder="Any or regex / enumeration"
+            placeholder="Any, regex, or enumeration"
           />
         </div>
       )}

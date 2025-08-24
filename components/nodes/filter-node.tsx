@@ -14,7 +14,14 @@ export const FilterNode = memo(({ data, isConnectable }: NodeProps<FilterNodeDat
       </div>
       <div className="p-3 text-xs">
         {data.properties ? (
-          data.properties.filterType === "storey" ? (
+          data.properties.filterType === "ifcClass" ? (
+            <div className="space-y-1">
+              <div className="flex justify-between">
+                <span>IFC Class:</span>
+                <span className="font-medium">{data.properties.ifcClass || "Any"}</span>
+              </div>
+            </div>
+          ) : data.properties.filterType === "storey" ? (
             <div className="space-y-1">
               <div className="flex justify-between">
                 <span>Storey:</span>
