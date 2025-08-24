@@ -40,9 +40,11 @@ export interface ExportNodeData extends BaseNodeData {
 export interface FilterNodeData extends BaseNodeData {
     properties?: {
         filterType?: string;
-        property?: string;
+        psetName?: string;
+        propertyName?: string;
         value?: string;
-        operator?: string;
+        storey?: string;
+        material?: string;
         [key: string]: any;
     };
 }

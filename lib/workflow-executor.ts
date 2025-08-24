@@ -346,12 +346,14 @@ export class WorkflowExecutor {
             ? inputValues.input
             : inputValues.input.elements;
 
-          result = filterElements(
-            elementsToFilter || [],
-            node.data.properties?.property || "",
-            node.data.properties?.operator || "equals",
-            node.data.properties?.value || ""
-          );
+          result = filterElements(elementsToFilter || [], {
+            filterType: node.data.properties?.filterType || "property",
+            psetName: node.data.properties?.psetName,
+            propertyName: node.data.properties?.propertyName,
+            value: node.data.properties?.value,
+            storey: node.data.properties?.storey,
+            material: node.data.properties?.material,
+          });
         }
         break;
 

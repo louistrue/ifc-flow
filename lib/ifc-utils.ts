@@ -599,74 +599,118 @@ export async function extractGeometryWithGeom(
 }
 
 // Filter elements by property
-export function filterElements(
-  elements: IfcElement[],
-  property: string,
-  operator: string,
-  value: string
-): IfcElement[] {
-  console.log("Filtering elements:", property, operator, value);
+export interface ElementFilter {
+  filterType?: "property" | "storey" | "material";
+  psetName?: string;
+  propertyName?: string;
+  value?: string;
+  storey?: string;
+  material?: string;
+}
 
-  // Add a check for undefined or empty elements
+function matchesPattern(target: string, pattern?: string): boolean {
+  if (!pattern || pattern.trim() === "") return true;
+  if (pattern.startsWith("/") && pattern.endsWith("/")) {
+    try {
+      const regex = new RegExp(pattern.slice(1, -1));
+      return regex.test(target);
+    } catch {
+      return false;
+    }
+  }
+  const parts = pattern.split(",").map(p => p.trim()).filter(Boolean);
+  if (parts.length > 1) {
+    return parts.includes(target);
+  }
+  return target === pattern;
+}
+
+function filterByProperty(elements: IfcElement[], config: ElementFilter): IfcElement[] {
+  const { psetName, propertyName, value } = config;
+  return elements.filter(el => {
+    const matchValue = (val: any) => matchesPattern(String(val), value);
+    if (psetName && propertyName) {
+      const prop = el.psets?.[psetName]?.[propertyName];
+      if (prop === undefined) return false;
+      return matchValue(prop);
+    }
+    if (psetName) {
+      const pset = el.psets?.[psetName];
+      if (!pset) return false;
+      if (!value) return true;
+      return Object.values(pset).some(v => matchValue(v));
+    }
+    if (propertyName) {
+      if (el.psets) {
+        for (const set in el.psets) {
+          const prop = el.psets[set][propertyName];
+          if (prop !== undefined) {
+            if (!value || matchValue(prop)) return true;
+          }
+        }
+      }
+      if (el.properties && el.properties[propertyName] !== undefined) {
+        return matchValue(el.properties[propertyName]);
+      }
+      return false;
+    }
+    if (!value) {
+      return true;
+    }
+    if (el.psets) {
+      for (const set in el.psets) {
+        for (const val of Object.values(el.psets[set])) {
+          if (matchValue(val)) return true;
+        }
+      }
+    }
+    if (el.properties) {
+      for (const val of Object.values(el.properties)) {
+        if (matchValue(val)) return true;
+      }
+    }
+    return false;
+  });
+}
+
+function filterByStorey(elements: IfcElement[], pattern?: string): IfcElement[] {
+  return elements.filter(el => {
+    const storeyVal =
+      (el as any).storey ||
+      el.properties?.Storey ||
+      el.properties?.Level ||
+      el.psets?.["Pset_BuildingStorey"]?.Name ||
+      el.psets?.["Pset_BuildingStorey"]?.Reference;
+    if (storeyVal === undefined) return false;
+    return matchesPattern(String(storeyVal), pattern);
+  });
+}
+
+function filterByMaterial(elements: IfcElement[], pattern?: string): IfcElement[] {
+  return elements.filter(el => {
+    const materialVal =
+      (el as any).material ||
+      el.properties?.Material ||
+      el.psets?.["Pset_MaterialCommon"]?.Material;
+    if (materialVal === undefined) return false;
+    return matchesPattern(String(materialVal), pattern);
+  });
+}
+
+export function filterElements(elements: IfcElement[], config: ElementFilter): IfcElement[] {
+  console.log("Filtering elements:", config);
   if (!elements || elements.length === 0) {
     console.warn("No elements to filter");
     return [];
   }
-
-  return elements.filter((element) => {
-    // Split property path (e.g., "Pset_WallCommon.FireRating")
-    const propParts = property.split(".");
-
-    if (propParts.length === 1) {
-      // Direct property lookup
-      let propValue = element.properties[property];
-      if (propValue === undefined) return false;
-
-      // Convert to string for comparison
-      propValue = String(propValue);
-
-      switch (operator) {
-        case "equals":
-          return propValue === value;
-        case "contains":
-          return propValue.includes(value);
-        case "startsWith":
-          return propValue.startsWith(value);
-        case "endsWith":
-          return propValue.endsWith(value);
-        default:
-          return false;
-      }
-    } else if (propParts.length === 2) {
-      // Property set lookup (e.g., "Pset_WallCommon.FireRating")
-      const [psetName, propName] = propParts;
-
-      // Check in property sets
-      if (element.psets && element.psets[psetName]) {
-        let propValue = element.psets[psetName][propName];
-        if (propValue === undefined) return false;
-
-        // Convert to string for comparison
-        propValue = String(propValue);
-
-        switch (operator) {
-          case "equals":
-            return propValue === value;
-          case "contains":
-            return propValue.includes(value);
-          case "startsWith":
-            return propValue.startsWith(value);
-          case "endsWith":
-            return propValue.endsWith(value);
-          default:
-            return false;
-        }
-      }
-      return false;
-    }
-
-    return false;
-  });
+  switch (config.filterType) {
+    case "storey":
+      return filterByStorey(elements, config.storey);
+    case "material":
+      return filterByMaterial(elements, config.material);
+    default:
+      return filterByProperty(elements, config);
+  }
 }
 
 // Transform elements (using geometric transformations)

@@ -4,8 +4,6 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { useEffect, useState } from "react";
-import { getModelPropertyNames } from "@/lib/ifc-utils";
 import {
   Select,
   SelectContent,
@@ -26,11 +24,6 @@ export function NodePropertyRenderer({
   properties,
   setProperties,
 }: NodePropertyRendererProps) {
-  const [modelProps, setModelProps] = useState<string[]>([]);
-
-  useEffect(() => {
-    setModelProps(getModelPropertyNames());
-  }, []);
   // Return null for ifcNode type to prevent properties panel from rendering anything
   if (node.type === "ifcNode") {
     return null;
@@ -107,54 +100,89 @@ export function NodePropertyRenderer({
       return (
         <div className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="property">Property</Label>
-            <Input
-              id="property"
-              list="model-properties"
-              value={properties.property || ""}
-              onChange={(e) =>
-                setProperties({ ...properties, property: e.target.value })
-              }
-              placeholder="e.g. Pset_WallCommon.FireRating"
-            />
-            {modelProps.length > 0 && (
-              <datalist id="model-properties">
-                {modelProps.map((p) => (
-                  <option key={p} value={p} />
-                ))}
-              </datalist>
-            )}
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="operator">Operator</Label>
+            <Label htmlFor="filterType">Filter Type</Label>
             <Select
-              value={properties.operator || "equals"}
+              value={properties.filterType || "property"}
               onValueChange={(value) =>
-                setProperties({ ...properties, operator: value })
+                setProperties({ ...properties, filterType: value })
               }
             >
-              <SelectTrigger id="operator">
-                <SelectValue placeholder="Select operator" />
+              <SelectTrigger id="filterType">
+                <SelectValue placeholder="Select filter type" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="equals">Equals</SelectItem>
-                <SelectItem value="contains">Contains</SelectItem>
-                <SelectItem value="startsWith">Starts With</SelectItem>
-                <SelectItem value="endsWith">Ends With</SelectItem>
+                <SelectItem value="property">Property</SelectItem>
+                <SelectItem value="storey">Building Storey</SelectItem>
+                <SelectItem value="material">Material</SelectItem>
               </SelectContent>
             </Select>
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="value">Value</Label>
-            <Input
-              id="value"
-              value={properties.value || ""}
-              onChange={(e) =>
-                setProperties({ ...properties, value: e.target.value })
-              }
-              placeholder="Value to match"
-            />
-          </div>
+          {properties.filterType === "property" && (
+            <>
+              <div className="space-y-2">
+                <Label htmlFor="psetName">Pset Name</Label>
+                <Input
+                  id="psetName"
+                  value={properties.psetName || ""}
+                  onChange={(e) =>
+                    setProperties({ ...properties, psetName: e.target.value })
+                  }
+                  placeholder="e.g. Pset_WallCommon"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="propertyName">Property Name</Label>
+                <Input
+                  id="propertyName"
+                  value={properties.propertyName || ""}
+                  onChange={(e) =>
+                    setProperties({
+                      ...properties,
+                      propertyName: e.target.value,
+                    })
+                  }
+                  placeholder="e.g. FireRating"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="value">Value</Label>
+                <Input
+                  id="value"
+                  value={properties.value || ""}
+                  onChange={(e) =>
+                    setProperties({ ...properties, value: e.target.value })
+                  }
+                  placeholder="Regex or comma list"
+                />
+              </div>
+            </>
+          )}
+          {properties.filterType === "storey" && (
+            <div className="space-y-2">
+              <Label htmlFor="storey">Storey</Label>
+              <Input
+                id="storey"
+                value={properties.storey || ""}
+                onChange={(e) =>
+                  setProperties({ ...properties, storey: e.target.value })
+                }
+                placeholder="e.g. Level 1"
+              />
+            </div>
+          )}
+          {properties.filterType === "material" && (
+            <div className="space-y-2">
+              <Label htmlFor="material">Material</Label>
+              <Input
+                id="material"
+                value={properties.material || ""}
+                onChange={(e) =>
+                  setProperties({ ...properties, material: e.target.value })
+                }
+                placeholder="e.g. Concrete"
+              />
+            </div>
+          )}
         </div>
       );
 

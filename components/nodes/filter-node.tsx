@@ -13,24 +13,62 @@ export const FilterNode = memo(({ data, isConnectable }: NodeProps<FilterNodeDat
         <div className="text-sm font-medium truncate">{data.label}</div>
       </div>
       <div className="p-3 text-xs">
-        {data.properties?.property ? (
-          <div className="space-y-1">
-            <div className="flex justify-between">
-              <span>Property:</span>
-              <span className="font-medium">{data.properties.property}</span>
-            </div>
-            <div className="flex justify-between">
-              <span>Operator:</span>
-              <span className="font-medium">{data.properties?.operator || "equals"}</span>
-            </div>
-            <div className="flex justify-between">
-              <span>Value:</span>
-              <span className="font-medium">{data.properties?.value || ""}</span>
-            </div>
-          </div>
-        ) : (
-          <div className="text-muted-foreground">No filter configured</div>
-        )}
+        {(() => {
+          const type = data.properties?.filterType || "property"
+          if (type === "property") {
+            if (
+              data.properties?.psetName ||
+              data.properties?.propertyName ||
+              data.properties?.value
+            ) {
+              return (
+                <div className="space-y-1">
+                  <div className="flex justify-between">
+                    <span>Pset:</span>
+                    <span className="font-medium">
+                      {data.properties.psetName || "any"}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Property:</span>
+                    <span className="font-medium">
+                      {data.properties.propertyName || "any"}
+                    </span>
+                  </div>
+                  {data.properties.value && (
+                    <div className="flex justify-between">
+                      <span>Value:</span>
+                      <span className="font-medium">
+                        {data.properties.value}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )
+            }
+          } else if (type === "storey") {
+            return (
+              <div className="flex justify-between">
+                <span>Storey:</span>
+                <span className="font-medium">
+                  {data.properties?.storey || "any"}
+                </span>
+              </div>
+            )
+          } else if (type === "material") {
+            return (
+              <div className="flex justify-between">
+                <span>Material:</span>
+                <span className="font-medium">
+                  {data.properties?.material || "any"}
+                </span>
+              </div>
+            )
+          }
+          return (
+            <div className="text-muted-foreground">No filter configured</div>
+          )
+        })()}
       </div>
       <Handle
         type="target"
