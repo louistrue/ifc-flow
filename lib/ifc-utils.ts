@@ -608,9 +608,18 @@ export function filterElements(
     value?: string;
     storey?: string;
     material?: string;
+    ifcClass?: string;
   }
 ): IfcElement[] {
-  const { filterType = "property", pset, property, value, storey, material } = options
+  const {
+    filterType = "property",
+    pset,
+    property,
+    value,
+    storey,
+    material,
+    ifcClass,
+  } = options
   console.log("Filtering elements:", filterType, options)
 
   if (!elements || elements.length === 0) {
@@ -621,22 +630,28 @@ export function filterElements(
   const matchValue = (propValue: any, pattern?: string) => {
     if (pattern === undefined || pattern === "") return true
     const str = String(propValue)
+    const strLower = str.toLowerCase()
 
     if (pattern.startsWith("/") && pattern.endsWith("/")) {
       try {
-        const regex = new RegExp(pattern.slice(1, -1))
+        const regex = new RegExp(pattern.slice(1, -1), "i")
         return regex.test(str)
       } catch {
         return false
       }
     }
 
-    if (pattern.includes(",")) {
-      const values = pattern.split(",").map((v) => v.trim())
-      return values.includes(str)
+    if (pattern.includes(";")) {
+      const values = pattern.split(";").map((v) => v.trim().toLowerCase())
+      return values.includes(strLower)
     }
 
-    return str === pattern
+    if (pattern.includes(",")) {
+      const values = pattern.split(",").map((v) => v.trim().toLowerCase())
+      return values.includes(strLower)
+    }
+
+    return strLower === pattern.toLowerCase()
   }
 
   return elements.filter((element) => {
@@ -663,6 +678,12 @@ export function filterElements(
         }
         if (!materialValue) return false
         return matchValue(materialValue, material)
+      }
+
+      case "class": {
+        const classValue = element.type
+        if (!classValue) return false
+        return matchValue(classValue, ifcClass)
       }
 
       case "property":

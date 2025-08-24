@@ -37,7 +37,7 @@ IFC Flow Map provides a graphical interface for viewing, filtering, transforming
 - 🧩 **Multiple Node Types**:
   - 📁 **IFC Node** - Import IFC files
   - 📐 **Geometry Node** - Extract geometric information
-  - 🔍 **Filter Node** - Filter elements using IFC properties (`Pset.PropertyName`)
+  - 🔍 **Filter Node** - Filter elements using IFC properties (`Pset.PropertyName`), IFC class, building storey or material
   - 🔄 **Transform Node** - Apply transformations to elements
   - 👁️ **Viewer Node** - Visualize 3D models
   - 📏 **Quantity Node** - Extract quantity information

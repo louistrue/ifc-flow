@@ -45,6 +45,7 @@ export interface FilterNodeData extends BaseNodeData {
         value?: string;
         storey?: string;
         material?: string;
+        ifcClass?: string;
         [key: string]: any;
     };
 }

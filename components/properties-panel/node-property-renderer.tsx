@@ -13,6 +13,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+  TooltipProvider,
+} from "@/components/ui/tooltip";
 import { DataTransformEditor } from "./property-editors/data-transform-editor";
 
 interface NodePropertyRendererProps {
@@ -121,6 +127,7 @@ export function NodePropertyRenderer({
                 <SelectItem value="property">Property</SelectItem>
                 <SelectItem value="storey">Building Storey</SelectItem>
                 <SelectItem value="material">Material</SelectItem>
+                <SelectItem value="class">IFC Class</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -128,28 +135,69 @@ export function NodePropertyRenderer({
           {properties.filterType === "storey" && (
             <div className="space-y-2">
               <Label htmlFor="storey">Storey</Label>
-              <Input
-                id="storey"
-                value={properties.storey || ""}
-                onChange={(e) =>
-                  setProperties({ ...properties, storey: e.target.value })
-                }
-                placeholder="Any or regex / enumeration"
-              />
+              <TooltipProvider delayDuration={100}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Input
+                      id="storey"
+                      value={properties.storey || ""}
+                      onChange={(e) =>
+                        setProperties({ ...properties, storey: e.target.value })
+                      }
+                      placeholder="Any or regex / enumeration"
+                    />
+                  </TooltipTrigger>
+                  <TooltipContent side="top" align="start">
+                    <p>Use ; to list multiple storeys or wrap with / / for regex.</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
             </div>
           )}
 
           {properties.filterType === "material" && (
             <div className="space-y-2">
               <Label htmlFor="material">Material</Label>
-              <Input
-                id="material"
-                value={properties.material || ""}
-                onChange={(e) =>
-                  setProperties({ ...properties, material: e.target.value })
-                }
-                placeholder="Any or regex / enumeration"
-              />
+              <TooltipProvider delayDuration={100}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Input
+                      id="material"
+                      value={properties.material || ""}
+                      onChange={(e) =>
+                        setProperties({ ...properties, material: e.target.value })
+                      }
+                      placeholder="Any or regex / enumeration"
+                    />
+                  </TooltipTrigger>
+                  <TooltipContent side="top" align="start">
+                    <p>Use ; to list materials or wrap with / / for regex.</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </div>
+          )}
+
+          {properties.filterType === "class" && (
+            <div className="space-y-2">
+              <Label htmlFor="ifcClass">IFC Class</Label>
+              <TooltipProvider delayDuration={100}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Input
+                      id="ifcClass"
+                      value={properties.ifcClass || ""}
+                      onChange={(e) =>
+                        setProperties({ ...properties, ifcClass: e.target.value })
+                      }
+                      placeholder="e.g. IfcWall;IfcSlab"
+                    />
+                  </TooltipTrigger>
+                  <TooltipContent side="top" align="start">
+                    <p>Enter IFC class name or ; separated list. Use / / for regex.</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
             </div>
           )}
 
