@@ -614,9 +614,84 @@ export const AiNode = memo(({ data, id, selected, isConnectable }: NodeProps<AiN
       try {
         // Handle structured tool results (from embedded markers)
         if (typeof apiResult === 'object' && apiResult.type) {
-          // This is already a structured tool result
-          results.push(apiResult);
-          return;
+          // Enhanced handling for the new structured results
+          switch (apiResult.type) {
+            case 'count':
+              results.push({
+                type: 'count',
+                value: apiResult.value,
+                description: apiResult.description,
+                elementType: apiResult.elementType
+              });
+              return;
+
+            case 'list':
+              results.push({
+                type: 'list',
+                items: apiResult.items || apiResult.rawData || [],
+                count: apiResult.count,
+                property: apiResult.property || 'Name',
+                description: apiResult.description,
+                elementType: apiResult.elementType
+              });
+              return;
+
+            case 'properties':
+              results.push({
+                type: 'properties',
+                data: apiResult.properties || apiResult.rawData,
+                count: apiResult.count,
+                description: apiResult.description
+              });
+              return;
+
+            case 'quantities':
+              results.push({
+                type: 'quantityResults',
+                data: apiResult.quantities || apiResult.rawData,
+                count: apiResult.count,
+                description: apiResult.description
+              });
+              return;
+
+            case 'queryResult':
+              // Handle generic query results - try to infer the type
+              if (apiResult.result && Array.isArray(apiResult.result)) {
+                const firstRow = apiResult.result[0];
+                if (firstRow && 'count' in firstRow) {
+                  results.push({
+                    type: 'count',
+                    value: firstRow.count,
+                    description: apiResult.description
+                  });
+                } else if (firstRow && ('Name' in firstRow || 'GlobalId' in firstRow)) {
+                  results.push({
+                    type: 'list',
+                    items: apiResult.result.map((row: any) => row.Name || row.GlobalId || JSON.stringify(row)),
+                    count: apiResult.count,
+                    description: apiResult.description
+                  });
+                } else {
+                  results.push({
+                    type: 'analysis',
+                    data: apiResult.result,
+                    description: apiResult.description || `Found ${apiResult.count || 0} results`
+                  });
+                }
+              } else {
+                results.push({
+                  type: 'analysis',
+                  description: apiResult.description || 'Query completed',
+                  data: apiResult.result
+                });
+              }
+              return;
+
+            default:
+              // Pass through other structured results
+              results.push(apiResult);
+              return;
+          }
         }
 
         // Handle the formatted result string from the API
@@ -791,7 +866,8 @@ export const AiNode = memo(({ data, id, selected, isConnectable }: NodeProps<AiN
   const width = data.width || 320; // Default width widened for better layout
   const height = data.height || 280; // Default height increased to fit chat area
 
-  useEffect(() => {
+  // Memoize the node update to prevent infinite re-renders
+  const updateNodeData = useCallback(() => {
     setNodes((nodes) =>
       nodes.map((n) =>
         n.id === id
@@ -807,6 +883,20 @@ export const AiNode = memo(({ data, id, selected, isConnectable }: NodeProps<AiN
       )
     );
   }, [messages, isLoading, id, setNodes]);
+
+  // Use a ref to track if we need to update
+  const prevDataRef = useRef<{ messages: Message[]; isLoading: boolean }>({ messages: [], isLoading: false });
+
+  useEffect(() => {
+    const prevData = prevDataRef.current;
+    const messagesChanged = JSON.stringify(messages) !== JSON.stringify(prevData.messages);
+    const loadingChanged = isLoading !== prevData.isLoading;
+
+    if (messagesChanged || loadingChanged) {
+      prevDataRef.current = { messages, isLoading };
+      updateNodeData();
+    }
+  }, [messages, isLoading, updateNodeData]);
 
   // Auto-scroll to latest message
   useEffect(() => {
@@ -928,33 +1018,101 @@ export const AiNode = memo(({ data, id, selected, isConnectable }: NodeProps<AiN
       const last: any = messages[messages.length - 1];
       if (!last || last.role !== 'assistant') return false;
       const parts = Array.isArray(last.parts) ? last.parts : [];
-      const hasToolResult = parts.some((p: any) => p.type === 'tool-result' && !p.preliminary);
-      const hasText = parts.some((p: any) => p.type === 'text' && p.text && p.text.trim().length > 0);
-      return hasToolResult && !hasText;
+
+      // AI SDK v5 uses different tool result types - check for both old and new formats
+      const hasToolResult = parts.some((p: any) =>
+        (p.type === 'tool-result' && !p.preliminary && p.state === 'output-available') ||
+        (p.type && p.type.startsWith('tool-') && p.type !== 'tool-call' && !p.preliminary && p.state === 'output-available')
+      );
+
+      // Only consider complete, non-streaming text
+      const hasCompleteText = parts.some((p: any) =>
+        p.type === 'text' &&
+        p.text &&
+        p.text.trim().length > 0 &&
+        (p.state === 'done' || !p.state) // Only complete text, not streaming
+      );
+
+      const shouldSendAuto = hasToolResult && !hasCompleteText;
+
+      console.log('🔧 [AI-NODE] sendAutomaticallyWhen check:', {
+        lastMessageRole: last?.role,
+        partsCount: parts.length,
+        hasToolResult,
+        hasCompleteText,
+        shouldSendAuto,
+        parts: parts.map((p: any) => ({
+          type: p.type,
+          hasText: !!p.text,
+          state: p.state,
+          preliminary: p.preliminary,
+          toolCallId: p.toolCallId
+        }))
+      });
+
+      // Disable automatic sending to reduce stuttering - rely on onFinish instead
+      return false;
     },
     onError: (error) => {
       console.error('🔧 [AI-NODE] Chat error:', error);
     },
     onFinish: ({ message }) => {
+      const parts = Array.isArray((message as any).parts) ? (message as any).parts : [];
+      // AI SDK v5 uses different tool result types - check for both old and new formats
+      const hasToolResult = parts.some((p: any) =>
+        (p.type === 'tool-result' && !p.preliminary && p.state === 'output-available') ||
+        (p.type && p.type.startsWith('tool-') && p.type !== 'tool-call' && !p.preliminary && p.state === 'output-available')
+      );
+
+      // Only consider complete, non-streaming text
+      const hasCompleteText = parts.some((p: any) =>
+        p.type === 'text' &&
+        p.text &&
+        p.text.trim().length > 0 &&
+        (p.state === 'done' || !p.state) // Only complete text, not streaming
+      );
+
       console.log('🔧 [AI-NODE] Chat finished:', {
         role: message.role,
         hasContent: !!(message as any).content,
-        contentLength: ((message as any).content || '').length
+        contentLength: ((message as any).content || '').length,
+        partsCount: parts.length,
+        hasToolResult,
+        hasCompleteText,
+        needsContinuation: message.role === 'assistant' && hasToolResult && !hasCompleteText,
+        parts: parts.map((p: any) => ({ type: p.type, hasText: !!p.text, state: p.state, preliminary: p.preliminary }))
       });
-      // Safety: if assistant message has tool-results but no text, nudge continuation
+
+      // Safety: if assistant message has tool-results but no complete text, nudge continuation
+      // BUT avoid infinite loops - only trigger once per unique tool call
       try {
-        const parts = Array.isArray((message as any).parts) ? (message as any).parts : [];
-        const hasToolResult = parts.some((p: any) => p.type === 'tool-result' && !p.preliminary);
-        const hasText = parts.some((p: any) => p.type === 'text' && p.text && p.text.trim().length > 0);
-        if (message.role === 'assistant' && hasToolResult && !hasText) {
-          setTimeout(() => {
-            if (!chatIsLoading) {
-              console.log('🔧 [AI-NODE] Nudge continuation after tool-result without text');
-              sendMessage({ text: '' });
-            }
-          }, 150);
+        if (message.role === 'assistant' && hasToolResult && !hasCompleteText) {
+          // Check if we've already triggered continuation for these tool calls
+          const toolCallIds = parts
+            .filter((p: any) => p.type && p.type.startsWith('tool-') && p.toolCallId)
+            .map((p: any) => p.toolCallId);
+
+          const continuationKey = `continuation-${toolCallIds.join('-')}`;
+
+          if (!sessionStorage.getItem(continuationKey)) {
+            console.log('🔧 [AI-NODE] 🚀 TRIGGERING CONTINUATION - Tool result without text detected');
+            sessionStorage.setItem(continuationKey, 'triggered');
+
+            setTimeout(() => {
+              if (!chatIsLoading) {
+                console.log('🔧 [AI-NODE] 📤 Sending empty message to continue conversation');
+                sendMessage({ text: '' });
+              } else {
+                console.log('🔧 [AI-NODE] ⏳ Chat still loading, skipping continuation nudge');
+              }
+            }, 500); // Increased delay to reduce stuttering
+          } else {
+            console.log('🔧 [AI-NODE] ⏭️ Skipping continuation - already triggered for these tool calls');
+          }
         }
-      } catch { }
+      } catch (e) {
+        console.error('🔧 [AI-NODE] Error in continuation logic:', e);
+      }
     }
   });
 
@@ -1196,11 +1354,7 @@ export const AiNode = memo(({ data, id, selected, isConnectable }: NodeProps<AiN
     if (!currentModel) {
       throw new Error("No IFC model connected");
     }
-
-    if (!currentModel.sqliteSuccess || !currentModel.sqliteDb) {
-      throw new Error("SQLite database not available for this model");
-    }
-
+    // Worker now builds a sql.js DB after extraction; attempt query regardless of sqliteSuccess flag
     try {
       return await querySqliteDatabase(currentModel, query);
     } catch (error) {
@@ -1310,43 +1464,46 @@ export const AiNode = memo(({ data, id, selected, isConnectable }: NodeProps<AiN
             </button>
           )}
 
-          {/* Test SQLite Query button */}
-          {getConnectedModelData()?.sqliteSuccess && (
+          {/* Save SQLite button */}
+          {getConnectedModelData() && (
             <button
               onClick={async () => {
+                const currentModel = getConnectedModelData();
+                if (!currentModel) return;
                 try {
-                  const result = await querySqlite('SELECT COUNT(*) FROM ifcwall');
-                  const count = result[0]?.['COUNT(*)'] || 0;
+                  const { exportSqliteDatabase } = await import('@/lib/ifc-utils');
+                  const bytes = await exportSqliteDatabase(currentModel);
+                  const blob = new Blob([bytes], { type: 'application/x-sqlite3' });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  const base = (currentModel.name || 'model').replace(/\.[^.]+$/, '');
+                  a.href = url;
+                  a.download = `${base}.sqlite`;
+                  document.body.appendChild(a);
+                  a.click();
+                  document.body.removeChild(a);
+                  URL.revokeObjectURL(url);
 
-                  const testMessage: Message = {
-                    role: "assistant",
-                    content: `SQLite test successful! Found ${count} walls in the database.`,
-                    toolResults: [{
-                      type: 'count',
-                      value: count,
-                      elementType: 'IfcWall',
-                      description: `SQLite query result: ${count} walls`
-                    }]
+                  const msg: Message = {
+                    role: 'assistant',
+                    content: `SQLite database exported as ${base}.sqlite`,
+                    toolResults: [{ type: 'analysis', description: 'SQLite DB saved to disk' }]
                   };
-
-                  setMessages(prev => [...prev, testMessage]);
+                  setMessages(prev => [...prev, msg]);
                 } catch (error) {
-                  console.error('SQLite test failed:', error);
+                  console.error('SQLite export failed:', error);
                   const errorMessage: Message = {
-                    role: "assistant",
-                    content: `SQLite test failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
-                    toolResults: [{
-                      type: 'analysis',
-                      description: `SQLite error: ${error instanceof Error ? error.message : 'Unknown error'}`
-                    }]
+                    role: 'assistant',
+                    content: `SQLite export failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                    toolResults: [{ type: 'analysis', description: `SQLite export error: ${error instanceof Error ? error.message : 'Unknown error'}` }]
                   };
                   setMessages(prev => [...prev, errorMessage]);
                 }
               }}
               className="text-xs bg-green-500/20 hover:bg-green-500/30 px-2 py-0.5 rounded transition-colors"
-              title="Test SQLite database connection"
+              title="Save SQLite database to file"
             >
-              Test SQLite
+              Save SQLite
             </button>
           )}
 

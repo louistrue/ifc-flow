@@ -64,6 +64,7 @@
     "reactflow": "^11.10.4",
     "recharts": "2.15.0",
     "sonner": "^1.7.1",
+    "sqlite3": "^5.1.7",
     "tailwind-merge": "^2.5.5",
     "tailwindcss-animate": "^1.0.7",
     "three": "^0.174.0",

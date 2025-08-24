@@ -221,6 +221,12 @@ export async function initializeWorker(): Promise<void> {
           workerPromiseResolvers.get(messageId)!.resolve(data.result);
           workerPromiseResolvers.delete(messageId);
         }
+      } else if (type === "sqliteExport") {
+        console.log("Received SQLite export bytes", { byteLength: (data.bytes && data.bytes.length) || 0 });
+        if (messageId && workerPromiseResolvers.has(messageId)) {
+          workerPromiseResolvers.get(messageId)!.resolve(data.bytes);
+          workerPromiseResolvers.delete(messageId);
+        }
       }
       // Progress messages don't resolve promises
     };
@@ -493,6 +499,32 @@ export async function querySqliteDatabase(
       `Failed to query SQLite database: ${error instanceof Error ? error.message : String(error)}`
     );
   }
+}
+
+// Export the sql.js database bytes for the given model
+export async function exportSqliteDatabase(model: IfcModel): Promise<Uint8Array> {
+  console.log("Exporting SQLite database bytes:", { modelId: model.id });
+  await initializeWorker();
+  if (!ifcWorker) throw new Error("IFC worker initialization failed");
+
+  const messageId = `sqlite_export_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+  const bytes: Uint8Array = await new Promise((resolve, reject) => {
+    workerPromiseResolvers.set(messageId, { resolve, reject });
+    ifcWorker!.postMessage({
+      action: "exportSqlite",
+      messageId,
+      data: { modelId: model.id }
+    });
+    setTimeout(() => {
+      if (workerPromiseResolvers.has(messageId)) {
+        reject(new Error("SQLite export timed out"));
+        workerPromiseResolvers.delete(messageId);
+      }
+    }, 30000);
+  }) as any;
+
+  return bytes;
 }
 
 // Extract geometry from IFC elements (Standard method without GEOM worker)

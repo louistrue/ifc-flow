@@ -15,6 +15,22 @@ let SQLModule = null;
 let sqliteDb = null;
 let currentSqlKey = null; // key for IndexedDB persistence per model
 
+// Cache for loading official ifc2sql.py source once
+let ifc2sqlPyCodeCache = null;
+async function ensureIfc2sqlPyCode() {
+  if (ifc2sqlPyCodeCache) return ifc2sqlPyCodeCache;
+  try {
+    const res = await fetch('/ifc2sql.py');
+    if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
+    ifc2sqlPyCodeCache = await res.text();
+    return ifc2sqlPyCodeCache;
+  } catch (e) {
+    console.warn('Failed to load ifc2sql.py from /public:', e);
+    ifc2sqlPyCodeCache = null;
+    return null;
+  }
+}
+
 async function initSqlJsModule() {
   if (SQLModule) return SQLModule;
   // initSqlJs is exposed by sql-wasm.js
@@ -59,6 +75,16 @@ async function idbGet(key) {
     const tx = db.transaction(IDB_STORE, 'readonly');
     const req = tx.objectStore(IDB_STORE).get(key);
     req.onsuccess = () => { const v = req.result || null; db.close(); resolve(v); };
+    req.onerror = () => { const e = req.error; db.close(); reject(e); };
+  });
+}
+
+async function idbDelete(key) {
+  const db = await idbOpen();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, 'readwrite');
+    const req = tx.objectStore(IDB_STORE).delete(key);
+    req.onsuccess = () => { db.close(); resolve(); };
     req.onerror = () => { const e = req.error; db.close(); reject(e); };
   });
 }
@@ -147,10 +173,12 @@ async function initPyodide() {
   });
 
   try {
+    console.log("initPyodide: Starting Pyodide initialization");
     // Load Pyodide
     pyodide = await loadPyodide({
       indexURL: "https://cdn.jsdelivr.net/pyodide/v0.23.4/full/",
     });
+    console.log("initPyodide: Pyodide loaded successfully");
 
     self.postMessage({
       type: "progress",
@@ -158,8 +186,10 @@ async function initPyodide() {
       percentage: 30,
     });
 
+    console.log("initPyodide: Loading micropip, numpy, typing-extensions");
     // Load micropip for package installation and numpy for computations
-    await pyodide.loadPackage(["micropip", "numpy"]);
+    await pyodide.loadPackage(["micropip", "numpy", "typing-extensions"]);
+    console.log("initPyodide: Basic packages loaded");
 
     // Bypass Emscripten version compatibility check for wheels
     await pyodide.runPythonAsync(`
@@ -192,10 +222,24 @@ async function initPyodide() {
       console.warn('Python sqlite3 not available in Pyodide, using sql.js path');
     }
 
+    // Ensure shapely is available before importing ifcopenshell.util.shape from ifc2sql.py
+    self.postMessage({
+      type: "progress",
+      message: "Loading shapely...",
+      percentage: 62,
+    });
+    try {
+      await pyodide.loadPackage(["shapely"]);
+      await pyodide.runPythonAsync(`import shapely\nprint('shapely available')`);
+    } catch (e) {
+      console.warn('Failed to load shapely package:', e);
+      // Proceed; if ifc2sql.py needs shapely it will error with clear message
+    }
+
     // Initialize the module for caching IFC models and SQLite support
     self.postMessage({
       type: "progress",
-      message: "Installing SQLite support...",
+      message: "Installing SQLite and Ifc2Sql support...",
       percentage: 60,
     });
 
@@ -209,6 +253,80 @@ async function initPyodide() {
       # Global variables for storing SQLite databases
       sqlite_databases = {}
     `);
+
+    // Best-effort install of ifcpatch and additional dependencies for comprehensive Ifc2Sql functionality
+    try {
+      await pyodide.runPythonAsync(`
+import micropip
+try:
+    await micropip.install('ifcpatch', keep_going=True)
+    print('ifcpatch installed')
+except Exception as e:
+    print('ifcpatch install warning:', e)
+
+# Install additional dependencies that might be needed for full ifc2sql functionality
+try:
+    await micropip.install(['numpy', 'shapely'], keep_going=True)
+    print('Additional dependencies installed')
+except Exception as e:
+    print('Additional dependencies install warning:', e)
+
+# Also install ifcopenshell dependencies
+try:
+    await micropip.install(['ifcopenshell'], keep_going=True)
+    print('ifcopenshell installed for ifc2sql.py')
+except Exception as e:
+    print('ifcopenshell install warning:', e)
+      `);
+    } catch { }
+
+    const ifc2sqlText = await ensureIfc2sqlPyCode();
+    if (ifc2sqlText) {
+      const encoded = btoa(unescape(encodeURIComponent(ifc2sqlText)));
+      await pyodide.runPythonAsync(`
+import base64
+import sys
+import importlib
+
+# First ensure ifcopenshell is available
+try:
+    import ifcopenshell
+    print('ifcopenshell available for ifc2sql.py')
+except ImportError as e:
+    print('ifcopenshell not available:', e)
+
+try:
+    import ifcpatch
+    print('ifcpatch available for ifc2sql.py')
+except ImportError as e:
+    print('ifcpatch not available:', e)
+
+# Decode and execute the ifc2sql.py code
+src = base64.b64decode('${encoded}').decode('utf-8')
+
+# Create a new module and execute the code in it
+import types
+ifc2sql_module = types.ModuleType('ifc2sql')
+sys.modules['ifc2sql'] = ifc2sql_module
+
+try:
+    exec(src, ifc2sql_module.__dict__)
+    Patcher = getattr(ifc2sql_module, 'Patcher', None)
+    print('official ifc2sql.py loaded successfully:', bool(Patcher))
+    if Patcher:
+        print('Patcher class found:', Patcher.__name__)
+        # Make Patcher available globally for later use
+        globals()['Patcher'] = Patcher
+        print('Patcher class added to globals')
+    else:
+        print('Patcher class not found in ifc2sql.py')
+except Exception as e:
+    print('Error loading ifc2sql.py:', e)
+    import traceback
+    print(traceback.format_exc())
+    Patcher = None
+      `);
+    }
 
     self.postMessage({
       type: "progress",
@@ -287,6 +405,11 @@ self.onmessage = async (event) => {
       case "querySqlite":
         console.log("Starting SQLite query...", { query: data.query, modelId: data.modelId });
         await handleSqliteQuery({ ...data, messageId });
+        break;
+
+      case "exportSqlite":
+        console.log("Starting SQLite export...");
+        await handleSqliteExport({ ...data, messageId });
         break;
 
       default:
@@ -411,27 +534,121 @@ async function handleLoadIfc({ arrayBuffer, filename, messageId }) {
               }
               print("Python: Result object created")
               
-              # Prefer IfcPatch Ifc2Sql when sqlite3 is available; otherwise, JS sql.js fallback
-              if sqlite3 is not None:
+              # Enhanced Pyodide Ifc2Sql integration using official Patcher if available
+              print("Python: Enhanced Ifc2Sql integration starting...")
+              sqlite_db_path = '/model.db'
+              sqlite_success = False
+              try:
+                  # Prefer official ifc2sql.py Patcher loaded during init
+                  use_official = False
+                  Patcher = None
+
                   try:
-                      print("Python: Attempt Ifc2Sql via IfcPatch")
-                      import ifcopenshell.ifcpatch
-                      sqlite_db_path = '/model.db'
-                      ifcopenshell.ifcpatch.execute({
-                          'input': 'model.ifc',
-                          'file': None,
-                          'recipe': 'Ifc2Sql',
-                          'arguments': {'sqlite_path': sqlite_db_path}
-                      })
-                      print("Python: Ifc2Sql created SQLite database successfully")
-                      sqlite_success = True
-                  except Exception as e:
-                      print(f"Python: Ifc2Sql failed: {e}")
-                      sqlite_db_path = None
-                      sqlite_success = False
-              else:
-                  print("Python: sqlite3 not available; will use sql.js in worker")
-                  sqlite_db_path = None
+                      # Try to import from ifc2sql module first
+                      import ifc2sql
+                      Patcher = ifc2sql.Patcher
+                      use_official = True
+                      print("Python: Using official ifc2sql.py Patcher from module")
+                  except (ImportError, AttributeError) as e:
+                      print(f"Python: Could not import Patcher from ifc2sql module: {e}")
+
+                  # Fallback: try global namespace
+                  if not Patcher:
+                      try:
+                          Patcher = globals().get('Patcher', None)
+                          if Patcher:
+                              use_official = True
+                              print("Python: Using official ifc2sql.py Patcher from globals")
+                      except:
+                          pass
+
+                  if not Patcher:
+                      print("Python: Official Patcher not present; trying ifcopenshell.ifcpatch")
+
+                  if use_official and Patcher:
+                      # Use Patcher class to create SQLite DB
+                      try:
+                          import os
+                          if os.path.exists(sqlite_db_path):
+                              os.remove(sqlite_db_path)
+                          patcher = Patcher(
+                              file=ifc_file,
+                              sql_type="SQLite",
+                              database=sqlite_db_path,
+                              full_schema=False,  # Only create tables for entities that exist in the file
+                              is_strict=False,
+                              should_expand=False,
+                              should_get_inverses=True,
+                              should_get_psets=True,
+                              should_get_geometry=False,   # Skip geometry for browser performance
+                              should_skip_geometry_data=True  # Skip geometry representation tables
+                          )
+                          patcher.patch()
+                          sqlite_success = os.path.exists(sqlite_db_path)
+
+                          # Check and log database statistics
+                          if sqlite_success:
+                              try:
+                                  import sqlite3
+                                  conn = sqlite3.connect(sqlite_db_path)
+                                  cursor = conn.cursor()
+
+                                  # Get table count
+                                  cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+                                  tables = cursor.fetchall()
+                                  table_count = len(tables)
+                                  print(f"Python: Created {table_count} tables")
+
+                                  # Get total row count across all tables
+                                  total_rows = 0
+                                  for table in tables:
+                                      table_name = table[0]
+                                      cursor.execute(f"SELECT COUNT(*) FROM {table_name}")
+                                      count = cursor.fetchone()[0]
+                                      total_rows += count
+                                      if count > 0:  # Only log non-empty tables
+                                          print(f"Python: Table {table_name}: {count} rows")
+
+                                  print(f"Python: Total rows across all tables: {total_rows}")
+                                  conn.close()
+                              except Exception as db_error:
+                                  print(f"Python: Error checking database statistics: {db_error}")
+
+                          print(f"Python: Patcher-based SQLite creation completed: {sqlite_success}")
+                      except Exception as e:
+                          print(f"Python: Patcher-based Ifc2Sql failed: {e}")
+                          import traceback
+                          print(traceback.format_exc())
+                          sqlite_success = False
+
+                  if not sqlite_success:
+                      try:
+                          import ifcopenshell.ifcpatch
+                          print("Python: ifcpatch module loaded successfully")
+                          config = {
+                              'input': 'model.ifc',
+                              'file': None,
+                              'recipe': 'Ifc2Sql',
+                              'arguments': {
+                                  'sqlite_path': sqlite_db_path,
+                                  'full_schema': False,  # Only create tables for entities that exist
+                                  'should_get_psets': True,
+                                  'should_get_inverses': True
+                              }
+                          }
+                          result = ifcopenshell.ifcpatch.execute(config)
+                          print(f"Python: Ifc2Sql execution completed: {result}")
+                          import os
+                          sqlite_success = os.path.exists(sqlite_db_path)
+                      except Exception as e:
+                          print(f"Python: IfcPatch Ifc2Sql failed: {e}")
+                          import traceback
+                          print(traceback.format_exc())
+                          sqlite_success = False
+              except Exception as e:
+                  print(f"Python: Unexpected error in Ifc2Sql integration: {e}")
+                  import traceback
+                  print(traceback.format_exc())
                   sqlite_success = False
 
               # Store as JSON in a variable - don't return it yet
@@ -496,13 +713,42 @@ async function handleLoadIfc({ arrayBuffer, filename, messageId }) {
             console.log("handleLoadIfc: Persisting Ifc2Sql DB to IndexedDB", {
               sqlite_db: modelInfo.sqlite_db,
             });
+            console.log("handleLoadIfc: Reading comprehensive database from Pyodide filesystem:", modelInfo.sqlite_db);
             const dbBytes = pyodide.FS.readFile(modelInfo.sqlite_db);
+            console.log("handleLoadIfc: Comprehensive database read from filesystem, size:", dbBytes.length, "bytes");
+            console.log("handleLoadIfc: Comprehensive database size:", (dbBytes.length / 1024).toFixed(2), "KB");
+
             const key = `model-sqlite-db:${modelInfo.model_id || modelInfo.filename || 'default'}`;
             currentSqlKey = key;
+            console.log("handleLoadIfc: Storing comprehensive database with key:", key);
+
+            // Clear any existing cached database first to ensure we use the new comprehensive one
+            try {
+              await idbDelete(key);
+              console.log("handleLoadIfc: Cleared existing cached database");
+            } catch (deleteError) {
+              console.log("handleLoadIfc: No existing cache to clear or delete failed:", deleteError.message);
+            }
+
             await idbPut(key, dbBytes);
-            console.log("handleLoadIfc: SQLite DB persisted to IndexedDB");
+            console.log("handleLoadIfc: SQLite DB persisted to IndexedDB (comprehensive database)");
+            console.log("handleLoadIfc: Stored database size:", dbBytes.length, "bytes");
+
+            // Verify the storage worked
+            try {
+              const verifyBytes = await idbGet(key);
+              if (verifyBytes && verifyBytes.length === dbBytes.length) {
+                console.log("handleLoadIfc: ✅ Comprehensive database storage verified successfully");
+              } else {
+                console.log("handleLoadIfc: ❌ Database storage verification failed");
+                console.log("handleLoadIfc: Expected size:", dbBytes.length, "Got size:", verifyBytes ? verifyBytes.length : 'null');
+              }
+            } catch (verifyError) {
+              console.log("handleLoadIfc: ❌ Could not verify database storage:", verifyError.message);
+            }
           } else {
             console.log("handleLoadIfc: Ifc2Sql DB not available; sql.js fallback will build after extraction");
+            console.log("handleLoadIfc: sqlite_db:", modelInfo.sqlite_db, "sqlite_success:", modelInfo.sqlite_success);
           }
         } catch (e) {
           console.warn("handleLoadIfc: Failed to persist Ifc2Sql DB to IndexedDB", e);
@@ -825,11 +1071,18 @@ async function handleExtractData({ types = ["IfcWall"], messageId }) {
       });
       console.log("handleExtractData: Sent dataExtracted message");
 
-      // Build and persist sql.js database (client-side SQLite) ONLY if a full DB is not already saved
+      // Build and persist sql.js database (client-side SQLite) if not already present
       try {
         const modelKey = (ifcModelCache && (ifcModelCache.model_id || ifcModelCache.filename)) || 'default';
         const key = `model-sqlite-db:${modelKey}:v2`;
-        currentSqlKey = key;
+
+        // Only update currentSqlKey if we don't already have a comprehensive database key
+        if (!currentSqlKey || !currentSqlKey.includes(modelKey.split(':')[0])) {
+          currentSqlKey = key;
+        } else {
+          console.log("handleExtractData: Keeping existing comprehensive database key:", currentSqlKey);
+        }
+
         const existing = await ensureDbLoaded(key);
         if (!existing) {
           await buildSqlJsDb(elements, key);
@@ -2237,7 +2490,7 @@ async function handleSqliteQuery({ query, modelId, messageId }) {
   try {
     console.log("handleSqliteQuery: Processing query (sql.js)", { query, modelId });
     await initSqlJsModule();
-    const key = 'model-sqlite-db';
+    const key = currentSqlKey || (modelId ? `model-sqlite-db:${modelId}` : 'model-sqlite-db');
     await ensureDbLoaded(key);
     if (!sqliteDb) {
       throw new Error('SQLite database is not available in sql.js');
@@ -2353,3 +2606,84 @@ async function handleSqliteQuery({ query, modelId, messageId }) {
     });
   }
 }
+
+// Export the current sql.js database bytes back to the main thread
+async function handleSqliteExport({ modelId, messageId }) {
+  try {
+    console.log("handleSqliteExport: Preparing export", { modelId });
+
+    // First try to get the comprehensive database from IndexedDB (created by ifc2sql.py Patcher)
+    const key = currentSqlKey || (modelId ? `model-sqlite-db:${modelId}` : 'model-sqlite-db');
+    console.log("handleSqliteExport: Checking for comprehensive database with key:", key);
+    console.log("handleSqliteExport: currentSqlKey is:", currentSqlKey);
+
+    try {
+      const comprehensiveDbBytes = await idbGet(key);
+      if (comprehensiveDbBytes) {
+        console.log("handleSqliteExport: Found comprehensive database in IndexedDB!");
+        console.log("handleSqliteExport: Comprehensive database size:", comprehensiveDbBytes.byteLength, "bytes");
+        console.log("handleSqliteExport: Comprehensive database size:", (comprehensiveDbBytes.byteLength / 1024).toFixed(2), "KB");
+
+        // Quick analysis of the comprehensive database
+        try {
+          await initSqlJsModule();
+          const tempDb = new SQLModule.Database(new Uint8Array(comprehensiveDbBytes));
+          const result = tempDb.exec("SELECT name FROM sqlite_master WHERE type='table'");
+          const tableCount = result.length > 0 ? result[0].values.length : 0;
+          console.log("handleSqliteExport: Comprehensive database contains", tableCount, "tables");
+          tempDb.close();
+        } catch (analysisError) {
+          console.log("handleSqliteExport: Could not analyze comprehensive database:", analysisError.message);
+        }
+
+        self.postMessage({
+          type: "sqliteExport",
+          messageId,
+          bytes: comprehensiveDbBytes
+        }, [comprehensiveDbBytes.buffer]);
+        return;
+      } else {
+        console.log("handleSqliteExport: No comprehensive database found in IndexedDB");
+        console.log("handleSqliteExport: This means the Patcher database was not properly stored");
+      }
+    } catch (idbError) {
+      console.log("handleSqliteExport: Error retrieving from IndexedDB:", idbError.message);
+    }
+
+    // Fallback to sql.js database if comprehensive one not available
+    console.log("handleSqliteExport: Falling back to sql.js database");
+    await initSqlJsModule();
+    const db = await ensureDbLoaded(key);
+    if (!db) {
+      throw new Error('SQLite database not found in IndexedDB');
+    }
+    const bytes = sqliteDb.export();
+    console.log("handleSqliteExport: Using sql.js fallback database");
+    console.log("handleSqliteExport: Fallback database size:", bytes.byteLength, "bytes");
+    console.log("handleSqliteExport: Fallback database size:", (bytes.byteLength / 1024).toFixed(2), "KB");
+
+    // Quick analysis of the fallback database
+    try {
+      const result = sqliteDb.exec("SELECT name FROM sqlite_master WHERE type='table'");
+      const tableCount = result.length > 0 ? result[0].values.length : 0;
+      console.log("handleSqliteExport: Fallback database contains", tableCount, "tables");
+    } catch (analysisError) {
+      console.log("handleSqliteExport: Could not analyze fallback database:", analysisError.message);
+    }
+
+    self.postMessage({
+      type: "sqliteExport",
+      messageId,
+      bytes
+    }, [bytes.buffer]);
+  } catch (error) {
+    console.error("handleSqliteExport error:", error);
+    self.postMessage({
+      type: "error",
+      message: `Error exporting SQLite DB: ${error.message}`,
+      messageId,
+    });
+  }
+}
+
+// (Removed duplicate enhanced initPyodide; using the primary init above that installs the IfcOpenShell wasm wheel)
