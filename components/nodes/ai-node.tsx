@@ -1583,7 +1583,7 @@ export const AiNode = memo(({ data, id, selected, isConnectable }: NodeProps<AiN
 
   return (
     <div
-      className={`bg-white dark:bg-gray-800 border-2 border-emerald-500 dark:border-emerald-400 rounded-md shadow-md relative overflow-visible ${isResizing ? "nodrag" : ""}`}
+      className={`bg-white dark:bg-gray-800 border-2 border-emerald-500 dark:border-emerald-400 rounded-md shadow-md relative overflow-visible ${isResizing ? "nodrag" : ""} ai-node-container`}
       style={{
         width: `${width}px`,
         height: `${height}px`,
@@ -1661,11 +1661,12 @@ export const AiNode = memo(({ data, id, selected, isConnectable }: NodeProps<AiN
         </div>
       </div>
       <div key={selectedModel} className="p-3 text-xs flex flex-col h-[calc(100%-3rem)]">
-        <div className="relative flex-1 overflow-visible border border-gray-200 dark:border-gray-700 rounded-md bg-gray-50 dark:bg-gray-900" style={{ minHeight: '96px' }}>
+        <div className="relative flex-1 overflow-hidden border border-gray-200 dark:border-gray-700 rounded-md bg-gray-50 dark:bg-gray-900 flex flex-col" style={{ minHeight: '96px' }}>
+          {/* Chat messages area */}
           <div
             ref={chatContainerRef}
-            className="h-full overflow-y-auto p-2 pb-10 custom-scrollbar"
-            style={{ scrollPaddingBottom: '3rem' }}
+            className="flex-1 overflow-y-auto p-2 custom-scrollbar nowheel"
+            style={{ paddingBottom: '0.5rem' }}
           >
             {messages.map((m, i) => {
               // Skip completely empty messages
@@ -1746,122 +1747,124 @@ export const AiNode = memo(({ data, id, selected, isConnectable }: NodeProps<AiN
             {/* Invisible element to scroll to */}
             <div ref={messagesEndRef} />
           </div>
-          {/* Bottom fade to prevent overlap between content and input */}
-          <div className="pointer-events-none absolute bottom-8 left-0 right-0 h-8 bg-gradient-to-t from-gray-50 dark:from-gray-900 to-transparent" />
-          {/* Invisible Turnstile verification */}
-          {showTurnstile && sitekey && (
-            <div className="absolute bottom-12 left-2 right-2 z-20">
-              <TurnstileComponent
-                theme={document.documentElement.classList.contains('dark') ? 'dark' : 'light'}
-                size="normal"
-              />
-            </div>
-          )}
 
-          <form onSubmit={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
+          {/* Input area - separate from scrollable chat */}
+          <div className="relative border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900">
+            {/* Invisible Turnstile verification */}
+            {showTurnstile && sitekey && (
+              <div className="absolute -top-12 left-2 right-2 z-20">
+                <TurnstileComponent
+                  theme={document.documentElement.classList.contains('dark') ? 'dark' : 'light'}
+                  size="normal"
+                />
+              </div>
+            )}
 
-            // Block submission if Turnstile is required but not verified
-            if (isChatBlocked) {
-              let errorContent = "🔒 Please wait for security verification to complete before chatting. This usually takes a few seconds.";
-              let errorDescription = 'Verification in progress';
+            <form onSubmit={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
 
-              if (turnstileError) {
-                if (turnstileError === '110200') {
-                  errorContent = "🔒 Security verification failed due to domain configuration. The site administrator needs to add this domain to the security settings. Please contact support if this persists.";
-                  errorDescription = 'Domain configuration error';
-                } else {
-                  errorContent = "🔒 Security verification failed. Please check the verification widget below and try again. If issues persist, try disabling browser extensions or using incognito mode.";
-                  errorDescription = 'Verification failed';
-                }
-              }
-
-              const errorMessage: Message = {
-                role: "assistant",
-                content: errorContent,
-                toolResults: [{
-                  type: 'analysis',
-                  description: errorDescription
-                }]
-              };
-              setMessages(prev => [...prev, errorMessage]);
-              return;
-            }
-
-            if (!chatIsLoading && input.trim()) {
-              // Double-check Turnstile verification before sending
+              // Block submission if Turnstile is required but not verified
               if (isChatBlocked) {
-                console.log('🚫 Blocking message - Turnstile not verified');
+                let errorContent = "🔒 Please wait for security verification to complete before chatting. This usually takes a few seconds.";
+                let errorDescription = 'Verification in progress';
+
+                if (turnstileError) {
+                  if (turnstileError === '110200') {
+                    errorContent = "🔒 Security verification failed due to domain configuration. The site administrator needs to add this domain to the security settings. Please contact support if this persists.";
+                    errorDescription = 'Domain configuration error';
+                  } else {
+                    errorContent = "🔒 Security verification failed. Please check the verification widget below and try again. If issues persist, try disabling browser extensions or using incognito mode.";
+                    errorDescription = 'Verification failed';
+                  }
+                }
+
+                const errorMessage: Message = {
+                  role: "assistant",
+                  content: errorContent,
+                  toolResults: [{
+                    type: 'analysis',
+                    description: errorDescription
+                  }]
+                };
+                setMessages(prev => [...prev, errorMessage]);
                 return;
               }
-              // Close model picker if it's open
-              if (showModelPicker) {
-                setShowModelPicker(false);
+
+              if (!chatIsLoading && input.trim()) {
+                // Double-check Turnstile verification before sending
+                if (isChatBlocked) {
+                  console.log('🚫 Blocking message - Turnstile not verified');
+                  return;
+                }
+                // Close model picker if it's open
+                if (showModelPicker) {
+                  setShowModelPicker(false);
+                }
+                sendMessage({ text: input });
+                setInput("");
               }
-              sendMessage({ text: input });
-              setInput("");
-            }
-          }} className="absolute bottom-4 left-3 right-3 z-[999] pointer-events-auto">
-            {/* OpenAI-style input with model picker */}
-            <div className="flex items-center gap-1 bg-white dark:bg-gray-800 rounded-full border border-gray-300 dark:border-gray-600 shadow-sm overflow-hidden">
-              {/* Model Picker - positioned on the left like OpenAI */}
-              <div className="relative pl-1" ref={modelPickerRef}>
+            }} className="p-3 pointer-events-auto">
+              {/* OpenAI-style input with model picker */}
+              <div className="flex items-center gap-1 bg-white dark:bg-gray-800 rounded-full border border-gray-300 dark:border-gray-600 shadow-sm overflow-hidden">
+                {/* Model Picker - positioned on the left like OpenAI */}
+                <div className="relative pl-1" ref={modelPickerRef}>
+                  <button
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      if (!chatIsLoading) {
+                        handleModelPickerToggle();
+                      }
+                    }}
+                    className="flex items-center gap-1 text-[10px] text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200 px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-all duration-200 min-w-[90px] justify-between"
+                    disabled={chatIsLoading}
+                    type="button"
+                    title={`Current model: ${AI_MODELS.find(m => (m.slug || m.id) === selectedModel)?.name || selectedModel}`}
+                  >
+                    <span className="truncate max-w-[70px] text-left">
+                      {AI_MODELS.find(m => (m.slug || m.id) === selectedModel)?.name || selectedModel.split('/').pop() || 'Model'}
+                    </span>
+                    <ChevronDown className={`h-3 w-3 flex-shrink-0 transition-transform duration-200 ${showModelPicker ? 'rotate-180' : ''}`} />
+                  </button>
+                </div>
+
+                {/* Separator */}
+                <div className="w-px h-5 bg-gray-300 dark:bg-gray-600" />
+
+                {/* Text Input */}
+                <input
+                  className={`min-w-0 flex-1 h-8 bg-transparent px-2 text-[0.8rem] sm:text-[0.75rem] focus:outline-none focus:ring-1 focus:ring-emerald-500/50 rounded-sm placeholder:text-gray-400 transition-all duration-200 ${isChatBlocked ? 'opacity-50 cursor-not-allowed' : 'disabled:opacity-50'}`}
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  placeholder={isChatBlocked ? (turnstileError ? "Verification error - check console" : "Verifying security... please wait") : "Ask a question"}
+                  disabled={chatIsLoading || isChatBlocked}
+                />
+
+                {/* Send Button */}
                 <button
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    if (!chatIsLoading) {
-                      handleModelPickerToggle();
-                    }
-                  }}
-                  className="flex items-center gap-1 text-[10px] text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200 px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-all duration-200 min-w-[90px] justify-between"
-                  disabled={chatIsLoading}
-                  type="button"
-                  title={`Current model: ${AI_MODELS.find(m => (m.slug || m.id) === selectedModel)?.name || selectedModel}`}
+                  type="submit"
+                  disabled={chatIsLoading || !input.trim() || isChatBlocked}
+                  aria-label="Send message"
+                  className={`h-8 w-9 rounded-l-none rounded-r-full bg-emerald-500 hover:bg-emerald-600 text-white shadow-sm disabled:opacity-50 disabled:hover:bg-emerald-500 flex items-center justify-center transition-colors border-l border-gray-200 dark:border-gray-700 ${isChatBlocked ? 'cursor-not-allowed' : ''}`}
                 >
-                  <span className="truncate max-w-[70px] text-left">
-                    {AI_MODELS.find(m => (m.slug || m.id) === selectedModel)?.name || selectedModel.split('/').pop() || 'Model'}
-                  </span>
-                  <ChevronDown className={`h-3 w-3 flex-shrink-0 transition-transform duration-200 ${showModelPicker ? 'rotate-180' : ''}`} />
+                  {isChatBlocked ? "🔒" : (chatIsLoading ? "..." : (
+                    <>
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-4 w-4"><path d="M3.4 2.3l18 9a1 1 0 010 1.8l-18 9a1 1 0 01-1.4-1.2l2.7-7.1a1 1 0 01.7-.6l9.7-1.9-9.7-1.9a1 1 0 01-.7-.6L2 3.5A1 1 0 013.4 2.3z" /></svg>
+                      <span className="sr-only">Send</span>
+                    </>
+                  ))}
                 </button>
               </div>
+            </form>
 
-              {/* Separator */}
-              <div className="w-px h-5 bg-gray-300 dark:bg-gray-600" />
-
-              {/* Text Input */}
-              <input
-                className={`min-w-0 flex-1 h-8 bg-transparent px-2 text-[0.8rem] sm:text-[0.75rem] focus:outline-none focus:ring-1 focus:ring-emerald-500/50 rounded-sm placeholder:text-gray-400 transition-all duration-200 ${isChatBlocked ? 'opacity-50 cursor-not-allowed' : 'disabled:opacity-50'}`}
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                placeholder={isChatBlocked ? (turnstileError ? "Verification error - check console" : "Verifying security... please wait") : "Ask a question"}
-                disabled={chatIsLoading || isChatBlocked}
-              />
-
-              {/* Send Button */}
-              <button
-                type="submit"
-                disabled={chatIsLoading || !input.trim() || isChatBlocked}
-                aria-label="Send message"
-                className={`h-8 w-9 rounded-l-none rounded-r-full bg-emerald-500 hover:bg-emerald-600 text-white shadow-sm disabled:opacity-50 disabled:hover:bg-emerald-500 flex items-center justify-center transition-colors border-l border-gray-200 dark:border-gray-700 ${isChatBlocked ? 'cursor-not-allowed' : ''}`}
-              >
-                {isChatBlocked ? "🔒" : (chatIsLoading ? "..." : (
-                  <>
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-4 w-4"><path d="M3.4 2.3l18 9a1 1 0 010 1.8l-18 9a1 1 0 01-1.4-1.2l2.7-7.1a1 1 0 01.7-.6l9.7-1.9-9.7-1.9a1 1 0 01-.7-.6L2 3.5A1 1 0 013.4 2.3z" /></svg>
-                    <span className="sr-only">Send</span>
-                  </>
-                ))}
-              </button>
+            {/* Disclaimer */}
+            <div className="px-3 pb-1 text-[8px] leading-tight text-gray-400 dark:text-gray-500 text-center pointer-events-none max-w-full overflow-hidden">
+              <span className="truncate block" title="We log queries and responses during AI node usage to improve system performance">
+                We log queries and responses during AI node usage to improve system performance
+              </span>
             </div>
-          </form>
-        </div>
-
-        {/* Disclaimer */}
-        <div className="absolute bottom-1 left-3 right-8 text-[8px] leading-tight text-gray-400 dark:text-gray-500 text-center pointer-events-none pb-1 max-w-full overflow-hidden">
-          <span className="truncate block" title="We log queries and responses during AI node usage to improve system performance">
-            We log queries and responses during AI node usage to improve system performance
-          </span>
+          </div>
         </div>
       </div>
 
