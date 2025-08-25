@@ -1,6 +1,6 @@
-import { getLastLoadedModel, querySqliteDatabase } from "@/lib/ifc-utils";
+import { getLastLoadedModel } from "@/lib/ifc-utils";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
-import { convertToModelMessages, streamText } from "ai";
+import { convertToModelMessages, streamText, tool } from "ai";
 import { z } from "zod";
 import { aiLogger } from "@/lib/logger";
 import { getServerSQLiteManager } from "@/lib/server-sqlite";
@@ -154,8 +154,8 @@ export async function POST(req: Request) {
 
         // SECURITY: Apply rate limiting based on verification status
         const rateLimitConfig = hasTurnstileToken ?
-            { windowMs: 60 * 1000, maxRequests: 15 } : // Verified users get higher limits
-            { windowMs: 60 * 1000, maxRequests: 5 };   // Unverified users get lower limits
+            { windowMs: 60 * 1000, maxRequests: 50 } : // Verified users get generous limits
+            { windowMs: 60 * 1000, maxRequests: 20 };   // Unverified users get moderate limits
 
         const rateLimitResult = await rateLimit(clientId, rateLimitConfig);
 
@@ -250,6 +250,7 @@ export async function POST(req: Request) {
             modelName: model?.name,
             totalElements: model?.totalElements,
             elementCounts: model?.elementCounts,
+            hasSqlite: modelData?.hasSqlite,
             elementsCount: model?.elements?.length
         });
 
@@ -341,66 +342,88 @@ AVAILABLE DATA:
 - Type information and element relationships
 
 SQLite DATABASE SCHEMA (IfcOpenShell ifc2sql):
-The model includes a SQLite database with the following structure:
+The model includes a comprehensive SQLite database with 64+ IFC tables.
 
-INDIVIDUAL IFC ELEMENT TABLES:
-- IfcWallStandardCase: ifc_id (PK), GlobalId, Name, Description, ObjectType, etc.
-- IfcSlab: ifc_id (PK), GlobalId, Name, Description, ObjectType, etc.  
-- IfcBeam: ifc_id (PK), GlobalId, Name, Description, ObjectType, etc.
-- IfcColumn: ifc_id (PK), GlobalId, Name, Description, ObjectType, etc.
-- And many other IFC element tables...
+CRITICAL: NEVER ASSUME SCHEMA - ALWAYS DISCOVER IT FIRST!
 
-SUPPORTING TABLES:
-- id_map: ifc_id (PK), ifc_class -- Maps entity IDs to IFC class names
-- psets: ifc_id, pset_name, name, value -- Flattened property data
-- metadata: preprocessor, schema, mvd -- Database metadata
+MANDATORY FIRST STEPS FOR ANY QUERY:
+1. ALWAYS START by discovering available tables:
+   SELECT name FROM sqlite_master WHERE type='table' ORDER BY name
 
-OPTIMIZED QUERY PATTERNS:
-- Element counts: SELECT COUNT(*) FROM IfcWallStandardCase (or IfcWall for some models)
-- Element names: SELECT ifc_id, GlobalId, Name, ObjectType FROM IfcWallStandardCase
-- Element properties: SELECT w.Name, p.pset_name, p.name, p.value FROM IfcWallStandardCase w JOIN psets p ON w.ifc_id = p.ifc_id
-- All element types: SELECT ifc_class, COUNT(*) FROM id_map GROUP BY ifc_class ORDER BY COUNT(*) DESC
-- Quantities: SELECT w.Name, p.value FROM IfcWallStandardCase w JOIN psets p ON w.ifc_id = p.ifc_id WHERE p.pset_name = 'BaseQuantities'
-- Flexible wall query: Use IfcWallStandardCase for most models, IfcWall for simpler models
+2. ALWAYS explore table schemas before writing queries:
+   PRAGMA table_info(IfcWall)
+   PRAGMA table_info(IfcMaterial)
 
-IMPORTANT RULES:
-- Use specific IFC tables (IfcWallStandardCase, IfcSlab, etc.) for direct element access
-- Join with psets table using ifc_id for properties and quantities
-- Use id_map for cross-element-type queries
-- GlobalId is the unique IFC identifier, Name is the human-readable name
+3. NEVER use assumed column names like 'id' - discover the actual columns first!
+
+COMMON IfcOpenShell SCHEMA PATTERNS:
+- Tables: IfcWall, IfcSlab, IfcBeam, IfcColumn, IfcMaterial, etc.
+- Primary keys are often named differently (not always 'id')
+- Relationships may use GlobalId, entity references, or other patterns
+- ALWAYS check PRAGMA table_info(TableName) to see actual column names
+
+SAFE DISCOVERY APPROACH:
+1. List tables: SELECT name FROM sqlite_master WHERE type='table'
+2. Check schema: PRAGMA table_info(IfcWall)  
+3. Sample data: SELECT * FROM IfcWall LIMIT 3
+4. Then write proper queries using discovered column names
+
+NEVER ASSUME:
+- Column names (don't assume 'id', 'Name', 'category', 'description', etc. exist)
+- Relationship patterns
+- Data types or formats
+- Table structures
+- Primary key names
+- Foreign key relationships
+
+COMMON COLUMN NAME ERRORS TO AVOID:
+- 'category' (might be 'Category', 'Type', or not exist)
+- 'id' (might be 'Id', 'ID', 'GlobalId', or other)
+- 'name' (might be 'Name', 'ObjectName', or other)
+- 'description' (might be 'Description', 'ObjectDescription', or other)
+
+ALWAYS DISCOVER FIRST, THEN QUERY!
+If you get "no such column" errors, you FAILED to discover the schema properly.
 
 You have access to the FULL IFC data including all properties, quantities, materials, and classifications. The data comes from IfcOpenShell processing and includes complete BIM information.`;
         }
 
         const systemMsg = `You are a BIM consultant analyzing IFC building models. You provide clear, direct answers to user questions about the building model.
 
-CRITICAL RULES:
-1. ALWAYS use the querySqlite tool FIRST for ANY question about the model - even simple ones
-2. NEVER respond without querying the database first
-3. NEVER mention ANY technical details: SQL, queries, databases, tools, tool names, implementation details
-4. NEVER include ANY SQL syntax, query text, or technical commands in your response
-5. NEVER say "querySqlite", "SELECT", "FROM", or any SQL keywords
-6. Use ONLY the clean data results to provide natural, conversational responses
+WORKFLOW (ENFORCED PROGRAMMATICALLY):
+MANDATORY SEQUENCE - ALL STEPS REQUIRED:
+1. FIRST: discoverSchema(action='list_tables') - discover all tables
+2. SECOND: discoverSchema(action='table_info', tableName='RelevantTable') - get column names
+3. THIRD: discoverSchema(action='sample_data', tableName='RelevantTable') - see sample data
+4. ONLY THEN: querySqlite - retrieve the actual data
+5. FINALLY: After querySqlite completes, you MUST provide a text response with the answer
 
-MANDATORY TOOL USAGE:
-- For "How many walls?" → Use querySqlite to count walls
-- For "What materials?" → Use querySqlite to get materials  
-- For "Show properties" → Use querySqlite to get properties
-- For "Total area?" → Use querySqlite to calculate areas
-- For ANY model question → Use querySqlite FIRST
+CRITICAL: You MUST complete ALL THREE discoverSchema steps before querySqlite becomes available.
+The tools will reject any attempt to skip steps - follow the exact sequence above.
 
-RESPONSE FORMAT:
-- Use querySqlite tool silently to get data
-- When tool returns results, USE THEM CONFIDENTLY
+IMPORTANT: After executing querySqlite and receiving results, ALWAYS generate a final text response that answers the user's question. Never end with just a tool call.
+
+RESPONSE RULES:
+- NEVER mention technical details: SQL, databases, tools, implementation
+- NEVER include SQL syntax in your response
+- Use ONLY the clean data results to provide natural, conversational answers
+- Determine the relevant IFC table based on the user's question (IfcWall, IfcMaterial, IfcDoor, IfcSpace, IfcSlab, etc.)
+- If no results are found, provide a polite, informative response (e.g., "There are no slabs in this model" or "No materials were found")
+- After getting query results, ALWAYS provide a final answer in text form
 - Respond with clean, natural language only
 - No technical jargon, no SQL, no tool mentions
 - Just provide the building model information
 - If tool gives you data, trust it and present it clearly
 
+ERROR HANDLING:
+- If you get "no such column" errors, you MUST immediately run PRAGMA table_info(TableName) to discover the correct column names
+- NEVER continue with assumed column names after getting schema errors
+- Always fix schema discovery before attempting data queries again
+
 Example Responses (AFTER using the tool):
-- User: "How many walls are there?" → "There are 114 walls in this building model."
-- User: "What materials are used?" → "The walls use these materials: Limestone wall 100, Reinforced concrete wall - prefab 100, Concrete wall - 370."
-- User: "total m2?" → "The total area is 1,250 m² across all elements."
+- User: "How many walls are there?" → "There are ... walls in this building model."
+- User: "What materials are used?" → "The walls use these materials: ... "
+- User: "total m2?" → "The total area is ... m² across all elements."
 
 FORBIDDEN in responses:
 ❌ "querySqlite: SELECT COUNT(*) FROM elements"
@@ -447,55 +470,169 @@ IMPORTANT: Always use the querySqlite tool for data questions. Never promise to 
 
         // Tools are now handled client-side, so no server-side intent classification needed
 
-        // Define tools completely server-side with execute functions - use model data
-        const tools = model ? {
-            "querySqlite": {
-                description: `Retrieve building model data using the actual IfcOpenShell ifc2sql database schema. Use individual IFC tables and join with psets for properties.`,
-                inputSchema: z.object({
-                    query: z.string().describe(`SQL query using the actual schema: Individual IFC tables (IfcWallStandardCase or IfcWall, IfcSlab, IfcBeam, IfcColumn) with columns (ifc_id, GlobalId, Name, ObjectType). Join with psets table for properties. Examples: SELECT COUNT(*) FROM IfcWallStandardCase; SELECT Name FROM IfcWall ORDER BY Name; SELECT w.Name, p.value FROM IfcWallStandardCase w JOIN psets p ON w.ifc_id = p.ifc_id WHERE p.name = 'Height'. Use id_map to find available tables: SELECT DISTINCT ifc_class FROM id_map WHERE ifc_class LIKE '%Wall%'`),
-                    description: z.string().describe('What information this query will retrieve')
-                }),
-                outputSchema: z.object({
-                    message: z.string().optional().describe('Human readable message about the query result'),
-                    count: z.number().optional().describe('Count of elements found'),
-                    walls: z.array(z.object({
-                        Name: z.string()
-                    })).optional().describe('List of wall elements with names'),
-                    results: z.array(z.any()).optional().describe('General query results'),
-                    query: z.string().optional().describe('The original query that was executed'),
-                    note: z.string().optional().describe('Additional notes about the result')
-                }),
-                execute: async ({ query, description }: { query: string; description: string }) => {
-                    try {
-                        // Get the server-side SQLite manager for real database access
-                        const sqliteManager = await getServerSQLiteManager(model.id);
+        // Check if client supports client-side queries
+        const supportsClientQueries = model?.supportsClientQueries;
 
-                        if (!sqliteManager) {
-                            return {
-                                type: 'error',
-                                message: 'Could not connect to SQLite database',
-                                description: description,
-                                query: query,
-                                error: 'Database connection failed'
-                            };
+        // Create a stateful tool system using AI SDK v5 approach
+        const createConditionalTools = () => {
+            let schemaState = {
+                tablesDiscovered: false,
+                discoveredTables: [] as string[],
+                columnsDiscovered: {} as Record<string, string[]>,
+                sampleDataSeen: {} as Record<string, boolean>
+            };
+
+            const baseTools = {
+                "discoverSchema": {
+                    description: `Discover database schema - ALWAYS use this first before any data queries!`,
+                    inputSchema: z.object({
+                        action: z.enum(['list_tables', 'table_info', 'sample_data']).describe('Schema discovery action to perform'),
+                        tableName: z.string().optional().describe('Table name for table_info or sample_data actions')
+                    }),
+                    outputSchema: z.object({
+                        tables: z.array(z.string()).optional().describe('List of available tables'),
+                        columns: z.array(z.object({
+                            name: z.string(),
+                            type: z.string(),
+                            nullable: z.boolean().optional()
+                        })).optional().describe('Table column information'),
+                        sampleData: z.array(z.any()).optional().describe('Sample rows from table'),
+                        schemaProgress: z.object({
+                            tablesDiscovered: z.boolean(),
+                            columnsDiscovered: z.record(z.array(z.string())),
+                            querySqliteAvailable: z.boolean()
+                        }).optional().describe('Current schema discovery progress')
+                    }),
+                    onInputStart: ({ toolCallId }: { toolCallId: string }) => {
+                        console.log('🔍 Schema discovery started:', toolCallId);
+                    },
+                    onInputAvailable: ({ input, toolCallId }: { input: any; toolCallId: string }) => {
+                        console.log('🔍 Schema discovery input ready:', input, toolCallId);
+                    },
+                    execute: async ({ action, tableName }: { action: 'list_tables' | 'table_info' | 'sample_data'; tableName?: string }) => {
+                        let query = '';
+                        let description = '';
+
+                        switch (action) {
+                            case 'list_tables':
+                                query = "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name";
+                                description = 'Discover all available tables in the database';
+                                schemaState.tablesDiscovered = true;
+                                break;
+                            case 'table_info':
+                                if (!tableName) throw new Error('tableName required for table_info action');
+                                query = `PRAGMA table_info(${tableName})`;
+                                description = `Discover column structure for table ${tableName}`;
+                                // Mark this table's columns as discovered
+                                schemaState.columnsDiscovered[tableName] = ['discovered']; // Will be updated by client
+                                break;
+                            case 'sample_data':
+                                if (!tableName) throw new Error('tableName required for sample_data action');
+                                query = `SELECT * FROM ${tableName} LIMIT 3`;
+                                description = `Get sample data from table ${tableName}`;
+                                schemaState.sampleDataSeen[tableName] = true;
+                                break;
                         }
 
-                        // Execute the real SQL query against the actual database
-                        const result = await sqliteManager.executeQuery(query, description);
-                        return result;
+                        // If client supports queries, return a special marker for client execution
+                        if (supportsClientQueries) {
+                            const result = {
+                                type: 'client_query',
+                                query: query,
+                                description: description,
+                                message: 'Schema discovery query will be executed on client',
+                                requiresClientExecution: true,
+                                schemaAction: action,
+                                tableName: tableName,
+                                schemaProgress: {
+                                    tablesDiscovered: schemaState.tablesDiscovered,
+                                    columnsDiscovered: schemaState.columnsDiscovered,
+                                    querySqliteAvailable: schemaState.tablesDiscovered && Object.keys(schemaState.columnsDiscovered).length > 0
+                                }
+                            };
 
-                    } catch (error) {
-                        return {
-                            type: 'error',
-                            message: error instanceof Error ? error.message : 'Query failed',
-                            description: description,
-                            query: query,
-                            error: error instanceof Error ? error.message : 'Unknown error'
-                        };
+                            // Update global tools if schema is now complete
+                            if (schemaState.tablesDiscovered && Object.keys(schemaState.columnsDiscovered).length > 0) {
+                                console.log('🎯 Schema discovery complete - querySqlite now available!');
+                            }
+
+                            return result;
+                        }
+
+                        // Fallback to server-side execution
+                        try {
+                            const sqliteManager = await getServerSQLiteManager(model.id);
+                            if (!sqliteManager) {
+                                return {
+                                    type: 'error',
+                                    message: 'Could not connect to SQLite database',
+                                    description: description,
+                                    query: query,
+                                    error: 'Database connection failed'
+                                };
+                            }
+                            // Expand IFC class variants for walls/beams to support older schemas
+                            const lower = query.toLowerCase();
+                            const isCount = lower.includes('count(');
+                            const expandVariants = (base: string, vars: string[]) => {
+                                const usedMatch = query.match(new RegExp(`\\b(${vars.join('|')})\\b`, 'i'));
+                                const used = usedMatch ? usedMatch[1] : base;
+                                return vars.map(v => query.replace(new RegExp(`\\b${used}\\b`, 'i'), v));
+                            };
+                            if (/\bifcwallstandardcase\b|\bifcwall\b/i.test(lower)) {
+                                const qs = expandVariants('IfcWall', ['IfcWall', 'IfcWallStandardCase']);
+                                if (isCount) {
+                                    let total = 0;
+                                    for (const q of qs) {
+                                        try { const r: any = await sqliteManager.executeQuery(q, description); total += Number(r?.results?.[0]?.['COUNT(*)'] ?? r?.results?.[0]?.count ?? 0); } catch { }
+                                    }
+                                    return { type: 'queryResult', result: [{ count: total }], count: 1, description } as any;
+                                } else {
+                                    let rows: any[] = [];
+                                    for (const q of qs) {
+                                        try { const r: any = await sqliteManager.executeQuery(q, description); if (Array.isArray(r?.results)) rows = rows.concat(r.results); } catch { }
+                                    }
+                                    return { type: 'queryResult', result: rows, count: rows.length, description } as any;
+                                }
+                            }
+                            if (/\bifcbeamstandardcase\b|\bifcbeam\b/i.test(lower)) {
+                                const qs = expandVariants('IfcBeam', ['IfcBeam', 'IfcBeamStandardCase']);
+                                if (isCount) {
+                                    let total = 0;
+                                    for (const q of qs) {
+                                        try { const r: any = await sqliteManager.executeQuery(q, description); total += Number(r?.results?.[0]?.['COUNT(*)'] ?? r?.results?.[0]?.count ?? 0); } catch { }
+                                    }
+                                    return { type: 'queryResult', result: [{ count: total }], count: 1, description } as any;
+                                } else {
+                                    let rows: any[] = [];
+                                    for (const q of qs) {
+                                        try { const r: any = await sqliteManager.executeQuery(q, description); if (Array.isArray(r?.results)) rows = rows.concat(r.results); } catch { }
+                                    }
+                                    return { type: 'queryResult', result: rows, count: rows.length, description } as any;
+                                }
+                            }
+
+                            const result = await sqliteManager.executeQuery(query, description);
+                            return result;
+                        } catch (error) {
+                            return {
+                                type: 'error',
+                                message: error instanceof Error ? error.message : 'Query failed',
+                                description: description,
+                                query: query,
+                                error: error instanceof Error ? error.message : 'Unknown error'
+                            };
+                        }
                     }
                 }
-            }
-        } : undefined;
+            };
+
+            // Return base tools initially (querySqlite not available yet)
+            return baseTools;
+        };
+
+        // Define tools - start with only discoverSchema available
+        const tools = model ? createConditionalTools() : undefined;
 
         // Track tool availability for semantic analysis
         const toolsAvailable = !!tools;
@@ -587,51 +724,538 @@ IMPORTANT: Always use the querySqlite tool for data questions. Never promise to 
             });
         }
 
-        const result = await streamText({
+        const startTime = Date.now();
+
+        // Schema discovery state tracking - use model-specific persistence
+        const schemaSessionId = `${model?.id || 'default'}`;
+
+        // Global state management for schema discovery
+        const globalAny = global as any;
+        if (!globalAny.schemaDiscoveryState) {
+            globalAny.schemaDiscoveryState = new Map();
+        }
+
+        const getSchemaState = () => {
+            const existingState = globalAny.schemaDiscoveryState.get(schemaSessionId);
+
+            // Reset schema discovery for each new conversation/model
+            // Check if this is a fresh start (no messages or only user message)
+            const isNewConversation = !messages || messages.length <= 1;
+
+            // Also reset if the last activity was more than 5 minutes ago (new session)
+            const isStaleSession = existingState && (Date.now() - existingState.lastActivity) > (5 * 60 * 1000);
+
+            if ((isNewConversation || isStaleSession) && existingState && existingState.stepCount > 0) {
+                console.log('🔄 Resetting schema discovery state:', {
+                    reason: isNewConversation ? 'new conversation' : 'stale session',
+                    messageCount: messages?.length || 0,
+                    stepCount: existingState.stepCount,
+                    lastActivity: new Date(existingState.lastActivity).toISOString()
+                });
+                globalAny.schemaDiscoveryState.delete(schemaSessionId);
+            }
+
+            return globalAny.schemaDiscoveryState.get(schemaSessionId) || {
+                schemaDiscoveryComplete: false,
+                discoveredTables: [],
+                discoveredColumns: {},
+                lastActivity: Date.now(),
+                stepCount: 0,
+                sampleDataExecuted: false
+            };
+        };
+
+        const updateSchemaState = (updates: any) => {
+            const currentState = getSchemaState();
+            const newState = { ...currentState, ...updates, lastActivity: Date.now() };
+            globalAny.schemaDiscoveryState.set(schemaSessionId, newState);
+            return newState;
+        };
+
+        // Clean up old sessions (older than 1 hour)
+        const cleanupOldSessions = () => {
+            const oneHourAgo = Date.now() - (60 * 60 * 1000);
+            for (const [key, state] of globalAny.schemaDiscoveryState.entries()) {
+                if (state.lastActivity < oneHourAgo) {
+                    globalAny.schemaDiscoveryState.delete(key);
+                }
+            }
+        };
+        cleanupOldSessions();
+
+        const schemaState = getSchemaState();
+        console.log('🔍 Current schema state:', {
+            sessionId: schemaSessionId,
+            messageCount: messages?.length || 0,
+            schemaState: {
+                tablesDiscovered: schemaState.tablesDiscovered,
+                columnsCount: Object.keys(schemaState.discoveredColumns).length,
+                stepCount: schemaState.stepCount,
+                schemaComplete: schemaState.schemaDiscoveryComplete
+            }
+        });
+
+        // Manual reset mechanism - if user sends "reset schema" or similar
+        const currentUserMessage = messages?.[messages.length - 1];
+        const userContent = currentUserMessage?.content || '';
+        if (userContent.toLowerCase().includes('reset') && schemaState.stepCount > 0) {
+            console.log('🔄 Manual schema reset requested by user');
+            globalAny.schemaDiscoveryState.delete(schemaSessionId);
+            // Get fresh state after reset
+            const freshState = getSchemaState();
+            console.log('✅ Schema state reset complete');
+        }
+
+        // Create dynamic tools with proper AI SDK v5 approach
+        const createAllTools = () => {
+            return {
+                discoverSchema: {
+                    description: 'Discover database schema - ALWAYS use this first before any data queries!',
+                    inputSchema: z.object({
+                        action: z.enum(['list_tables', 'table_info', 'sample_data']).describe('Schema discovery action to perform'),
+                        tableName: z.string().optional().describe('Table name for table_info or sample_data actions')
+                    }),
+                    execute: async ({ action, tableName }: { action: 'list_tables' | 'table_info' | 'sample_data'; tableName?: string }) => {
+                        const currentState = getSchemaState();
+
+                        // Increment step count to prevent infinite loops
+                        updateSchemaState({ stepCount: currentState.stepCount + 1 });
+
+                        // Prevent infinite loops - auto-reset if too many attempts
+                        if (currentState.stepCount > 10) {
+                            console.log('🔄 Auto-resetting schema state due to too many attempts');
+                            globalAny.schemaDiscoveryState.delete(schemaSessionId);
+                            // Get fresh state after reset
+                            const freshState = getSchemaState();
+                            console.log('✅ Schema state auto-reset complete');
+                            // Continue with fresh state
+                            updateSchemaState({ stepCount: freshState.stepCount + 1 });
+                        }
+
+                        // ENFORCE SEQUENTIAL EXECUTION - Reject invalid steps
+                        console.log(`🔍 Schema validation for action="${action}":`, {
+                            tablesDiscovered: currentState.tablesDiscovered,
+                            columnsCount: Object.keys(currentState.discoveredColumns).length,
+                            stepCount: currentState.stepCount,
+                            schemaComplete: currentState.schemaDiscoveryComplete
+                        });
+
+                        // If schema is already complete, skip validation for new queries
+                        if (currentState.schemaDiscoveryComplete) {
+                            console.log('✅ Schema already complete, allowing re-discovery for new query');
+                            // Reset for new query but keep schema complete flag
+                            if (action === 'list_tables') {
+                                updateSchemaState({
+                                    stepCount: currentState.stepCount + 1,
+                                    lastQuery: Date.now()
+                                });
+                            }
+                        } else {
+                            // Only enforce strict ordering when schema is not complete
+                            if (action === 'table_info' && !currentState.tablesDiscovered) {
+                                throw new Error('Must discover tables first using action="list_tables"');
+                            }
+                            if (action === 'sample_data' && Object.keys(currentState.discoveredColumns).length === 0) {
+                                throw new Error('Must discover table columns first using action="table_info"');
+                            }
+                            if (action === 'list_tables' && currentState.tablesDiscovered) {
+                                console.log('🚫 Blocking duplicate list_tables call - tables already discovered');
+                                throw new Error('Tables already discovered. Use action="table_info" next');
+                            }
+                        }
+
+                        // Update state IMMEDIATELY after validation passes
+                        if (action === 'list_tables') {
+                            console.log('✅ Updating state: tablesDiscovered = true');
+                            updateSchemaState({
+                                discoveredTables: ['IfcWall', 'IfcMaterial', 'IfcDoor', 'IfcWindow'], // Common IFC tables
+                                tablesDiscovered: true
+                            });
+                        } else if (action === 'table_info') {
+                            console.log(`✅ Updating state: columns for ${tableName}`);
+                            const currentStateForColumns = getSchemaState();
+                            const newColumns = { ...currentStateForColumns.discoveredColumns };
+                            newColumns[tableName!] = ['id', 'Name', 'GlobalId', 'ObjectType', 'Tag']; // Common IFC columns
+                            updateSchemaState({ discoveredColumns: newColumns });
+                        }
+
+                        let query = '';
+                        let description = '';
+
+                        switch (action) {
+                            case 'list_tables':
+                                query = "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name";
+                                description = 'Discover all available tables in the database';
+                                break;
+                            case 'table_info':
+                                if (!tableName) throw new Error('tableName required for table_info action');
+                                query = `PRAGMA table_info(${tableName})`;
+                                description = `Discover column structure for table ${tableName}`;
+                                break;
+                            case 'sample_data':
+                                if (!tableName) throw new Error('tableName required for sample_data action');
+                                query = `SELECT * FROM ${tableName} LIMIT 3`;
+                                description = `Get sample data from table ${tableName}`;
+                                break;
+                        }
+
+                        // Get current state and check if schema discovery is complete
+                        const currentSchemaState = getSchemaState();
+
+                        // Schema is only complete after ALL THREE steps: list_tables + table_info + sample_data
+                        const hasTablesDiscovered = currentSchemaState.discoveredTables.length > 0;
+                        const hasColumnsDiscovered = Object.keys(currentSchemaState.discoveredColumns).length > 0;
+                        const hasSampleDataSeen = action === 'sample_data'; // This is the final step
+
+                        // Track if sample_data has been executed for any table
+                        if (action === 'sample_data') {
+                            updateSchemaState({ sampleDataExecuted: true });
+                        }
+
+                        const isComplete = hasTablesDiscovered && hasColumnsDiscovered && (hasSampleDataSeen || currentSchemaState.sampleDataExecuted);
+
+                        if (isComplete && !currentSchemaState.schemaDiscoveryComplete) {
+                            updateSchemaState({ schemaDiscoveryComplete: true });
+                            console.log('🎯 Schema discovery marked as complete after ALL THREE steps!');
+                        }
+
+                        // If client supports queries, return a special marker for client execution
+                        if (supportsClientQueries) {
+                            return {
+                                type: 'client_query',
+                                query: query,
+                                description: description,
+                                message: 'Schema discovery query will be executed on client',
+                                requiresClientExecution: true,
+                                schemaAction: action,
+                                tableName: tableName,
+                                schemaProgress: {
+                                    tablesDiscovered: currentSchemaState.discoveredTables.length > 0,
+                                    columnsDiscovered: currentSchemaState.discoveredColumns,
+                                    querySqliteNowAvailable: isComplete && currentSchemaState.schemaDiscoveryComplete
+                                }
+                            };
+                        }
+
+                        // Fallback to server-side execution
+                        try {
+                            const sqliteManager = await getServerSQLiteManager(model.id);
+                            if (!sqliteManager) {
+                                return {
+                                    type: 'error',
+                                    message: 'Could not connect to SQLite database',
+                                    description: description,
+                                    query: query,
+                                    error: 'Database connection failed'
+                                };
+                            }
+                            const result = await sqliteManager.executeQuery(query, description);
+                            return result;
+                        } catch (error) {
+                            return {
+                                type: 'error',
+                                message: error instanceof Error ? error.message : 'Query failed',
+                                description: description,
+                                query: query,
+                                error: error instanceof Error ? error.message : 'Unknown error'
+                            };
+                        }
+                    }
+                },
+                querySqlite: {
+                    description: 'Query the IfcOpenShell SQLite database using discovered schema',
+                    inputSchema: z.object({
+                        query: z.string().describe('SQL query using ONLY the column names you discovered via discoverSchema'),
+                        description: z.string().describe('What information this query will retrieve')
+                    }),
+                    execute: async ({ query, description }: { query: string; description: string }) => {
+                        const currentState = getSchemaState();
+
+                        // ENFORCE SCHEMA DISCOVERY COMPLETION
+                        if (!currentState.schemaDiscoveryComplete && !currentState.sampleDataExecuted) {
+                            console.log('⚠️ Blocking querySqlite - schema discovery incomplete:', {
+                                schemaComplete: currentState.schemaDiscoveryComplete,
+                                sampleDataExecuted: currentState.sampleDataExecuted,
+                                tables: currentState.discoveredTables?.length || 0,
+                                columns: Object.keys(currentState.discoveredColumns || {}).length
+                            });
+                            throw new Error('Schema discovery must be completed first. Use discoverSchema with all three actions: list_tables, table_info, and sample_data');
+                        }
+
+                        // If client supports queries, return a special marker for client execution
+                        if (supportsClientQueries) {
+                            return {
+                                type: 'client_query',
+                                query: query,
+                                description: description,
+                                message: 'Query will be executed on client',
+                                requiresClientExecution: true,
+                                discoveredSchema: {
+                                    tables: currentState.discoveredTables,
+                                    columns: currentState.discoveredColumns
+                                }
+                            };
+                        }
+
+                        // Fallback to server-side execution
+                        try {
+                            const sqliteManager = await getServerSQLiteManager(model.id);
+                            if (!sqliteManager) {
+                                return {
+                                    type: 'error',
+                                    message: 'Could not connect to SQLite database',
+                                    description: description,
+                                    query: query,
+                                    error: 'Database connection failed'
+                                };
+                            }
+                            const result = await sqliteManager.executeQuery(query, description);
+                            return result;
+                        } catch (error) {
+                            return {
+                                type: 'error',
+                                message: error instanceof Error ? error.message : 'Query failed',
+                                description: description,
+                                query: query,
+                                error: error instanceof Error ? error.message : 'Unknown error'
+                            };
+                        }
+                    }
+                }
+            };
+        };
+
+        // Use proper streamText with AI SDK v5 approach - force multi-step execution
+        const result = streamText({
             model: aiModel,
             system: systemMsg,
             messages: modelMessages,
-            tools: tools,
-            maxRetries: 2,
-            // Force querySqlite for first few messages or when data is clearly needed
-            toolChoice: shouldForceQuery ? ({ type: 'tool', toolName: 'querySqlite' } as const) :
-                isContinuation ? ('none' as const) :
-                    ('auto' as const),
-            onFinish: async ({ text, toolCalls, toolResults, finishReason }) => {
+            tools: createAllTools(),
+            toolChoice: 'auto', // Changed from 'required' to allow final text response
+            onFinish: async ({ text, toolCalls, toolResults, finishReason, usage }) => {
+                const finishTime = Date.now();
+                const responseTime = finishTime - startTime;
+
                 console.log('🔧 [SERVER] Stream finished:', {
                     finishReason,
                     hasText: !!text,
                     textLength: text?.length || 0,
                     toolCallsCount: toolCalls?.length || 0,
-                    toolResultsCount: toolResults?.length || 0
+                    toolResultsCount: toolResults?.length || 0,
+                    responseTime,
+                    usage: usage ? {
+                        promptTokens: (usage as any).promptTokens || 0,
+                        completionTokens: (usage as any).completionTokens || 0,
+                        totalTokens: usage.totalTokens
+                    } : null
                 });
 
+                // Log tool calls with detailed information
                 if (toolCalls && toolCalls.length > 0) {
+                    // Debug: Log the complete structure of toolCalls
+                    console.log('🔍 [DEBUG] Complete toolCall structure:', JSON.stringify(toolCalls, null, 2));
+
                     console.log('🔧 [SERVER] Tool calls made:', toolCalls.map(tc => ({
                         toolName: tc.toolName,
-                        toolCallId: tc.toolCallId
+                        toolCallId: tc.toolCallId,
+                        args: (tc as any).args,
+                        allKeys: Object.keys(tc),
+                        fullObject: tc
                     })));
+
+                    // Log each tool call individually
+                    for (const toolCall of toolCalls) {
+                        // Try different possible property names for arguments
+                        const args = (toolCall as any).args ||
+                            (toolCall as any).arguments ||
+                            (toolCall as any).input ||
+                            (toolCall as any).parameters;
+
+                        console.log('🔍 [DEBUG] Tool call args extraction:', {
+                            toolCallId: toolCall.toolCallId,
+                            args: args,
+                            allProperties: Object.keys(toolCall)
+                        });
+
+                        aiLogger.logToolExecution({
+                            toolName: toolCall.toolName,
+                            query: args?.query || 'N/A',
+                            description: args?.description || 'N/A',
+                            result: 'pending', // Will be updated when results come in
+                            executionTime: 0, // Will be calculated when results come in
+                            success: true,
+                            clientId,
+                            ip: clientIp,
+                            toolCallId: toolCall.toolCallId,
+                            args: args
+                        });
+                    }
                 }
 
+                // Log tool results with detailed information
                 if (toolResults && toolResults.length > 0) {
+                    // Debug: Log the complete structure of toolResults
+                    console.log('🔍 [DEBUG] Complete toolResult structure:', JSON.stringify(toolResults, null, 2));
+
                     console.log('🔧 [SERVER] Tool results:', toolResults.map(tr => ({
                         toolCallId: tr.toolCallId,
-                        result: tr,
+                        result: (tr as any).result,
                         keys: Object.keys(tr),
-                        outputType: typeof tr.output,
-                        outputValue: tr.output,
-                        outputIsString: typeof tr.output === 'string'
+                        outputType: typeof (tr as any).result,
+                        outputValue: (tr as any).result,
+                        outputIsString: typeof (tr as any).result === 'string',
+                        fullObject: tr
                     })));
+
+                    // Log each tool result individually
+                    for (const toolResult of toolResults) {
+                        const correspondingCall = toolCalls?.find(tc => tc.toolCallId === toolResult.toolCallId);
+
+                        // Try different possible property names for arguments
+                        const args = (correspondingCall as any)?.args ||
+                            (correspondingCall as any)?.arguments ||
+                            (correspondingCall as any)?.input ||
+                            (correspondingCall as any)?.parameters;
+
+                        // Try different possible property names for results
+                        const result = (toolResult as any).result ||
+                            (toolResult as any).output ||
+                            (toolResult as any).value ||
+                            toolResult;
+
+                        const isError = (toolResult as any).isError ||
+                            (toolResult as any).error ||
+                            false;
+
+                        console.log('🔍 [DEBUG] Tool result extraction:', {
+                            toolCallId: toolResult.toolCallId,
+                            result: result,
+                            isError: isError,
+                            allProperties: Object.keys(toolResult)
+                        });
+
+                        aiLogger.logToolExecution({
+                            toolName: correspondingCall?.toolName || 'unknown',
+                            query: args?.query || 'N/A',
+                            description: args?.description || 'N/A',
+                            result: result,
+                            executionTime: responseTime, // Approximate
+                            success: !isError,
+                            error: isError ? String(result) : undefined,
+                            clientId,
+                            ip: clientIp,
+                            toolCallId: toolResult.toolCallId,
+                            output: result,
+                            outputType: typeof result
+                        });
+
+                        // Special logging for SQL queries
+                        if (correspondingCall?.toolName === 'querySqlite' && args?.query) {
+                            aiLogger.info('SQL_QUERY_EXECUTED', {
+                                type: 'sql_execution',
+                                clientId,
+                                ip: clientIp,
+                                query: args.query,
+                                description: args.description,
+                                result: result,
+                                success: !isError,
+                                error: isError ? String(result) : undefined,
+                                executionTime: responseTime,
+                                resultCount: Array.isArray(result?.results) ? result.results.length : 0,
+                                resultType: typeof result
+                            });
+                        }
+                    }
                 }
 
-                // Check if we have tool results but no text - this indicates the AI needs to continue
+                // Log the complete conversation turn
+                // Find the last user message (not assistant message)
+                const lastUserMessage = messages.slice().reverse().find((msg: any) => msg.role === 'user');
+
+                // Extract user prompt from various possible formats
+                let userPrompt = 'Unknown';
+                if (lastUserMessage) {
+                    // Check for parts array (AI SDK v5 format)
+                    if ((lastUserMessage as any).parts && Array.isArray((lastUserMessage as any).parts)) {
+                        const parts = (lastUserMessage as any).parts;
+                        const textPart = parts.find((p: any) => p.type === 'text');
+                        userPrompt = textPart?.text || 'Continuation';
+                    } else if (typeof lastUserMessage.content === 'string') {
+                        userPrompt = lastUserMessage.content || 'Continuation';
+                    } else if (Array.isArray(lastUserMessage.content)) {
+                        // Handle array format - look for text content
+                        const textContent = lastUserMessage.content.find((c: any) =>
+                            c.type === 'text' || (c.type === undefined && c.text)
+                        );
+                        userPrompt = textContent?.text || textContent?.content ||
+                            lastUserMessage.content[0]?.text ||
+                            lastUserMessage.content[0]?.content ||
+                            'Continuation';
+                    } else if (typeof lastUserMessage.content === 'object') {
+                        // Handle object format
+                        userPrompt = lastUserMessage.content?.text ||
+                            lastUserMessage.content?.content ||
+                            'Continuation';
+                    }
+                }
+
+                // If it's an empty message, it's likely a continuation
+                if (!userPrompt || userPrompt.trim() === '') {
+                    userPrompt = 'Continuation';
+                }
+
+                console.log('🔍 [DEBUG] User prompt extraction:', {
+                    messagesCount: messages.length,
+                    lastUserMessage: lastUserMessage ? {
+                        role: lastUserMessage.role,
+                        contentType: typeof lastUserMessage.content,
+                        contentIsArray: Array.isArray(lastUserMessage.content),
+                        content: lastUserMessage.content
+                    } : null,
+                    extractedPrompt: userPrompt
+                });
+
+                aiLogger.logConversationTurn({
+                    sessionId: clientId,
+                    clientId,
+                    ip: clientIp,
+                    modelName: selectedModel || 'unknown',
+                    userPrompt,
+                    toolCalls: toolCalls?.map(tc => {
+                        const args = (tc as any).args;
+                        return {
+                            toolName: tc.toolName,
+                            query: args?.query || 'N/A',
+                            description: args?.description || 'N/A',
+                            result: (toolResults?.find(tr => tr.toolCallId === tc.toolCallId) as any)?.result || 'pending'
+                        };
+                    }) || [],
+                    aiResponse: text || '',
+                    responseTime,
+                    success: finishReason === 'stop',
+                    error: finishReason === 'error' ? 'Stream finished with error' : undefined,
+                    finishReason,
+                    usage: usage ? {
+                        promptTokens: (usage as any).promptTokens || 0,
+                        completionTokens: (usage as any).completionTokens || 0,
+                        totalTokens: usage.totalTokens || 0
+                    } : undefined,
+                    toolCallsCount: toolCalls?.length || 0,
+                    toolResultsCount: toolResults?.length || 0,
+                    textLength: text?.length || 0
+                });
+
+                // With maxSteps enabled, the AI will automatically continue after tool execution
+                // No need to warn about incomplete responses - this is expected behavior
                 if (toolResults && toolResults.length > 0 && (!text || text.trim() === '')) {
-                    console.log('🔧 [SERVER] Tool executed but no response text - AI should continue automatically');
+                    console.log('🔧 [SERVER] Tool executed, AI will continue in next step (maxSteps enabled)');
                 }
             }
         });
 
         // Track conversation completion and return response
+        // AI SDK v5: Return the stream response without modifications
+        // The messages are already in correct chronological order
         return result.toUIMessageStreamResponse();
     } catch (error) {
         console.error("Chat API error:", error);

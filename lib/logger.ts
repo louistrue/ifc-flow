@@ -1,8 +1,12 @@
 import winston from 'winston';
 import path from 'path';
+import fs from 'fs';
 
 // Create logs directory if it doesn't exist
 const logsDir = path.join(process.cwd(), 'logs');
+if (!fs.existsSync(logsDir)) {
+    fs.mkdirSync(logsDir, { recursive: true });
+}
 
 const logger = winston.createLogger({
     level: process.env.NODE_ENV === 'production' ? 'info' : 'debug',
@@ -72,6 +76,8 @@ export const aiLogger = {
     // Log complete conversation turn
     logConversationTurn: (data: {
         sessionId?: string;
+        clientId?: string;
+        ip?: string;
         modelName: string;
         userPrompt: string;
         toolCalls: Array<{
@@ -84,6 +90,15 @@ export const aiLogger = {
         responseTime: number;
         success: boolean;
         error?: string;
+        finishReason?: string;
+        usage?: {
+            promptTokens?: number;
+            completionTokens?: number;
+            totalTokens?: number;
+        };
+        toolCallsCount?: number;
+        toolResultsCount?: number;
+        textLength?: number;
     }) => {
         logger.info('AI_CONVERSATION_TURN', {
             type: 'conversation_turn',
@@ -101,6 +116,12 @@ export const aiLogger = {
         executionTime: number;
         success: boolean;
         error?: string;
+        clientId?: string;
+        ip?: string;
+        toolCallId?: string;
+        args?: any;
+        output?: any;
+        outputType?: string;
     }) => {
         logger.info('AI_TOOL_EXECUTION', {
             type: 'tool_execution',

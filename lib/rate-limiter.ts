@@ -85,10 +85,10 @@ const rateLimiter = new InMemoryRateLimiter();
 
 // Default configurations for different endpoints
 export const RATE_LIMIT_CONFIGS: Record<string, RateLimitConfig> = {
-    // AI/Chat endpoints - more restrictive
+    // AI/Chat endpoints - generous for normal conversations
     ai: {
         windowMs: 60 * 1000, // 1 minute
-        maxRequests: 10 // 10 requests per minute
+        maxRequests: 30 // 30 requests per minute
     },
 
     // General API endpoints

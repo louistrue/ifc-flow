@@ -21,7 +21,7 @@ export const ChatMessageSchema = z.object({
 });
 
 export const ChatRequestSchema = z.object({
-    messages: z.array(ChatMessageSchema).max(50, 'Too many messages in conversation'),
+    messages: z.array(ChatMessageSchema).max(200, 'Too many messages in conversation'),
     model: z.string().max(100).optional(),
     modelId: z.string().max(100).optional(),
     modelData: z.object({
@@ -58,7 +58,7 @@ const DANGEROUS_PATTERNS = [
     // Prompt injection attempts
     /(ignore\s+(previous|all)\s+(instructions|prompts|rules))/i,
     /(you\s+are\s+now|forget\s+(everything|all|previous))/i,
-    /(system\s*:\s*|assistant\s*:\s*|user\s*:\s*)/i,
+    /^\s*(system|assistant|user)\s*:\s*/i, // Only match at start of message
 
     // API key extraction attempts
     /(api[_-]?key|secret|token|password|credential)/i,
@@ -121,8 +121,13 @@ export function validateAndSanitizeInput(input: any): ValidationResult {
                         }
                     }
 
-                    // Skip validation if no content found
+                    // Skip validation if no content found or if it's a continuation message
                     if (!messageContent || messageContent.trim().length === 0) {
+                        continue;
+                    }
+
+                    // Skip validation for continuation messages (empty or query results)
+                    if (messageContent.trim() === '' || messageContent.startsWith('Query results:') || messageContent.startsWith('Query failed:')) {
                         continue;
                     }
 

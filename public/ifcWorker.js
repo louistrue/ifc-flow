@@ -89,63 +89,53 @@ async function idbDelete(key) {
   });
 }
 
-async function buildSqlJsDb(elements, key) {
-  await initSqlJsModule();
-  sqliteDb = new SQLModule.Database();
-  // Schema: normalized columns and helpful views for LLM queries
-  sqliteDb.exec(
-    `PRAGMA journal_mode=OFF; PRAGMA synchronous=OFF; BEGIN;
-     CREATE TABLE IF NOT EXISTS elements (
-       id TEXT PRIMARY KEY,         -- Prefer GlobalId when available
-       GlobalId TEXT,               -- Explicit GlobalId
-       type TEXT,                   -- IFC type, e.g., IfcWall
-       category TEXT,               -- Normalized type without 'Ifc' prefix and StandardCase
-       Name TEXT                    -- Element name
-     );
-     CREATE INDEX IF NOT EXISTS idx_elements_type ON elements(type);
-     CREATE INDEX IF NOT EXISTS idx_elements_category ON elements(category);
-     CREATE INDEX IF NOT EXISTS idx_elements_name ON elements(Name);
-     -- Convenience view to allow queries using 'IfcElement'
-     CREATE VIEW IF NOT EXISTS IfcElement AS
-       SELECT id, GlobalId, type, category, Name FROM elements;
-     -- Optional spaces table derived from elements
-     CREATE TABLE IF NOT EXISTS ifc_spaces (
-       GlobalId TEXT PRIMARY KEY,
-       Name TEXT
-     );
-     COMMIT;`
-  );
-  // Insert elements
-  const stmt = sqliteDb.prepare("INSERT OR REPLACE INTO elements (id, GlobalId, type, category, Name) VALUES (?, ?, ?, ?, ?)");
-  const spaceStmt = sqliteDb.prepare("INSERT OR REPLACE INTO ifc_spaces (GlobalId, Name) VALUES (?, ?)");
+// buildSqlJsDb function removed - we only use comprehensive database from ifc2sql
+
+// Clean up old fallback databases from IndexedDB
+async function cleanupFallbackDatabases() {
   try {
-    sqliteDb.exec('BEGIN');
-    for (const el of elements) {
-      const globalId = el.properties?.GlobalId || el.GlobalId || null;
-      const id = globalId || el.id || null;
-      const typeRaw = el.type || el.element_type || null;
-      const name = (el.properties && el.properties.Name) || el.Name || el.name || null;
-      if (!id || !typeRaw) continue;
-      const type = String(typeRaw);
-      const category = type.replace(/^Ifc/i, '').replace(/StandardCase$/i, '');
-      stmt.run([String(id), globalId ? String(globalId) : null, type, category, name != null ? String(name) : null]);
-      if (/^IfcSpace$/i.test(type)) {
-        if (globalId) {
-          spaceStmt.run([String(globalId), name != null ? String(name) : null]);
+    const db = await new Promise((resolve, reject) => {
+      const req = indexedDB.open('ifcWorkerDB', 1);
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+
+    const tx = db.transaction(['kvStore'], 'readonly');
+    const store = tx.objectStore('kvStore');
+    const getAllKeysReq = store.getAllKeys();
+
+    await new Promise((resolve, reject) => {
+      getAllKeysReq.onsuccess = async () => {
+        const keys = getAllKeysReq.result;
+        const fallbackKeys = keys.filter(k => k.includes(':v2'));
+
+        if (fallbackKeys.length > 0) {
+          console.log(`Cleaning up ${fallbackKeys.length} fallback database(s)...`);
+          const deleteTx = db.transaction(['kvStore'], 'readwrite');
+          const deleteStore = deleteTx.objectStore('kvStore');
+
+          for (const key of fallbackKeys) {
+            deleteStore.delete(key);
+            console.log(`Deleted fallback database: ${key}`);
+          }
+
+          deleteTx.oncomplete = () => {
+            console.log('Fallback database cleanup complete');
+            resolve();
+          };
+          deleteTx.onerror = () => reject(deleteTx.error);
+        } else {
+          console.log('No fallback databases found to clean up');
+          resolve();
         }
-      }
-    }
-    sqliteDb.exec('COMMIT');
-  } catch (e) {
-    try { sqliteDb.exec('ROLLBACK'); } catch { }
-    throw e;
-  } finally {
-    stmt.free && stmt.free();
-    spaceStmt.free && spaceStmt.free();
+      };
+      getAllKeysReq.onerror = () => reject(getAllKeysReq.error);
+    });
+
+    db.close();
+  } catch (error) {
+    console.warn('Failed to cleanup fallback databases:', error);
   }
-  // Persist to IDB
-  const bytes = sqliteDb.export();
-  await idbPut(key, bytes);
 }
 
 async function ensureDbLoaded(key) {
@@ -354,6 +344,7 @@ self.onmessage = async (event) => {
     switch (action) {
       case "init":
         await initPyodide();
+        await cleanupFallbackDatabases(); // Clean up old fallback databases
         self.postMessage({ type: "initialized", messageId });
         break;
 
@@ -1073,28 +1064,10 @@ async function handleExtractData({ types = ["IfcWall"], messageId }) {
       });
       console.log("handleExtractData: Sent dataExtracted message");
 
-      // Build and persist sql.js database (client-side SQLite) if not already present
-      try {
-        const modelKey = (ifcModelCache && (ifcModelCache.model_id || ifcModelCache.filename)) || 'default';
-        const key = `model-sqlite-db:${modelKey}:v2`;
-
-        // Only update currentSqlKey if we don't already have a comprehensive database key
-        if (!currentSqlKey || !currentSqlKey.includes(modelKey.split(':')[0])) {
-          currentSqlKey = key;
-        } else {
-          console.log("handleExtractData: Keeping existing comprehensive database key:", currentSqlKey);
-        }
-
-        const existing = await ensureDbLoaded(key);
-        if (!existing) {
-          await buildSqlJsDb(elements, key);
-          console.log('handleExtractData: sql.js DB built and persisted (fallback)');
-        } else {
-          console.log('handleExtractData: Existing SQLite DB found in IndexedDB; skipping fallback build');
-        }
-      } catch (e) {
-        console.warn('handleExtractData: sql.js DB ensure/build failed:', e);
-      }
+      // No fallback database - only use comprehensive database from ifc2sql
+      const modelKey = (ifcModelCache && (ifcModelCache.model_id || ifcModelCache.filename)) || 'default';
+      currentSqlKey = `model-sqlite-db:${modelKey}`;
+      console.log("handleExtractData: Using comprehensive database key:", currentSqlKey);
     } catch (pythonError) {
       console.error("Python execution error:", pythonError);
       throw new Error(`Python error: ${pythonError.message}`);
@@ -2492,10 +2465,23 @@ async function handleSqliteQuery({ query, modelId, messageId }) {
   try {
     console.log("handleSqliteQuery: Processing query (sql.js)", { query, modelId });
     await initSqlJsModule();
-    const key = currentSqlKey || (modelId ? `model-sqlite-db:${modelId}` : 'model-sqlite-db');
+
+    // Always use the comprehensive database
+    let key = currentSqlKey || (modelId ? `model-sqlite-db:${modelId}` : 'model-sqlite-db');
+    console.log("handleSqliteQuery: Using database key:", key);
+
     await ensureDbLoaded(key);
     if (!sqliteDb) {
       throw new Error('SQLite database is not available in sql.js');
+    }
+
+    // Debug: Check what tables are available in the loaded database
+    try {
+      const tables = sqliteDb.exec("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name");
+      const tableNames = tables.length > 0 ? tables[0].values.map(row => row[0]) : [];
+      console.log("handleSqliteQuery: Available tables in database:", tableNames.slice(0, 10), `(${tableNames.length} total)`);
+    } catch (debugError) {
+      console.warn("handleSqliteQuery: Could not list tables:", debugError.message);
     }
     // Normalize or synthesize SQL if a natural language prompt was provided
     let rewritten = String(query || '').trim();
@@ -2645,39 +2631,11 @@ async function handleSqliteExport({ modelId, messageId }) {
         }, [comprehensiveDbBytes.buffer]);
         return;
       } else {
-        console.log("handleSqliteExport: No comprehensive database found in IndexedDB");
-        console.log("handleSqliteExport: This means the Patcher database was not properly stored");
+        throw new Error("No comprehensive database found in IndexedDB. The IFC file needs to be reloaded.");
       }
     } catch (idbError) {
-      console.log("handleSqliteExport: Error retrieving from IndexedDB:", idbError.message);
+      throw new Error(`Failed to export database: ${idbError.message}`);
     }
-
-    // Fallback to sql.js database if comprehensive one not available
-    console.log("handleSqliteExport: Falling back to sql.js database");
-    await initSqlJsModule();
-    const db = await ensureDbLoaded(key);
-    if (!db) {
-      throw new Error('SQLite database not found in IndexedDB');
-    }
-    const bytes = sqliteDb.export();
-    console.log("handleSqliteExport: Using sql.js fallback database");
-    console.log("handleSqliteExport: Fallback database size:", bytes.byteLength, "bytes");
-    console.log("handleSqliteExport: Fallback database size:", (bytes.byteLength / 1024).toFixed(2), "KB");
-
-    // Quick analysis of the fallback database
-    try {
-      const result = sqliteDb.exec("SELECT name FROM sqlite_master WHERE type='table'");
-      const tableCount = result.length > 0 ? result[0].values.length : 0;
-      console.log("handleSqliteExport: Fallback database contains", tableCount, "tables");
-    } catch (analysisError) {
-      console.log("handleSqliteExport: Could not analyze fallback database:", analysisError.message);
-    }
-
-    self.postMessage({
-      type: "sqliteExport",
-      messageId,
-      bytes
-    }, [bytes.buffer]);
   } catch (error) {
     console.error("handleSqliteExport error:", error);
     self.postMessage({

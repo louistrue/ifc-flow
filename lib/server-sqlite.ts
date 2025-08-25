@@ -48,6 +48,18 @@ export class ServerSQLiteManager {
             if (!this.dbPath) {
                 console.error('❌ No SQLite database file found for model:', modelId);
                 console.log('Searched paths:', possiblePaths);
+
+                // Log the database connection failure
+                aiLogger.logToolExecution({
+                    toolName: 'querySqlite',
+                    query: 'CONNECT_DB',
+                    description: `Connect to SQLite database for model ${modelId}`,
+                    result: null,
+                    executionTime: 0,
+                    success: false,
+                    error: `No database file found. Searched paths: ${possiblePaths.join(', ')}`
+                });
+
                 return false;
             }
 
@@ -55,6 +67,18 @@ export class ServerSQLiteManager {
                 this.db = new sqlite.Database(this.dbPath!, (err) => {
                     if (err) {
                         console.error('❌ Error connecting to SQLite database:', err.message);
+
+                        // Log the SQLite connection error
+                        aiLogger.logToolExecution({
+                            toolName: 'querySqlite',
+                            query: 'CONNECT_DB',
+                            description: `SQLite connection to ${this.dbPath}`,
+                            result: null,
+                            executionTime: 0,
+                            success: false,
+                            error: err.message
+                        });
+
                         reject(err);
                     } else {
                         console.log('✅ Connected to SQLite database:', this.dbPath);
@@ -64,6 +88,18 @@ export class ServerSQLiteManager {
             });
         } catch (error) {
             console.error('❌ Error in connectToDatabase:', error);
+
+            // Log the general connection error
+            aiLogger.logToolExecution({
+                toolName: 'querySqlite',
+                query: 'CONNECT_DB',
+                description: `Database connection attempt for model ${modelId}`,
+                result: null,
+                executionTime: 0,
+                success: false,
+                error: error instanceof Error ? error.message : 'Unknown connection error'
+            });
+
             return false;
         }
     }
@@ -90,7 +126,7 @@ export class ServerSQLiteManager {
 
                 if (err) {
                     console.error('❌ SQLite query error:', err.message);
-                    
+
                     // Log the error
                     aiLogger.logToolExecution({
                         toolName: 'querySqlite',

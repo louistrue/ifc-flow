@@ -1,16 +1,15 @@
 "use client";
 
-import { memo, useEffect, useRef, useState, useCallback, useMemo } from "react";
-import { createPortal } from "react-dom";
-import { Handle, Position, type NodeProps, useReactFlow } from "reactflow";
-import type { AiNodeData } from "./node-types";
-import { Bot, Database, Calculator, List, ChevronDown, Copy, Shield } from "lucide-react";
+import { useTurnstile } from "@/components/ui/turnstile";
+import { querySqliteDatabase } from "@/lib/ifc-utils";
+import { getTurnstileSitekey } from "@/lib/turnstile";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
-import { querySqliteDatabase } from "@/lib/ifc-utils";
-import { z } from "zod";
-import { Turnstile, useTurnstile } from "@/components/ui/turnstile";
-import { getTurnstileSitekey } from "@/lib/turnstile";
+import { Bot, Calculator, ChevronDown, Copy, Database, List, Shield } from "lucide-react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { Handle, Position, useReactFlow, type NodeProps } from "reactflow";
+import type { AiNodeData } from "./node-types";
 
 
 
@@ -18,6 +17,9 @@ interface Message {
   role: "user" | "assistant";
   content: string;
   toolResults?: ToolResult[];
+  id?: string;
+  seq?: number;
+  createdAt?: number;
 }
 
 interface ToolResult {
@@ -40,7 +42,6 @@ interface ToolResultDisplayProps {
   result: ToolResult;
 }
 
-// Simple pluralization helper to avoid duplicates like "Wallss"
 const formatElementType = (rawType?: string, count?: number): string => {
   if (!rawType) return "items";
   let name = rawType.replace(/^Ifc/i, "").trim();
@@ -55,6 +56,76 @@ const formatElementType = (rawType?: string, count?: number): string => {
   }
 
   return name;
+};
+
+// Build a concise natural-language summary from a single tool result
+const naturalLanguageFromToolResult = (result: ToolResult): string => {
+  switch (result.type) {
+    case 'count': {
+      const count = result.value ?? result.count ?? 0;
+      const label = formatElementType(result.elementType, Number(count));
+      return `There are ${count} ${label}.`;
+    }
+    case 'area':
+    case 'volume': {
+      const value = typeof result.value === 'number' ? result.value.toFixed(2) : String(result.value ?? '0');
+      const unit = result.unit || (result.type === 'area' ? 'm²' : 'm³');
+      const label = result.elementType ? ` for ${formatElementType(result.elementType, 1)}` : '';
+      return `${result.type === 'area' ? 'Total area' : 'Total volume'}${label}: ${value} ${unit}.`;
+    }
+    case 'materials': {
+      const items = result.materials || [];
+      const prefix = 'Materials in the model';
+      if (items.length === 0) return `${prefix}: none found.`;
+      if (items.length <= 3) return `${prefix}: ${items.join(', ')}.`;
+      const first = items.slice(0, 10).join(', ');
+      return `${prefix}: ${first}${items.length > 10 ? `, and ${items.length - 10} more.` : '.'}`;
+    }
+    case 'list': {
+      const items = Array.isArray(result.items) ? result.items.map((v) => String(v)).filter(Boolean) : [];
+      const what = result.property ? result.property.toLowerCase() : 'items';
+      const ofWhat = result.elementType ? ` ${formatElementType(result.elementType, 2)}` : '';
+      if (items.length === 0) return `No ${what}${ofWhat} found.`;
+      // If very short, inline all
+      if (items.length <= 3) {
+        return `Here are the ${what}${ofWhat} I found: ${items.join(', ')}.`;
+      }
+      // Otherwise, show a short preview
+      const first = items.slice(0, 10).join(', ');
+      const extra = items.length > 10 ? `, and ${items.length - 10} more.` : '.';
+      return `Here are the first ${Math.min(10, items.length)} ${what}${ofWhat} I found: ${first}${extra}`;
+    }
+    case 'quantityResults':
+      return 'Calculated quantity results.';
+    default:
+      // Improve generic analysis summaries
+      if (result.data && Array.isArray(result.data)) {
+        const rows = result.data as any[];
+        if (rows.length === 0) return 'No results found.';
+        const sample = rows[0];
+        if (sample && typeof sample === 'object' && ('Name' in sample || 'name' in sample)) {
+          const names = rows.map((r: any) => r?.Name ?? r?.name).filter(Boolean);
+          if (names.length > 0) {
+            const preview = names.slice(0, 3).join(', ');
+            return `Found ${names.length} names. First ${Math.min(3, names.length)}: ${preview}.`;
+          }
+        }
+        return `Found ${rows.length} results.`;
+      }
+      return result.description || 'Analysis complete.';
+  }
+};
+// Detect low-quality instruction-like text (e.g., "Retrieve all ...")
+const isInstructionEcho = (text?: string): boolean => {
+  if (!text) return false;
+  const t = text.trim();
+  if (t.length === 0) return false;
+  const starts = /^(retrieve|get|list|show|query|count|fetch|extract|return)\b/i.test(t);
+  const containsAttrs = /with their attributes/i.test(t);
+  const looksLikeToolHeader = /^tool results:?$/i.test(t) || /\btool results\b/i.test(t);
+  // Consider very short imperative lines as echos
+  const tooShort = t.length < 80 && /:/.test(t) === false && /\./.test(t) === false && /\?$/.test(t) === false;
+  return starts || containsAttrs || looksLikeToolHeader || tooShort;
 };
 
 // Component to display tool results with expandable details
@@ -110,6 +181,72 @@ const ToolResultDisplay = ({ result }: ToolResultDisplayProps) => {
       (result.type === 'materials' && result.materials && result.materials.length > 0) ||
       result.data ||
       (result.elementType || result.method || result.elementCount || result.property);
+  };
+
+  // Helper: render nicer views for generic data arrays (query rows)
+  const renderGenericData = () => {
+    const data = result.data;
+    if (!Array.isArray(data)) return null;
+    if (data.length === 0) return <div className="text-[10px] text-gray-500">No rows</div>;
+
+    // If rows are primitives, render as a simple list
+    if (typeof data[0] !== 'object') {
+      return (
+        <div className="max-h-32 overflow-y-auto bg-white dark:bg-gray-800 rounded p-2 space-y-1">
+          {data.slice(0, 100).map((v: any, i: number) => (
+            <div key={i} className="text-[10px] font-mono">{String(v)}</div>
+          ))}
+          {data.length > 100 && (
+            <div className="text-[10px] text-gray-500">... and {data.length - 100} more</div>
+          )}
+        </div>
+      );
+    }
+
+    // If rows are objects and have a Name field, show a compact name list
+    if (data[0] && Object.prototype.hasOwnProperty.call(data[0], 'Name')) {
+      const names = data.map((r: any) => r?.Name).filter(Boolean);
+      return (
+        <div className="max-h-32 overflow-y-auto bg-white dark:bg-gray-800 rounded p-2 space-y-1">
+          {names.slice(0, 100).map((name: string, i: number) => (
+            <div key={i} className="text-[10px] font-mono">{name}</div>
+          ))}
+          {names.length > 100 && (
+            <div className="text-[10px] text-gray-500">... and {names.length - 100} more</div>
+          )}
+        </div>
+      );
+    }
+
+    // Otherwise, render a small table using up to first 4 columns
+    const keys = Object.keys(data[0] || {}).slice(0, 4);
+    return (
+      <div className="max-h-32 overflow-y-auto bg-white dark:bg-gray-800 rounded">
+        <table className="w-full text-[10px]">
+          <thead className="bg-gray-100 dark:bg-gray-700 sticky top-0">
+            <tr>
+              {keys.map((k) => (
+                <th key={k} className="p-1 text-left font-medium">{k}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {data.slice(0, 50).map((row: any, i: number) => (
+              <tr key={i} className={i % 2 === 0 ? 'bg-gray-50 dark:bg-gray-900' : ''}>
+                {keys.map((k) => (
+                  <td key={k} className="p-1 border-t border-gray-200 dark:border-gray-700">
+                    {typeof row[k] === 'object' ? JSON.stringify(row[k]) : String(row[k] ?? '—')}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {data.length > 50 && (
+          <div className="text-[10px] text-gray-500 px-2 py-1">Showing first 50 of {data.length} rows</div>
+        )}
+      </div>
+    );
   };
 
   return (
@@ -193,11 +330,11 @@ const ToolResultDisplay = ({ result }: ToolResultDisplayProps) => {
           {result.data && (
             <div>
               <div className="text-[10px] font-semibold text-gray-600 dark:text-gray-400 mb-1">Data:</div>
-              <div className="max-h-32 overflow-y-auto bg-white dark:bg-gray-800 rounded p-2">
-                <pre className="text-[10px] font-mono whitespace-pre-wrap">
-                  {JSON.stringify(result.data, null, 2)}
-                </pre>
-              </div>
+              {renderGenericData() || (
+                <div className="max-h-32 overflow-y-auto bg-white dark:bg-gray-800 rounded p-2">
+                  <pre className="text-[10px] font-mono whitespace-pre-wrap">{JSON.stringify(result.data, null, 2)}</pre>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -283,6 +420,8 @@ const AI_MODELS: UiModelOption[] = loadModelListFromEnv();
 
 export const AiNode = memo(({ data, id, selected, isConnectable }: NodeProps<AiNodeData>) => {
   const [messages, setMessages] = useState<Message[]>((data.messages as Message[]) || []);
+  // Local assistant messages created on the client (e.g., client-side tool results)
+  const [localMessages, setLocalMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
@@ -896,27 +1035,95 @@ export const AiNode = memo(({ data, id, selected, isConnectable }: NodeProps<AiN
 
   // Use a ref to track if we need to update
   const prevDataRef = useRef<{ messages: Message[]; isLoading: boolean }>({ messages: [], isLoading: false });
+  // Persist message timestamps so ordering remains stable across renders
+  const messageTimeCacheRef = useRef<Map<string, number>>(new Map());
+  const getMessageTimestamp = useCallback((m: any, fallbackIndex?: number): number => {
+    // Prefer explicit timestamps if provided by the SDK
+    const explicit = (m && (m.createdAt || m.timestamp)) as number | undefined;
+    if (typeof explicit === 'number') return explicit;
+    // Otherwise use a cached timestamp keyed by id
+    const id = (m && m.id) ? String(m.id) : `noid_${fallbackIndex ?? 0}`;
+    const cache = messageTimeCacheRef.current;
+    if (cache.has(id)) return cache.get(id)!;
+    const now = Date.now();
+    cache.set(id, now);
+    return now;
+  }, []);
+
+  // Monotonic order counter so messages always appear in the order they arrive
+  const nextSeqRef = useRef<number>(0);
+  const messageOrderCacheRef = useRef<Map<string, number>>(new Map());
+  const getOrAssignSeq = useCallback((id: string): number => {
+    const cache = messageOrderCacheRef.current;
+    if (cache.has(id)) return cache.get(id)!;
+    const seq = nextSeqRef.current++;
+    cache.set(id, seq);
+    return seq;
+  }, []);
 
   useEffect(() => {
+    // AI SDK v5: Messages are already in chronological order from the SDK
+    // Combine messages and local messages, preserving chronological order with stable tie-breakers
+    const combined = [...messages, ...localMessages]
+      .sort((a: Message, b: Message) => {
+        // Primary ordering by monotonic sequence to match arrival order
+        const aSeq = typeof a.seq === 'number' ? a.seq : getOrAssignSeq(String(a.id || ''));
+        const bSeq = typeof b.seq === 'number' ? b.seq : getOrAssignSeq(String(b.id || ''));
+        if (aSeq !== bSeq) return aSeq - bSeq;
+        // Secondary by timestamp to keep determinism across sessions
+        const aTime = a.createdAt || 0;
+        const bTime = b.createdAt || 0;
+        if (aTime !== bTime) return aTime - bTime;
+        // Tertiary: user before assistant
+        if (a.role !== b.role) return a.role === 'user' ? -1 : 1;
+        return 0;
+      });
+
+
+
     const prevData = prevDataRef.current;
-    const messagesChanged = JSON.stringify(messages) !== JSON.stringify(prevData.messages);
+    const messagesChanged = JSON.stringify(combined) !== JSON.stringify(prevData.messages);
     const loadingChanged = isLoading !== prevData.isLoading;
 
     if (messagesChanged || loadingChanged) {
-      prevDataRef.current = { messages, isLoading };
-      updateNodeData();
+      prevDataRef.current = { messages: combined, isLoading };
+      // Persist both server-streamed and local messages in correct order
+      setNodes((nodes) =>
+        nodes.map((n) =>
+          n.id === id
+            ? {
+              ...n,
+              data: {
+                ...n.data,
+                messages: combined,
+                isLoading,
+              },
+            }
+            : n
+        )
+      );
     }
-  }, [messages, isLoading, updateNodeData]);
+  }, [messages, localMessages, isLoading, id, setNodes]);
 
-  // Auto-scroll to latest message
+  // Auto-scroll to latest message - only when content actually changes
   useEffect(() => {
-    if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({
-        behavior: 'smooth',
-        block: 'end'
-      });
+    const scrollToBottom = () => {
+      if (messagesEndRef.current) {
+        // Use scrollIntoView with immediate behavior for better reliability
+        messagesEndRef.current.scrollIntoView({
+          behavior: 'auto',
+          block: 'end'
+        });
+      }
+    };
+
+    // Only scroll when there are actual messages, not during loading state changes
+    if (messages.length > 0 || localMessages.length > 0) {
+      // Small delay to ensure DOM has updated
+      const timeoutId = setTimeout(scrollToBottom, 0);
+      return () => clearTimeout(timeoutId);
     }
-  }, [messages, isLoading]);
+  }, [messages, localMessages]); // Removed isLoading from dependencies
 
   // Add scroll listener to chat container
   useEffect(() => {
@@ -1143,7 +1350,8 @@ export const AiNode = memo(({ data, id, selected, isConnectable }: NodeProps<AiN
             schema: currentModel.schema,
             totalElements: currentModel.totalElements,
             elementCounts: currentModel.elementCounts,
-            hasSqlite: currentModel.sqliteSuccess && !!currentModel.sqliteDb
+            hasSqlite: currentModel.sqliteSuccess && !!currentModel.sqliteDb,
+            supportsClientQueries: true
           } : null,
           turnstileToken: shouldSendToken ? currentTurnstileToken : undefined, // Only send token once
           sessionVerified: currentIsNodeVerified // Indicate this is a verified session
@@ -1183,10 +1391,16 @@ export const AiNode = memo(({ data, id, selected, isConnectable }: NodeProps<AiN
     }
   }, [isTurnstileVerified, turnstileToken, isNodeVerified, id, resetTurnstile]);
 
+  // Ref to track if we're waiting for a client query
+  const pendingClientQuery = useRef<{ query: string; description: string; messageId: string } | null>(null);
+
   // Chat hook using AI SDK UI with transport that forwards model + modelData per request
   // Tools are now handled completely server-side with execute functions
-  const { messages: chatMessages, sendMessage, status: chatStatus, error: chatError } = useChat({
+  const seqRef = useRef<number>(0);
+
+  const { messages: chatMessages, sendMessage, status: chatStatus, error: chatError, setMessages: setChatMessages } = useChat({
     transport,
+    generateId: () => `msg_${Date.now()}_${Math.random().toString(36).substring(7)}`,
     sendAutomaticallyWhen: ({ messages }) => {
       const last: any = messages[messages.length - 1];
       if (!last || last.role !== 'assistant') return false;
@@ -1208,8 +1422,10 @@ export const AiNode = memo(({ data, id, selected, isConnectable }: NodeProps<AiN
 
       const shouldSendAuto = hasToolResult && !hasCompleteText;
 
-      // Disable automatic sending to reduce stuttering - rely on onFinish instead
-      return false;
+      // Disable automatic sending - we handle continuation differently
+      // to prevent multiple requests and stuttering
+      console.log('🔧 [AI-NODE] Auto-send check:', { hasToolResult, hasCompleteText, shouldSendAuto });
+      return false; // Disabled to prevent duplicate requests
     },
     onError: (error) => {
       console.error('🔧 [AI-NODE] Chat error:', error);
@@ -1247,12 +1463,192 @@ export const AiNode = memo(({ data, id, selected, isConnectable }: NodeProps<AiN
           toolResults: [{
             type: 'analysis',
             description: 'Security block - request rejected'
-          }]
+          }],
+          id: `local_security_${Date.now()}_${++seqRef.current}`,
+          seq: getOrAssignSeq(`local_security_${seqRef.current}`),
+          createdAt: Date.now()
         };
         setMessages(prev => [...prev, errorMessage]);
+
+        // Scroll to bottom after security error message
+        setTimeout(() => {
+          if (messagesEndRef.current) {
+            messagesEndRef.current.scrollIntoView({
+              behavior: 'auto',
+              block: 'end'
+            });
+          }
+        }, 0);
       }
     },
-    onFinish: ({ message }) => {
+    onFinish: async ({ message }) => {
+      // Check if the message contains a client query request
+      if (message.role === 'assistant' && Array.isArray((message as any).parts)) {
+        const parts = (message as any).parts;
+        console.log('🔍 Checking message parts for client queries:', {
+          messageRole: message.role,
+          partsCount: parts.length,
+          partTypes: parts.map((p: any) => p.type)
+        });
+
+        // Look for tool results that need client execution
+        for (const part of parts) {
+          console.log('🔍 Examining part:', {
+            type: part.type,
+            hasResult: !!part.result,
+            hasOutput: !!part.output,
+            requiresClientExecution: part.result?.requiresClientExecution || part.output?.requiresClientExecution,
+            resultData: part.result,
+            outputData: part.output
+          });
+
+          if ((part.type === 'tool-result' || part.type === 'tool-querySqlite') &&
+            (part.result?.requiresClientExecution || part.output?.requiresClientExecution)) {
+            const toolData = part.result || part.output;
+            const { query, description } = toolData;
+
+            console.log('📱 Executing SQLite query on client:', { query, description });
+
+            try {
+              // Execute the query locally using the connected model
+              const currentModel = getConnectedModelData();
+              console.log('🔍 Current model data:', {
+                hasModel: !!currentModel,
+                modelId: currentModel?.id,
+                modelName: currentModel?.name
+              });
+
+              if (currentModel) {
+                const results = await querySqliteDatabase(currentModel, query);
+
+                console.log('✅ Client query successful:', {
+                  query,
+                  resultCount: Array.isArray(results) ? results.length : 0
+                });
+
+                // Format the results
+                let formattedResult: any;
+
+                // Check if it's a COUNT query
+                if (query.toLowerCase().includes('count(')) {
+                  const count = results[0]?.['COUNT(*)'] || results[0]?.count || 0;
+                  formattedResult = {
+                    type: 'count',
+                    value: count,
+                    description,
+                    query,
+                    message: `Found ${count} results`
+                  };
+                } else if (query.toLowerCase().includes('select name') || query.toLowerCase().includes('select distinct name')) {
+                  // Handle name queries
+                  const names = results.map((r: any) => r.Name || r.name).filter(Boolean);
+                  formattedResult = {
+                    type: 'list',
+                    items: names,
+                    count: names.length,
+                    property: 'Name',
+                    description,
+                    query
+                  };
+                } else {
+                  // Generic result
+                  formattedResult = {
+                    type: 'queryResult',
+                    result: results,
+                    count: results.length,
+                    description,
+                    query
+                  };
+                }
+
+                // Do NOT send a new user message. Create a local assistant message
+                // with structured tool results and render it once.
+                const toToolResult = (fr: any): ToolResult => {
+                  if (fr?.type === 'count') {
+                    return { type: 'count', value: fr.value, description, elementType: fr.elementType } as ToolResult;
+                  }
+                  if (fr?.type === 'list') {
+                    const items = Array.isArray(fr.items)
+                      ? fr.items
+                      : (Array.isArray(results) ? results.map((r: any) => r.Name || r.name || JSON.stringify(r)) : []);
+                    return { type: 'list', items, count: items.length, property: 'Name', description } as ToolResult;
+                  }
+                  // Generic SQL result – attach raw rows for inspector components
+                  return { type: 'analysis', description: description || 'Query results', data: results } as ToolResult;
+                };
+
+                const tr = toToolResult(formattedResult);
+
+                // Update UI once with an assistant message containing tool results
+                // Build NL lead sentence from the tool result
+                const lead = naturalLanguageFromToolResult(tr);
+
+                // Local messages should come after AI SDK messages
+                const now = Date.now();
+                const assistantMsg: Message = {
+                  role: 'assistant',
+                  content: lead,
+                  toolResults: [tr],
+                  id: `local_${now}_${++seqRef.current}`,
+                  seq: getOrAssignSeq(`local_${seqRef.current}`),
+                  createdAt: now
+                };
+                // Keep locally so server-streamed messages don't overwrite
+                setLocalMessages(prev => [...prev, assistantMsg]);
+
+                // Scroll to bottom after local message is added
+                setTimeout(() => {
+                  if (messagesEndRef.current) {
+                    messagesEndRef.current.scrollIntoView({
+                      behavior: 'auto',
+                      block: 'end'
+                    });
+                  }
+                }, 0);
+
+                // Propagate structured results downstream (watch nodes, etc.)
+                try { propagateToWatchNodes([tr]); } catch { }
+
+                // Mark for internal tracking (no server send)
+                pendingClientQuery.current = {
+                  query,
+                  description,
+                  messageId: `client_query_${Date.now()}`
+                };
+              }
+            } catch (error) {
+              console.error('❌ Client query failed:', error);
+
+              // Create a single assistant error message locally
+              const now = Date.now();
+              const assistantError: Message = {
+                role: 'assistant',
+                content: 'Query failed. Please see details below.',
+                toolResults: [{ type: 'analysis', description: `Query failed: ${error instanceof Error ? error.message : 'Unknown error'}` }],
+                id: `local_error_${now}_${++seqRef.current}`,
+                seq: getOrAssignSeq(`local_error_${seqRef.current}`),
+                createdAt: now
+              };
+              setLocalMessages(prev => [...prev, assistantError]);
+
+              // Scroll to bottom after error message is added
+              setTimeout(() => {
+                if (messagesEndRef.current) {
+                  messagesEndRef.current.scrollIntoView({
+                    behavior: 'auto',
+                    block: 'end'
+                  });
+                }
+              }, 0);
+            }
+
+            // Only handle the first client query per message
+            break;
+          }
+        }
+      }
+
+      // Original onFinish logic
       const parts = Array.isArray((message as any).parts) ? (message as any).parts : [];
       // AI SDK v5 uses different tool result types - check for both old and new formats
       const hasToolResult = parts.some((p: any) =>
@@ -1272,27 +1668,35 @@ export const AiNode = memo(({ data, id, selected, isConnectable }: NodeProps<AiN
 
       // Safety: if assistant message has tool-results but no complete text, nudge continuation
       // BUT avoid infinite loops - only trigger once per unique tool call
-      try {
-        if (message.role === 'assistant' && hasToolResult && !hasCompleteText) {
-          // Check if we've already triggered continuation for these tool calls
-          const toolCallIds = parts
-            .filter((p: any) => p.type && p.type.startsWith('tool-') && p.toolCallId)
-            .map((p: any) => p.toolCallId);
+      // Handle continuation after tool execution
+      // Only send continuation if we have tool results but no text response
+      if (message.role === 'assistant' && hasToolResult && !hasCompleteText) {
+        console.log('🔄 Tool executed, checking if continuation needed...');
 
-          const continuationKey = `continuation-${toolCallIds.join('-')}`;
+        // Check if this is a client query that needs to send results back
+        const hasClientQuery = Array.isArray((message as any).parts) &&
+          (message as any).parts.some((part: any) =>
+            part.type === 'tool-querySqlite' && part.output?.requiresClientExecution
+          );
 
-          if (!sessionStorage.getItem(continuationKey)) {
-            sessionStorage.setItem(continuationKey, 'triggered');
-
-            setTimeout(() => {
-              if (!chatIsLoading) {
-                sendMessage({ text: '' });
-              }
-            }, 500); // Increased delay to reduce stuttering
-          }
+        if (hasClientQuery) {
+          console.log('📱 Client query detected - results will be sent automatically');
+          // Client query execution will handle sending results back
+          return;
         }
-      } catch (e) {
-        console.error('🔧 [AI-NODE] Error in continuation logic:', e);
+
+        // For other tool executions, send continuation
+        const messageId = (message as any).id || Date.now().toString();
+        const continuationKey = `continuation-${messageId}`;
+
+        if (!sessionStorage.getItem(continuationKey)) {
+          sessionStorage.setItem(continuationKey, 'sent');
+
+          setTimeout(() => {
+            console.log('📤 Sending continuation message');
+            sendMessage({ text: '' });
+          }, 100);
+        }
       }
     }
   });
@@ -1311,8 +1715,14 @@ export const AiNode = memo(({ data, id, selected, isConnectable }: NodeProps<AiN
 
   // Map AI SDK messages (with parts) to local message format and propagate tool results
   useEffect(() => {
+    // AI SDK v5 messages are already in correct chronological order
+    // We should preserve this order and not manipulate timestamps
+
     // Compute mapped messages and only update when content actually changes
-    const mapped: Message[] = chatMessages.map((m: any) => {
+    // Capture a base time to derive stable monotonic timestamps for this mapping pass
+    const baseNow = Date.now();
+    const total = chatMessages.length;
+    const mapped: Message[] = chatMessages.map((m: any, index: number) => {
       const textParts = Array.isArray(m.parts) ? m.parts.filter((p: any) => p.type === 'text').map((p: any) => p.text).join("") : "";
       const originalContent = m.content || textParts || "";
       let content = originalContent;
@@ -1326,7 +1736,7 @@ export const AiNode = memo(({ data, id, selected, isConnectable }: NodeProps<AiN
           .trim();
         if (cleaned.length > 0) content = cleaned; // fallback to original when cleaning removes everything
       }
-      const toolResults: ToolResult[] = Array.isArray(m.parts)
+      let toolResults: ToolResult[] = Array.isArray(m.parts)
         ? m.parts
           .filter((p: any) => p.type === 'tool-result')
           .map((p: any) => {
@@ -1353,16 +1763,16 @@ export const AiNode = memo(({ data, id, selected, isConnectable }: NodeProps<AiN
                 const row = rows[0] || {};
                 const countVal = row.count ?? row.COUNT ?? row.total ?? undefined;
                 if (typeof countVal === 'number') {
-                  return { type: 'count', value: countVal, description: 'Query count result' } as ToolResult;
+                  return { type: 'count', value: countVal, description: r.description || 'Query count result', data: rows } as ToolResult;
                 }
               }
               // Prefer Name lists
               const nameItems = rows.map((row: any) => row?.Name ?? row?.name).filter((v: any) => v != null);
               if (nameItems.length > 0) {
-                return { type: 'list', items: nameItems, property: 'Name', description: 'Query results' } as ToolResult;
+                return { type: 'list', items: nameItems, property: 'Name', description: r.description || 'Query results', data: rows } as ToolResult;
               }
               // Fallback: return rows as list
-              return { type: 'list', items: rows, description: 'Query results' } as ToolResult;
+              return { type: 'list', items: rows, description: r.description || 'Query results', data: rows } as ToolResult;
             }
             // Materials
             if (r.type === 'materials' && Array.isArray(r.materials)) {
@@ -1381,28 +1791,45 @@ export const AiNode = memo(({ data, id, selected, isConnectable }: NodeProps<AiN
           })
           .filter(Boolean) as ToolResult[]
         : [];
-      // Fallback text if the model returned no text but produced tool results
-      if ((!content || content.trim() === "") && toolResults.length > 0 && m.role === 'assistant') {
-        const summaries = toolResults.map((tr) => {
-          switch (tr.type) {
-            case 'count':
-              return `There are ${tr.value ?? tr.count ?? 0} ${formatElementType(tr.elementType, (tr.value ?? tr.count ?? 0) as number)}.`;
-            case 'area':
-            case 'volume':
-              return `${tr.type === 'area' ? 'Total area' : 'Total volume'}: ${tr.value?.toFixed(2)} ${tr.unit || (tr.type === 'area' ? 'm²' : 'm³')}.`;
-            case 'materials':
-              return `Found ${tr.materials?.length || 0} material types.`;
-            case 'list':
-              return `Found ${tr.count ?? (Array.isArray(tr.items) ? tr.items.length : 0)} ${tr.property ? `${tr.property} ` : ''}values${tr.elementType ? ` for ${formatElementType(tr.elementType, 2)}` : ''}.`;
-            case 'quantityResults':
-              return `Calculated quantity results.`;
-            default:
-              return tr.description || 'Analysis complete.';
+      // If no structured tool result was parsed, try to detect inline list of names in assistant text
+      if ((!toolResults || toolResults.length === 0) && typeof originalContent === 'string' && /\bname\b/i.test(originalContent)) {
+        const listMatch = originalContent.match(/(?:here are the .*? name[s]? i found:\s*)(.+)$/i);
+        if (listMatch) {
+          const names = listMatch[1].split(/,\s*/).map(s => s.trim()).filter(Boolean);
+          if (names.length > 0) {
+            toolResults = [{ type: 'list', items: names, property: 'Name' } as ToolResult];
           }
-        });
+        }
+      }
+      // Fallback text if the model returned no text but produced tool results
+      if ((!content || content.trim() === "" || isInstructionEcho(content)) && toolResults.length > 0 && m.role === 'assistant') {
+        const summaries = toolResults.map((tr) => naturalLanguageFromToolResult(tr));
         content = summaries.join(' ');
       }
-      return { role: m.role, content, toolResults: toolResults.length ? toolResults : undefined } as Message;
+
+      // When the model did provide text but we also have a list with many items,
+      // prepend a compact human-readable summary.
+      if (content && !isInstructionEcho(content) && m.role === 'assistant' && Array.isArray(toolResults) && toolResults.length > 0) {
+        // Prefer the first result to build a brief lead sentence
+        const lead = naturalLanguageFromToolResult(toolResults[0]);
+        if (lead && lead.trim().length > 0) content = `${lead}\n\n${content}`.trim();
+      }
+
+      // AI SDK v5: Messages come from AI SDK in chronological order already
+      // Use proper timestamp for reliable chronological sorting
+      const syntheticId = m.id || `ai_msg_${index}`;
+      const assignedSeq = getOrAssignSeq(String(syntheticId));
+      const message: Message = {
+        role: m.role,
+        content,
+        toolResults: toolResults.length ? toolResults : undefined,
+        id: syntheticId,
+        seq: assignedSeq, // Use our monotonic sequence for stable ordering
+        // Ensure a strictly increasing fallback timestamp so order is stable
+        createdAt: m.createdAt || m.timestamp || (baseNow - ((total - 1) - index))
+      };
+
+      return message;
     });
 
     // Create a compact signature to detect real changes
@@ -1427,6 +1854,16 @@ export const AiNode = memo(({ data, id, selected, isConnectable }: NodeProps<AiN
     if (prevMsgSigRef.current !== newSig) {
       prevMsgSigRef.current = newSig;
       setMessages(mapped);
+
+      // Trigger scroll to bottom after messages are updated
+      setTimeout(() => {
+        if (messagesEndRef.current) {
+          messagesEndRef.current.scrollIntoView({
+            behavior: 'auto',
+            block: 'end'
+          });
+        }
+      }, 0);
     }
 
     // Propagate latest tool results to Watch nodes
@@ -1544,6 +1981,95 @@ export const AiNode = memo(({ data, id, selected, isConnectable }: NodeProps<AiN
     }
   }, [getConnectedModelData]);
 
+  // Helper to expand older IFC class variants (e.g., IfcWallStandardCase) and combine results
+  const executeSqlWithClassExpansions = useCallback(async (model: any, query: string): Promise<any[]> => {
+    try {
+      const q = query || '';
+      const lower = q.toLowerCase();
+
+      // Never rewrite schema discovery queries
+      if (lower.startsWith('pragma') || lower.includes('sqlite_master')) {
+        return await querySqliteDatabase(model, q);
+      }
+
+      type Variant = { trigger: RegExp; base: string; variants: string[] };
+      const variants: Variant[] = [
+        { trigger: /\bifcwallstandardcase\b|\bifcwall\b/i, base: 'IfcWall', variants: ['IfcWall', 'IfcWallStandardCase'] },
+        { trigger: /\bifcbeamstandardcase\b|\bifcbeam\b/i, base: 'IfcBeam', variants: ['IfcBeam', 'IfcBeamStandardCase'] }
+      ];
+
+      const matched = variants.find(v => v.trigger.test(lower));
+      if (!matched) {
+        // No special handling needed
+        return await querySqliteDatabase(model, q);
+      }
+
+      // If query already includes both variants, just run it
+      const hasAll = matched.variants.every(v => new RegExp(`\\b${v}\\b`, 'i').test(q));
+      if (hasAll && !/\bcount\s*\(/i.test(lower)) {
+        return await querySqliteDatabase(model, q);
+      }
+
+      // Generate per-variant queries by replacing the first occurrence of any matched class with the specific variant
+      const usedTokenMatch = q.match(new RegExp(`\\b(${matched.variants.map(v => v.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')).join('|')})\\b`, 'i'));
+      const usedToken = usedTokenMatch ? usedTokenMatch[1] : matched.base;
+      const limitMatch = q.match(/limit\s+(\d+)/i);
+      const limitVal = limitMatch ? parseInt(limitMatch[1] || '0', 10) : undefined;
+      const isCount = /\bcount\s*\(/i.test(lower);
+      const isDistinctName = /select\s+distinct\s+name/i.test(lower);
+
+      // Run queries and combine
+      const allRows: any[] = [];
+      let totalCount = 0;
+
+      for (const v of matched.variants) {
+        const qv = q.replace(new RegExp(`\\b${usedToken.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')}\\b`, 'i'), v);
+        try {
+          const rows = await querySqliteDatabase(model, qv);
+          if (isCount) {
+            const row = rows && rows[0] ? rows[0] : {};
+            const c = Number(row['COUNT(*)'] ?? row['count'] ?? row['COUNT'] ?? row['total'] ?? 0);
+            totalCount += Number.isFinite(c) ? c : 0;
+          } else {
+            if (Array.isArray(rows)) allRows.push(...rows);
+          }
+        } catch (err: any) {
+          // Ignore missing tables for variants (older/newer schema differences)
+          if (String(err?.message || err).toLowerCase().includes('no such table')) {
+            continue;
+          }
+          throw err;
+        }
+      }
+
+      if (isCount) {
+        return [{ count: totalCount, 'COUNT(*)': totalCount }];
+      }
+
+      // De-duplicate for DISTINCT Name queries
+      let combined = allRows;
+      if (isDistinctName) {
+        const seen = new Set<string>();
+        combined = allRows.filter((r: any) => {
+          const name = (r?.Name ?? r?.name ?? '').toString();
+          if (!name) return false;
+          if (seen.has(name)) return false;
+          seen.add(name);
+          return true;
+        });
+      }
+
+      if (typeof limitVal === 'number' && limitVal > 0) {
+        combined = combined.slice(0, limitVal);
+      }
+
+      return combined;
+    } catch (e) {
+      // Fallback to original behavior on errors
+      return await querySqliteDatabase(model, query);
+    }
+  }, [querySqliteDatabase]);
+
   // Deprecated: sending explicit query details downstream. We only forward structured results now.
 
   // Function to send full model data downstream
@@ -1575,10 +2101,23 @@ export const AiNode = memo(({ data, id, selected, isConnectable }: NodeProps<AiN
         type: 'analysis',
         description: `Model data propagated: ${currentModel.totalElements} elements`,
         elementCount: currentModel.totalElements
-      }]
+      }],
+      id: `local_summary_${Date.now()}_${++seqRef.current}`,
+      seq: getOrAssignSeq(`send_model_data_${seqRef.current}`),
+      createdAt: Date.now()
     };
 
     setMessages(prev => [...prev, summaryMessage]);
+
+    // Scroll to bottom after summary message is added
+    setTimeout(() => {
+      if (messagesEndRef.current) {
+        messagesEndRef.current.scrollIntoView({
+          behavior: 'auto',
+          block: 'end'
+        });
+      }
+    }, 0);
   }, [getConnectedModelData, propagateAllData]);
 
   return (
@@ -1625,7 +2164,7 @@ export const AiNode = memo(({ data, id, selected, isConnectable }: NodeProps<AiN
                 try {
                   const { exportSqliteDatabase } = await import('@/lib/ifc-utils');
                   const bytes = await exportSqliteDatabase(currentModel);
-                  const blob = new Blob([bytes], { type: 'application/x-sqlite3' });
+                  const blob = new Blob([new Uint8Array(bytes)], { type: 'application/x-sqlite3' });
                   const url = URL.createObjectURL(blob);
                   const a = document.createElement('a');
                   const base = (currentModel.name || 'model').replace(/\.[^.]+$/, '');
@@ -1639,17 +2178,43 @@ export const AiNode = memo(({ data, id, selected, isConnectable }: NodeProps<AiN
                   const msg: Message = {
                     role: 'assistant',
                     content: `SQLite database exported as ${base}.sqlite`,
-                    toolResults: [{ type: 'analysis', description: 'SQLite DB saved to disk' }]
+                    toolResults: [{ type: 'analysis', description: 'SQLite DB saved to disk' }],
+                    id: `local_export_success_${Date.now()}_${++seqRef.current}`,
+                    seq: getOrAssignSeq(`local_export_success_${seqRef.current}`),
+                    createdAt: Date.now()
                   };
                   setMessages(prev => [...prev, msg]);
+
+                  // Scroll to bottom after export success message
+                  setTimeout(() => {
+                    if (messagesEndRef.current) {
+                      messagesEndRef.current.scrollIntoView({
+                        behavior: 'auto',
+                        block: 'end'
+                      });
+                    }
+                  }, 0);
                 } catch (error) {
                   console.error('SQLite export failed:', error);
                   const errorMessage: Message = {
                     role: 'assistant',
                     content: `SQLite export failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
-                    toolResults: [{ type: 'analysis', description: `SQLite export error: ${error instanceof Error ? error.message : 'Unknown error'}` }]
+                    toolResults: [{ type: 'analysis', description: `SQLite export error: ${error instanceof Error ? error.message : 'Unknown error'}` }],
+                    id: `local_export_error_${Date.now()}_${++seqRef.current}`,
+                    seq: getOrAssignSeq(`local_export_error_${seqRef.current}`),
+                    createdAt: Date.now()
                   };
                   setMessages(prev => [...prev, errorMessage]);
+
+                  // Scroll to bottom after export error message
+                  setTimeout(() => {
+                    if (messagesEndRef.current) {
+                      messagesEndRef.current.scrollIntoView({
+                        behavior: 'auto',
+                        block: 'end'
+                      });
+                    }
+                  }, 0);
                 }
               }}
               className="text-xs bg-green-500/20 hover:bg-green-500/30 px-2 py-0.5 rounded transition-colors"
@@ -1668,75 +2233,88 @@ export const AiNode = memo(({ data, id, selected, isConnectable }: NodeProps<AiN
             className="flex-1 overflow-y-auto p-2 custom-scrollbar nowheel"
             style={{ paddingBottom: '0.5rem' }}
           >
-            {messages.map((m, i) => {
-              // Skip completely empty messages
-              if (!m.content && (!m.toolResults || m.toolResults.length === 0)) {
-                return null;
-              }
+            {[...messages, ...localMessages]
+              .sort((a: Message, b: Message) => {
+                // Use the monotonic sequence as the primary ordering so tool calls
+                // and assistant continuations never jump to the top.
+                const aSeq = typeof a.seq === 'number' ? a.seq : getOrAssignSeq(String(a.id || ''));
+                const bSeq = typeof b.seq === 'number' ? b.seq : getOrAssignSeq(String(b.id || ''));
+                if (aSeq !== bSeq) return aSeq - bSeq;
+                const aTime = a.createdAt || 0;
+                const bTime = b.createdAt || 0;
+                if (aTime !== bTime) return aTime - bTime;
+                if (a.role !== b.role) return a.role === 'user' ? -1 : 1;
+                return 0;
+              })
+              .map((m, i) => {
+                // Skip completely empty messages
+                if (!m.content && (!m.toolResults || m.toolResults.length === 0)) {
+                  return null;
+                }
 
-              // For assistant messages with tool results but no content, show just the tool results
-              if (m.role === "assistant" && (!m.content || m.content.trim() === '') && m.toolResults && m.toolResults.length > 0) {
-                return (
-                  <div
-                    key={i}
-                    data-message-index={i}
-                    className="mb-1 flex justify-start relative"
-                    onMouseEnter={() => setHoveredMessageIndex(i)}
-                    onMouseLeave={() => setHoveredMessageIndex(null)}
-                  >
-                    <div className="max-w-[85%] space-y-1">
-                      {m.toolResults.map((result, resultIndex) => (
-                        <ToolResultDisplay key={resultIndex} result={result} />
-                      ))}
-                    </div>
-                    {/* Copy button for tool-only messages */}
-                    {hoveredMessageIndex === i && (
-                      <button
-                        onClick={() => copyMessageToClipboard(m)}
-                        className={`absolute p-1 bg-white/90 dark:bg-gray-700/90 hover:bg-white dark:hover:bg-gray-700 rounded-full shadow-sm border border-gray-200 dark:border-gray-600 transition-all duration-200 ${getCopyButtonPosition(i, true) === 'top' ? 'top-1 right-1' : 'bottom-1 right-1'}`}
-                        title="Copy message"
-                      >
-                        <Copy className="h-3 w-3 text-gray-600 dark:text-gray-300" />
-                      </button>
-                    )}
-                  </div>
-                );
-              }
-
-              // Regular message display
-              return (
-                <div
-                  key={i}
-                  data-message-index={i}
-                  className={`mb-1 flex ${m.role === "user" ? "justify-end" : "justify-start"} relative`}
-                  onMouseEnter={() => setHoveredMessageIndex(i)}
-                  onMouseLeave={() => setHoveredMessageIndex(null)}
-                >
-                  <div
-                    className={`max-w-[85%] whitespace-pre-wrap break-words px-2 py-1.5 rounded-2xl shadow-sm relative ${m.role === "user" ? "bg-sky-500 text-white dark:bg-sky-600" : "bg-white text-gray-800 dark:bg-gray-800 dark:text-gray-100 border border-gray-200 dark:border-gray-700"}`}
-                  >
-                    {m.content}
-                    {m.toolResults && m.toolResults.length > 0 && (
-                      <div className="mt-2 space-y-1">
+                // For assistant messages with tool results but no content, show just the tool results
+                if (m.role === "assistant" && (!m.content || m.content.trim() === '') && m.toolResults && m.toolResults.length > 0) {
+                  return (
+                    <div
+                      key={i}
+                      data-message-index={i}
+                      className="mb-1 flex justify-start relative"
+                      onMouseEnter={() => setHoveredMessageIndex(i)}
+                      onMouseLeave={() => setHoveredMessageIndex(null)}
+                    >
+                      <div className="max-w-[85%] space-y-1">
                         {m.toolResults.map((result, resultIndex) => (
                           <ToolResultDisplay key={resultIndex} result={result} />
                         ))}
                       </div>
-                    )}
-                    {/* Copy button - only for assistant messages */}
-                    {m.role === "assistant" && hoveredMessageIndex === i && (
-                      <button
-                        onClick={() => copyMessageToClipboard(m)}
-                        className={`absolute p-1 bg-white/90 dark:bg-gray-700/90 hover:bg-white dark:hover:bg-gray-700 rounded-full shadow-sm border border-gray-200 dark:border-gray-600 transition-all duration-200 ${getCopyButtonPosition(i, !!m.toolResults) === 'top' ? 'top-1 right-1' : 'bottom-1 right-1'}`}
-                        title="Copy message"
-                      >
-                        <Copy className="h-3 w-3 text-gray-600 dark:text-gray-300" />
-                      </button>
-                    )}
+                      {/* Copy button for tool-only messages */}
+                      {hoveredMessageIndex === i && (
+                        <button
+                          onClick={() => copyMessageToClipboard(m)}
+                          className={`absolute p-1 bg-white/90 dark:bg-gray-700/90 hover:bg-white dark:hover:bg-gray-700 rounded-full shadow-sm border border-gray-200 dark:border-gray-600 transition-all duration-200 ${getCopyButtonPosition(i, true) === 'top' ? 'top-1 right-1' : 'bottom-1 right-1'}`}
+                          title="Copy message"
+                        >
+                          <Copy className="h-3 w-3 text-gray-600 dark:text-gray-300" />
+                        </button>
+                      )}
+                    </div>
+                  );
+                }
+
+                // Regular message display
+                return (
+                  <div
+                    key={i}
+                    data-message-index={i}
+                    className={`mb-1 flex ${m.role === "user" ? "justify-end" : "justify-start"} relative`}
+                    onMouseEnter={() => setHoveredMessageIndex(i)}
+                    onMouseLeave={() => setHoveredMessageIndex(null)}
+                  >
+                    <div
+                      className={`max-w-[85%] whitespace-pre-wrap break-words px-2 py-1.5 rounded-2xl shadow-sm relative ${m.role === "user" ? "bg-sky-500 text-white dark:bg-sky-600" : "bg-white text-gray-800 dark:bg-gray-800 dark:text-gray-100 border border-gray-200 dark:border-gray-700"}`}
+                    >
+                      {m.content}
+                      {m.toolResults && m.toolResults.length > 0 && (
+                        <div className="mt-2 space-y-1">
+                          {m.toolResults.map((result, resultIndex) => (
+                            <ToolResultDisplay key={resultIndex} result={result} />
+                          ))}
+                        </div>
+                      )}
+                      {/* Copy button - only for assistant messages */}
+                      {m.role === "assistant" && hoveredMessageIndex === i && (
+                        <button
+                          onClick={() => copyMessageToClipboard(m)}
+                          className={`absolute p-1 bg-white/90 dark:bg-gray-700/90 hover:bg-white dark:hover:bg-gray-700 rounded-full shadow-sm border border-gray-200 dark:border-gray-600 transition-all duration-200 ${getCopyButtonPosition(i, !!m.toolResults) === 'top' ? 'top-1 right-1' : 'bottom-1 right-1'}`}
+                          title="Copy message"
+                        >
+                          <Copy className="h-3 w-3 text-gray-600 dark:text-gray-300" />
+                        </button>
+                      )}
+                    </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })}
             {isLoading && (
               <div className="mb-1 flex justify-start">
                 <div className="max-w-[85%] px-2 py-1.5 rounded-2xl border border-dashed border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-300">
@@ -1785,9 +2363,22 @@ export const AiNode = memo(({ data, id, selected, isConnectable }: NodeProps<AiN
                   toolResults: [{
                     type: 'analysis',
                     description: errorDescription
-                  }]
+                  }],
+                  id: `local_input_error_${Date.now()}_${++seqRef.current}`,
+                  seq: seqRef.current,
+                  createdAt: Date.now() + seqRef.current
                 };
                 setMessages(prev => [...prev, errorMessage]);
+
+                // Scroll to bottom after input error message
+                setTimeout(() => {
+                  if (messagesEndRef.current) {
+                    messagesEndRef.current.scrollIntoView({
+                      behavior: 'auto',
+                      block: 'end'
+                    });
+                  }
+                }, 0);
                 return;
               }
 
