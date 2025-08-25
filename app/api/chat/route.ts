@@ -2,21 +2,211 @@ import { getLastLoadedModel, querySqliteDatabase } from "@/lib/ifc-utils";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { convertToModelMessages, streamText } from "ai";
 import { z } from "zod";
+import { aiLogger } from "@/lib/logger";
+import { getServerSQLiteManager } from "@/lib/server-sqlite";
+import { validateAndSanitizeInput, validateModelSelection } from "@/lib/input-validator";
+import { rateLimit, checkSuspiciousActivity } from "@/lib/rate-limiter";
+import { validateTurnstileToken } from "@/lib/turnstile";
+import { resolveModelSlug } from "@/lib/model-utils";
 
 export async function POST(req: Request) {
     try {
-        const { messages = [], model: selectedModel, modelId, modelData } = await req.json();
+        // Get client identifier for security checks
+        const forwarded = req.headers.get('x-forwarded-for');
+        const clientIp = forwarded ? forwarded.split(',')[0] :
+            req.headers.get('x-real-ip') || 'unknown';
+        const userAgent = req.headers.get('user-agent') || 'unknown';
+        const clientId = `${clientIp}-${Buffer.from(userAgent).toString('base64').slice(0, 10)}`;
 
-        console.log("🤖 AI Chat Request:", {
-            messageCount: messages.length,
-            selectedModel,
-            modelId,
-            hasModelData: !!modelData,
-            modelName: modelData?.name
+        // Check for suspicious activity
+        if (checkSuspiciousActivity(clientId)) {
+            aiLogger.warn('Blocked suspicious activity', { clientId, ip: clientIp });
+            return new Response(
+                JSON.stringify({ error: 'Access temporarily restricted' }),
+                {
+                    status: 429,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Retry-After': '900' // 15 minutes
+                    }
+                }
+            );
+        }
+
+        // Parse and validate input - simplified for now
+        const rawInput = await req.json();
+
+        // Debug logging to see what we're receiving
+        console.log('🔍 Raw input received:', {
+            hasMessages: !!rawInput.messages,
+            messageCount: rawInput.messages?.length || 0,
+            firstMessage: rawInput.messages?.[0] ? {
+                role: rawInput.messages[0].role,
+                hasContent: !!rawInput.messages[0].content,
+                hasParts: !!rawInput.messages[0].parts,
+                contentLength: rawInput.messages[0].content?.length || 0,
+                partsLength: rawInput.messages[0].parts?.length || 0
+            } : null,
+            hasModelData: !!rawInput.modelData,
+            hasTurnstileToken: !!rawInput.turnstileToken,
+            keys: Object.keys(rawInput)
         });
 
-        // Debug: Log the actual message structure
-        console.log("🔧 [DEBUG] Raw messages received:", JSON.stringify(messages, null, 2));
+        // Basic validation - just check for required fields
+        if (!rawInput.messages || !Array.isArray(rawInput.messages) || rawInput.messages.length === 0) {
+            return new Response(
+                JSON.stringify({ error: 'Messages array is required' }),
+                { status: 400, headers: { 'Content-Type': 'application/json' } }
+            );
+        }
+
+        // SECURITY: Validate and sanitize all input
+        const validationResult = validateAndSanitizeInput(rawInput);
+        if (!validationResult.isValid || validationResult.isDangerous) {
+            aiLogger.warn('Input validation failed', {
+                clientId,
+                ip: clientIp,
+                errors: validationResult.errors,
+                isDangerous: validationResult.isDangerous,
+                isSuspicious: validationResult.isSuspicious
+            });
+            return new Response(
+                JSON.stringify({
+                    error: 'Invalid input',
+                    message: validationResult.isDangerous ?
+                        'Request blocked for security reasons.' :
+                        'Request contains invalid data.'
+                }),
+                { status: validationResult.isDangerous ? 403 : 400, headers: { 'Content-Type': 'application/json' } }
+            );
+        }
+
+        // Log suspicious activity (but allow it through)
+        if (validationResult.isSuspicious) {
+            aiLogger.warn('Suspicious input detected but allowed', {
+                clientId,
+                ip: clientIp,
+                warnings: validationResult.warnings
+            });
+        }
+
+        // Parse input (already validated)
+        const { messages = [], model: selectedModel, modelId, modelData, turnstileToken, sessionVerified } = rawInput;
+
+        // Check if this is a verified session or needs initial verification
+        let hasTurnstileToken = false;
+
+        // If sessionVerified is true, this node has already been verified
+        if (sessionVerified) {
+            hasTurnstileToken = true;
+            aiLogger.info('Using verified session', { clientId, ip: clientIp });
+        }
+        // Otherwise, validate the Turnstile token for first-time verification
+        else if (turnstileToken) {
+            try {
+                const turnstileResult = await validateTurnstileToken(turnstileToken, clientIp);
+                if (turnstileResult.success) {
+                    hasTurnstileToken = true;
+                    aiLogger.info('Turnstile initial verification successful', { clientId, ip: clientIp });
+                } else {
+                    aiLogger.warn('Turnstile verification failed', {
+                        clientId,
+                        ip: clientIp,
+                        errors: turnstileResult['error-codes']
+                    });
+                    return new Response(
+                        JSON.stringify({
+                            error: 'Verification failed',
+                            message: 'Please refresh the page and try again.',
+                            details: turnstileResult['error-codes']
+                        }),
+                        { status: 403, headers: { 'Content-Type': 'application/json' } }
+                    );
+                }
+            } catch (error) {
+                aiLogger.error('Turnstile validation error', {
+                    clientId,
+                    ip: clientIp,
+                    error: error instanceof Error ? error.message : 'Unknown error'
+                });
+                return new Response(
+                    JSON.stringify({
+                        error: 'Verification error',
+                        message: 'Unable to verify your request. Please try again.'
+                    }),
+                    { status: 500, headers: { 'Content-Type': 'application/json' } }
+                );
+            }
+        }
+        // No token and no session verification
+        else {
+            aiLogger.warn('Missing Turnstile token and not a verified session', { clientId, ip: clientIp });
+            return new Response(
+                JSON.stringify({
+                    error: 'Verification required',
+                    message: 'Please complete verification to access the AI chat.'
+                }),
+                { status: 403, headers: { 'Content-Type': 'application/json' } }
+            );
+        }
+
+
+
+        // SECURITY: Apply rate limiting based on verification status
+        const rateLimitConfig = hasTurnstileToken ?
+            { windowMs: 60 * 1000, maxRequests: 15 } : // Verified users get higher limits
+            { windowMs: 60 * 1000, maxRequests: 5 };   // Unverified users get lower limits
+
+        const rateLimitResult = await rateLimit(clientId, rateLimitConfig);
+
+        if (!rateLimitResult.allowed) {
+            aiLogger.warn('Rate limit exceeded', {
+                clientId,
+                ip: clientIp,
+                remaining: rateLimitResult.remaining,
+                resetTime: rateLimitResult.resetTime
+            });
+
+            return new Response(
+                JSON.stringify({
+                    error: 'Rate limit exceeded',
+                    message: 'Too many requests. Please try again later.',
+                    retryAfter: Math.ceil((rateLimitResult.resetTime - Date.now()) / 1000),
+                    resetTime: rateLimitResult.resetTime
+                }),
+                {
+                    status: 429,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Retry-After': Math.ceil((rateLimitResult.resetTime - Date.now()) / 1000).toString(),
+                        'X-RateLimit-Limit': rateLimitConfig.maxRequests.toString(),
+                        'X-RateLimit-Remaining': rateLimitResult.remaining.toString(),
+                        'X-RateLimit-Reset': Math.ceil(rateLimitResult.resetTime / 1000).toString()
+                    }
+                }
+            );
+        }
+
+        console.log('✅ Security checks passed:', {
+            clientId: clientId.substring(0, 10) + '...',
+            rateLimitRemaining: rateLimitResult.remaining,
+            turnstileVerified: hasTurnstileToken,
+            inputValidated: validationResult.isValid,
+            suspicious: validationResult.isSuspicious,
+            messageCount: messages.length
+        });
+
+        // Start conversation tracking
+        const conversationStart = Date.now();
+        const sessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+        // Extract user prompt for logging
+        const lastUserMessage = messages[messages.length - 1];
+        const userPrompt = typeof lastUserMessage?.content === 'string'
+            ? lastUserMessage.content
+            : Array.isArray(lastUserMessage?.parts)
+                ? lastUserMessage.parts.filter((p: any) => p.type === 'text').map((p: any) => p.text).join(' ')
+                : '';
 
         // Check if API key is available
         if (!process.env.OPENROUTER_API_KEY) {
@@ -35,39 +225,21 @@ export async function POST(req: Request) {
             apiKey: process.env.OPENROUTER_API_KEY!,
         });
 
-        // Helper to resolve UI model ids to OpenRouter slugs
-        const resolveOpenRouterModel = (modelId?: string) => {
-            if (!modelId) return "openai/gpt-4o-mini";
-            // If already a provider/model slug, pass through
-            if (modelId.includes("/")) return modelId;
-            const normalized = modelId.toLowerCase().replace(/\s+/g, "");
-            switch (normalized) {
-                case "gpt5mini":
-                case "gpt-5-mini":
-                case "gpt_5_mini":
-                    return "openai/gpt-5-mini";
-                case "gpt-4o-mini":
-                case "gpt4omini":
-                    return "openai/gpt-4o-mini";
-                case "gpt-4.1-mini":
-                case "gpt41mini":
-                    return "openai/gpt-4.1-mini";
-                case "gpt-4.1-nano":
-                case "gpt41nano":
-                    return "openai/gpt-4.1-nano";
-                case "gpt-4-turbo":
-                case "gpt4turbo":
-                    return "openai/gpt-4-turbo";
-                case "gpt-4-turbo-preview":
-                case "gpt4turbopreview":
-                    return "openai/gpt-4-turbo-preview";
-                case "gpt-3.5-turbo":
-                case "gpt35turbo":
-                    return "openai/gpt-4o-mini"; // sensible default upgrade
-                default:
-                    return "openai/gpt-4o-mini";
-            }
-        };
+        // Use shared model utilities - no more duplication!
+
+        // Validate model selection
+        const requestedModel = selectedModel || modelId;
+        if (requestedModel && !validateModelSelection(requestedModel)) {
+            aiLogger.warn('Invalid model selection attempted', {
+                clientId,
+                requestedModel,
+                ip: clientIp
+            });
+            return new Response(
+                JSON.stringify({ error: 'Invalid model selection' }),
+                { status: 400, headers: { 'Content-Type': 'application/json' } }
+            );
+        }
 
         // Use model data from client or fallback to server-side model
         const model = modelData || getLastLoadedModel();
@@ -247,7 +419,7 @@ IMPORTANT: Always use the querySqlite tool for data questions. Never promise to 
         console.log("💬 System Message:", systemMsg.substring(0, 200) + "...");
 
         // Resolve to OpenRouter model slug and create chat model
-        const modelSlug = resolveOpenRouterModel(selectedModel);
+        const modelSlug = resolveModelSlug(selectedModel);
         const aiModel = openrouter.chat(modelSlug);
         console.log(`🤖 Using AI model (OpenRouter): ${modelSlug}`);
 
@@ -260,7 +432,7 @@ IMPORTANT: Always use the querySqlite tool for data questions. Never promise to 
                 // Filter out incomplete tool calls (input-streaming state)
                 const filteredParts = msg.parts.filter((part: any) => {
                     if (part.type && part.type.startsWith('tool-') && part.state === 'input-streaming') {
-                        console.log(`🔧 [DEBUG] Filtering out incomplete tool call: ${part.toolCallId}`);
+                        // Filtering incomplete tool call for AI SDK v5 compatibility
                         return false;
                     }
                     return true;
@@ -294,165 +466,40 @@ IMPORTANT: Always use the querySqlite tool for data questions. Never promise to 
                     note: z.string().optional().describe('Additional notes about the result')
                 }),
                 execute: async ({ query, description }: { query: string; description: string }) => {
-                    console.log(`🔧 [SERVER] ✅ TOOL EXECUTION STARTED - querySqlite called!`);
-                    console.log(`🔧 [SERVER] Query: "${query}"`);
-                    console.log(`🔧 [SERVER] Description: "${description}"`);
-                    console.log(`🔧 [SERVER] Model ID: ${model.id}`);
-                    console.log(`🔧 [SERVER] Model has SQLite: ${model.sqliteSuccess}`);
-
                     try {
-                        // Server-side SQLite querying - Workers don't exist in Node.js
-                        console.log(`🔧 [SERVER] About to execute server-side SQLite query...`);
+                        // Get the server-side SQLite manager for real database access
+                        const sqliteManager = await getServerSQLiteManager(model.id);
 
-                        // TODO: Implement proper server-side SQLite access
-                        // For now, simulate the query result based on the model data
-                        // In a real implementation, you'd use a server-side SQLite library like 'sqlite3' or 'better-sqlite3'
-                        // and access the actual SQLite database file created by the worker
-                        let queryResult: any[] = [];
-
-                        if (query.toLowerCase().includes('count')) {
-                            // Handle count queries
-                            if (query.toLowerCase().includes('wall')) {
-                                queryResult = [{ count: model.elementCounts?.IfcWall || 0 }];
-                            } else if (query.toLowerCase().includes('slab')) {
-                                queryResult = [{ count: model.elementCounts?.IfcSlab || 0 }];
-                            } else if (query.toLowerCase().includes('beam')) {
-                                queryResult = [{ count: model.elementCounts?.IfcBeam || 0 }];
-                            } else if (query.toLowerCase().includes('column')) {
-                                queryResult = [{ count: model.elementCounts?.IfcColumn || 0 }];
-                            }
-                        } else if (query.toLowerCase().includes('name') && query.toLowerCase().includes('wall')) {
-                            // Handle wall name queries
-                            const wallCount = model.elementCounts?.IfcWall || 0;
-                            queryResult = [];
-                            for (let i = 1; i <= wallCount; i++) {
-                                queryResult.push({
-                                    GlobalId: `wall-${i}-${model.id}`,
-                                    Name: `Wall ${i}`,
-                                    ObjectType: i === 1 ? 'Limestone wall 100' : i === 2 ? 'Reinforced concrete wall' : 'Concrete wall'
-                                });
-                            }
-                        } else if (query.toLowerCase().includes('material')) {
-                            // Handle material queries
-                            queryResult = [
-                                { ObjectType: 'Limestone wall 100', count: 1 },
-                                { ObjectType: 'Reinforced concrete wall', count: 1 },
-                                { ObjectType: 'Concrete wall', count: 1 }
-                            ];
-                        } else {
-                            // Generic fallback
-                            queryResult = [{ message: 'Query executed successfully', count: model.totalElements }];
-                        }
-
-                        console.log(`🔧 [SERVER] ✅ Server-side query executed successfully!`);
-                        console.log(`🔧 [SERVER] SQLite query result:`, {
-                            resultType: typeof queryResult,
-                            isArray: Array.isArray(queryResult),
-                            length: Array.isArray(queryResult) ? queryResult.length : 'N/A',
-                            sample: Array.isArray(queryResult) ? queryResult.slice(0, 2) : queryResult
-                        });
-
-                        // Process the result based on query type
-                        if (Array.isArray(queryResult)) {
-                            // Handle count queries
-                            if (queryResult.length === 1 && 'count' in queryResult[0]) {
-                                return {
-                                    type: 'count',
-                                    value: queryResult[0].count,
-                                    description: description,
-                                    query: query
-                                };
-                            }
-
-                            // Handle list queries (names, properties, etc.)
-                            if (queryResult.length > 0) {
-                                const firstRow = queryResult[0];
-
-                                // Check if it's element names
-                                if ('Name' in firstRow || 'GlobalId' in firstRow) {
-                                    return {
-                                        type: 'list',
-                                        items: queryResult.map(row => row.Name || row.GlobalId || JSON.stringify(row)),
-                                        count: queryResult.length,
-                                        description: description,
-                                        query: query,
-                                        rawData: queryResult
-                                    };
-                                }
-
-                                // Check if it's properties
-                                if ('property_name' in firstRow && 'value' in firstRow) {
-                                    return {
-                                        type: 'properties',
-                                        properties: queryResult,
-                                        count: queryResult.length,
-                                        description: description,
-                                        query: query
-                                    };
-                                }
-
-                                // Check if it's quantities
-                                if ('quantity_name' in firstRow || ('name' in firstRow && 'value' in firstRow)) {
-                                    return {
-                                        type: 'quantities',
-                                        quantities: queryResult,
-                                        count: queryResult.length,
-                                        description: description,
-                                        query: query
-                                    };
-                                }
-
-                                // Generic list result
-                                return {
-                                    type: 'queryResult',
-                                    result: queryResult,
-                                    count: queryResult.length,
-                                    description: description,
-                                    query: query
-                                };
-                            }
-
-                            // Empty result
+                        if (!sqliteManager) {
                             return {
-                                type: 'queryResult',
-                                result: [],
-                                count: 0,
-                                message: 'No results found',
+                                type: 'error',
+                                message: 'Could not connect to SQLite database',
                                 description: description,
-                                query: query
+                                query: query,
+                                error: 'Database connection failed'
                             };
                         }
 
-                        // Non-array result
-                        return {
-                            type: 'queryResult',
-                            result: queryResult,
-                            description: description,
-                            query: query
-                        };
+                        // Execute the real SQL query against the actual database
+                        const result = await sqliteManager.executeQuery(query, description);
+                        return result;
 
                     } catch (error) {
-                        console.error(`🔧 [SERVER] SQLite query failed:`, error);
                         return {
                             type: 'error',
                             message: error instanceof Error ? error.message : 'Query failed',
                             description: description,
-                            query: query
+                            query: query,
+                            error: error instanceof Error ? error.message : 'Unknown error'
                         };
                     }
                 }
             }
         } : undefined;
 
-        console.log(`🔧 [DEBUG] Tools available:`, {
-            hasTools: !!tools,
-            toolNames: tools ? Object.keys(tools) : [],
-            toolSchema: tools ? {
-                hasInputSchema: !!tools.querySqlite?.inputSchema,
-                hasOutputSchema: !!tools.querySqlite?.outputSchema,
-                hasExecute: !!tools.querySqlite?.execute
-            } : 'no tools'
-        });
+        // Track tool availability for semantic analysis
+        const toolsAvailable = !!tools;
+        const toolNames = tools ? Object.keys(tools) : [];
 
         // Detect continuation turn (client auto-resubmit after tool-result)
         const isContinuation = (() => {
@@ -474,19 +521,13 @@ IMPORTANT: Always use the querySqlite tool for data questions. Never promise to 
                             text = parts.filter((p: any) => p?.type === 'text').map((p: any) => p.text || '').join('').trim();
                         }
 
-                        console.log('🔧 [DEBUG] Continuation check - last user message:', {
-                            hasContent: !!content,
-                            hasParts: !!parts,
-                            partsLength: Array.isArray(parts) ? parts.length : 0,
-                            text: text.substring(0, 50),
-                            isEmpty: text.length === 0
-                        });
+                        // Checking if this is a continuation message
 
                         return text.length === 0;
                     }
                 }
             } catch (e) {
-                console.log('🔧 [DEBUG] Continuation detection error:', e);
+                // Error in continuation detection, defaulting to false
             }
             return false;
         })();
@@ -511,19 +552,13 @@ IMPORTANT: Always use the querySqlite tool for data questions. Never promise to 
                             text = parts.filter((p: any) => p?.type === 'text').map((p: any) => p.text || '').join(' ');
                         }
 
-                        console.log('🔧 [DEBUG] Last user text extracted:', {
-                            hasContent: !!content,
-                            hasParts: !!parts,
-                            partsLength: Array.isArray(parts) ? parts.length : 0,
-                            text: text.substring(0, 100),
-                            length: text.length
-                        });
+                        // Extracting user text for intent classification
 
                         return text;
                     }
                 }
             } catch (e) {
-                console.log('🔧 [DEBUG] User text extraction error:', e);
+                // Error in user text extraction, defaulting to empty
             }
             return '';
         })().toLowerCase();
@@ -535,21 +570,22 @@ IMPORTANT: Always use the querySqlite tool for data questions. Never promise to 
         ];
         const intentDataNeeded = dataKeywords.some(k => lastUserText.includes(k));
 
-        console.log('🔧 [DEBUG] Tool choice logic:', {
-            isContinuation,
-            hasTools: !!tools,
-            intentDataNeeded,
-            lastUserText: lastUserText.substring(0, 100),
-            matchedKeywords: dataKeywords.filter(k => lastUserText.includes(k))
-        });
-
         // For AI SDK v5, be more aggressive about tool calling
         const shouldForceQuery = tools && !isContinuation && (intentDataNeeded || messages.length <= 2);
+        const finalToolChoice = shouldForceQuery ? 'forced querySqlite' : (isContinuation ? 'none' : 'auto');
+        const matchedKeywords = dataKeywords.filter(k => lastUserText.includes(k));
 
-        console.log('🔧 [DEBUG] Final tool choice decision:', {
-            shouldForceQuery,
-            toolChoice: shouldForceQuery ? 'forced querySqlite' : (isContinuation ? 'none' : 'auto')
-        });
+        // Log semantic analysis
+        if (!isContinuation && userPrompt) {
+            aiLogger.logSemanticAnalysis({
+                userIntent: userPrompt,
+                detectedKeywords: matchedKeywords,
+                toolChoice: finalToolChoice,
+                queryGenerated: 'pending', // Will be updated after tool execution
+                resultQuality: 'pending' as any,
+                semanticAccuracy: matchedKeywords.length > 0 ? 0.8 : 0.5
+            });
+        }
 
         const result = await streamText({
             model: aiModel,
@@ -595,10 +631,7 @@ IMPORTANT: Always use the querySqlite tool for data questions. Never promise to 
             }
         });
 
-        console.log("✅ AI streaming response initiated");
-
-        // Return UI message stream response so client gets tool-call and tool-result parts
-        console.log("📤 Returning UI message stream response to client");
+        // Track conversation completion and return response
         return result.toUIMessageStreamResponse();
     } catch (error) {
         console.error("Chat API error:", error);

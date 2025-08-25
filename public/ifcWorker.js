@@ -575,13 +575,13 @@ async function handleLoadIfc({ arrayBuffer, filename, messageId }) {
                               file=ifc_file,
                               sql_type="SQLite",
                               database=sqlite_db_path,
-                              full_schema=False,  # Only create tables for entities that exist in the file
+                              full_schema=True,   # Create all IFC class tables for comprehensive database
                               is_strict=False,
                               should_expand=False,
                               should_get_inverses=True,
                               should_get_psets=True,
-                              should_get_geometry=False,   # Skip geometry for browser performance
-                              should_skip_geometry_data=True  # Skip geometry representation tables
+                              should_get_geometry=False,   # Skip geometry processing (Pyodide limitation)
+                              should_skip_geometry_data=False  # Include geometry representation tables (but not processed geometry)
                           )
                           patcher.patch()
                           sqlite_success = os.path.exists(sqlite_db_path)
@@ -631,9 +631,11 @@ async function handleLoadIfc({ arrayBuffer, filename, messageId }) {
                               'recipe': 'Ifc2Sql',
                               'arguments': {
                                   'sqlite_path': sqlite_db_path,
-                                  'full_schema': False,  # Only create tables for entities that exist
+                                  'full_schema': True,   # Create all IFC class tables for comprehensive database
                                   'should_get_psets': True,
-                                  'should_get_inverses': True
+                                  'should_get_inverses': True,
+                                  'should_get_geometry': False,  # Skip geometry processing (Pyodide limitation)
+                                  'should_skip_geometry_data': False
                               }
                           }
                           result = ifcopenshell.ifcpatch.execute(config)

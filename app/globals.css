@@ -168,6 +168,64 @@ body {
   .text-balance {
     text-wrap: balance;
   }
+
+  /* Custom scrollbar for AI chat node - hidden by default, shows on hover */
+  .custom-scrollbar {
+    scrollbar-width: none;
+    /* Hide Firefox scrollbar by default */
+    -ms-overflow-style: none;
+    /* Hide IE scrollbar */
+  }
+
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 0;
+    /* Hide Webkit scrollbar by default */
+    height: 0;
+  }
+
+  /* Show scrollbar on hover */
+  .custom-scrollbar:hover {
+    scrollbar-width: thin;
+    /* Show Firefox scrollbar on hover */
+    scrollbar-color: rgba(156, 163, 175, 0.8) transparent;
+  }
+
+  .custom-scrollbar:hover::-webkit-scrollbar {
+    width: 6px;
+    /* Show Webkit scrollbar on hover */
+    height: 6px;
+  }
+
+  .custom-scrollbar:hover::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .custom-scrollbar:hover::-webkit-scrollbar-thumb {
+    background: rgba(156, 163, 175, 0.8);
+    border-radius: 3px;
+    border: none;
+  }
+
+  .custom-scrollbar:hover::-webkit-scrollbar-thumb:hover {
+    background: rgba(107, 114, 128, 0.9);
+  }
+
+  .custom-scrollbar:hover::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+
+  /* Dark theme scrollbar */
+  .dark .custom-scrollbar:hover {
+    scrollbar-color: rgba(75, 85, 99, 0.8) transparent;
+  }
+
+  .dark .custom-scrollbar:hover::-webkit-scrollbar-thumb {
+    background: rgba(75, 85, 99, 0.8);
+  }
+
+  .dark .custom-scrollbar:hover::-webkit-scrollbar-thumb:hover {
+    background: rgba(107, 114, 128, 0.9);
+  }
 }
 
 @layer base {

@@ -1,13 +1,16 @@
 "use client";
 
 import { memo, useEffect, useRef, useState, useCallback, useMemo } from "react";
+import { createPortal } from "react-dom";
 import { Handle, Position, type NodeProps, useReactFlow } from "reactflow";
 import type { AiNodeData } from "./node-types";
-import { Bot, Database, Calculator, List, ChevronDown, Copy } from "lucide-react";
+import { Bot, Database, Calculator, List, ChevronDown, Copy, Shield } from "lucide-react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import { querySqliteDatabase } from "@/lib/ifc-utils";
 import { z } from "zod";
+import { Turnstile, useTurnstile } from "@/components/ui/turnstile";
+import { getTurnstileSitekey } from "@/lib/turnstile";
 
 
 
@@ -215,10 +218,13 @@ const loadModelListFromEnv = (): UiModelOption[] => {
   // NEXT_PUBLIC_ is required for client-side access; allow MODEL_LIST fallback if inlined at build time
   const raw = process.env.NEXT_PUBLIC_MODEL_LIST || process.env.MODEL_LIST;
   const defaultModels: UiModelOption[] = [
-    { id: 'gpt-5-mini', name: 'gpt-5-mini', provider: 'openrouter', slug: 'openai/gpt-5-mini' },
-    { id: 'gpt-4o-mini', name: 'gpt-4o-mini', provider: 'openrouter', slug: 'openai/gpt-4o-mini' },
-    { id: 'gpt-4.1-mini', name: 'gpt-4.1-mini', provider: 'openrouter', slug: 'openai/gpt-4.1-mini' },
-    { id: 'gpt-4.1-nano', name: 'gpt-4.1-nano', provider: 'openrouter', slug: 'openai/gpt-4.1-nano' }
+    { id: 'gpt-4o-mini', name: 'GPT-4o Mini', provider: 'OpenAI', slug: 'openai/gpt-4o-mini' },
+    { id: 'gpt-4.1-mini', name: 'GPT-4.1 Mini', provider: 'OpenAI', slug: 'openai/gpt-4.1-mini' },
+    { id: 'gpt-4.1-nano', name: 'GPT-4.1 Nano', provider: 'OpenAI', slug: 'openai/gpt-4.1-nano' },
+    { id: 'gpt-5-mini', name: 'GPT-5 Mini', provider: 'OpenAI', slug: 'openai/gpt-5-mini' },
+    { id: 'deepseek-v2-chat', name: 'DeepSeek V2 Chat', provider: 'DeepSeek', slug: 'deepseek/deepseek-v2-chat' },
+    { id: 'gemini-flash-1.5', name: 'Gemini Flash 1.5', provider: 'Google', slug: 'google/gemini-flash-1.5' },
+    { id: 'gemini-pro-1.5', name: 'Gemini Pro 1.5', provider: 'Google', slug: 'google/gemini-pro-1.5' }
   ];
 
   if (!raw || !raw.trim()) return defaultModels;
@@ -258,11 +264,13 @@ const loadModelListFromEnv = (): UiModelOption[] => {
       if (part.includes('|')) {
         const [name, slug] = part.split('|').map((s) => s.trim());
         const id = slug.includes('/') ? slug.split('/').pop() || slug : slug;
-        return { id, name: name || id, provider: 'openrouter', slug };
+        const provider = slug.includes('/') ? slug.split('/')[0] : 'openrouter';
+        return { id, name: name || id, provider, slug };
       }
       const slug = part;
       const id = slug.includes('/') ? slug.split('/').pop() || slug : slug;
-      return { id, name: id, provider: 'openrouter', slug };
+      const provider = slug.includes('/') ? slug.split('/')[0] : 'openrouter';
+      return { id, name: id, provider, slug };
     });
     return models.length > 0 ? models : defaultModels;
   } catch (e) {
@@ -288,6 +296,8 @@ export const AiNode = memo(({ data, id, selected, isConnectable }: NodeProps<AiN
 
 
   const [showModelPicker, setShowModelPicker] = useState(false);
+  const [dropdownPosition, setDropdownPosition] = useState({ top: 0, left: 0 });
+  const [modelSearchQuery, setModelSearchQuery] = useState("");
   const [hoveredMessageIndex, setHoveredMessageIndex] = useState<number | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const modelPickerRef = useRef<HTMLDivElement>(null);
@@ -863,8 +873,8 @@ export const AiNode = memo(({ data, id, selected, isConnectable }: NodeProps<AiN
   };
 
   // Default sizes with fallback values
-  const width = data.width || 320; // Default width widened for better layout
-  const height = data.height || 280; // Default height increased to fit chat area
+  const width = data.width || 360; // Slightly reduced for tighter default footprint
+  const height = data.height || 320; // Reduced to remove excess whitespace
 
   // Memoize the node update to prevent infinite re-renders
   const updateNodeData = useCallback(() => {
@@ -968,6 +978,124 @@ export const AiNode = memo(({ data, id, selected, isConnectable }: NodeProps<AiN
     [id, width, height, setNodes]
   );
 
+  // Calculate dropdown position
+  const calculateDropdownPosition = useCallback(() => {
+    if (modelPickerRef.current) {
+      const rect = modelPickerRef.current.getBoundingClientRect();
+      const viewportHeight = window.innerHeight;
+      const viewportWidth = window.innerWidth;
+      const dropdownHeight = 200; // Estimated dropdown height
+      const dropdownWidth = 280; // Max dropdown width
+
+      let top = rect.top - 12; // 12px gap above the button
+      let left = rect.left - 4; // Slight left offset
+
+      // Adjust if dropdown would go off-screen vertically
+      if (top - dropdownHeight < 10) {
+        top = rect.bottom + 8; // Position below the button instead
+      }
+
+      // Adjust if dropdown would go off-screen horizontally
+      if (left + dropdownWidth > viewportWidth - 10) {
+        left = viewportWidth - dropdownWidth - 10;
+      }
+      if (left < 10) {
+        left = 10;
+      }
+
+      setDropdownPosition({ top, left });
+    }
+  }, []);
+
+  // Filter models based on search query
+  const filteredModels = useMemo(() => {
+    if (!modelSearchQuery.trim()) return AI_MODELS;
+    const query = modelSearchQuery.toLowerCase();
+    return AI_MODELS.filter(model =>
+      model.name.toLowerCase().includes(query) ||
+      model.provider.toLowerCase().includes(query) ||
+      (model.slug && model.slug.toLowerCase().includes(query))
+    );
+  }, [modelSearchQuery]);
+
+  // Handle model picker toggle with position calculation
+  const handleModelPickerToggle = useCallback(() => {
+    if (!showModelPicker) {
+      calculateDropdownPosition();
+      setShowModelPicker(true);
+      setModelSearchQuery(""); // Reset search when opening
+    } else {
+      setShowModelPicker(false);
+      setModelSearchQuery(""); // Reset search when closing
+    }
+  }, [showModelPicker, calculateDropdownPosition]);
+
+  // Handle click outside and keyboard events to close model picker
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      // Don't close if clicking on the dropdown itself or the model picker button
+      const target = event.target as Node;
+      const isClickInsideDropdown = (event.target as Element)?.closest('[data-dropdown]');
+      const isClickOnButton = modelPickerRef.current?.contains(target);
+
+      if (modelPickerRef.current && !modelPickerRef.current.contains(target) && !isClickInsideDropdown && !isClickOnButton) {
+        setShowModelPicker(false);
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setShowModelPicker(false);
+      }
+    };
+
+    if (showModelPicker) {
+      document.addEventListener('mousedown', handleClickOutside);
+      document.addEventListener('keydown', handleKeyDown);
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [showModelPicker]);
+
+  // Rate limiting state
+  const [rateLimitInfo, setRateLimitInfo] = useState<{
+    remaining: number;
+    resetTime: number;
+    blocked: boolean;
+    requiresTurnstile?: boolean;
+  } | null>(null);
+
+  // Turnstile integration - use environment-based sitekey
+  const sitekey = getTurnstileSitekey();
+  const {
+    token: turnstileToken,
+    isVerified: isTurnstileVerified,
+    error: turnstileError,
+    handleSuccess: handleTurnstileSuccess,
+    handleError: handleTurnstileError,
+    reset: resetTurnstile,
+    TurnstileComponent
+  } = useTurnstile(sitekey);
+
+  const [showTurnstile, setShowTurnstile] = useState(false);
+
+  // Store verification state persistently for this node instance
+  const [isNodeVerified, setIsNodeVerified] = useState(false);
+
+  // Use ref to ensure transport always has latest verification state
+  const isNodeVerifiedRef = useRef(false);
+  isNodeVerifiedRef.current = isNodeVerified;
+
+  // Chat is blocked until initial one-time Turnstile verification completes
+  const isChatBlocked = !!(sitekey && !isNodeVerified);
+
+  // Ref to track current turnstile token for transport
+  const turnstileTokenRef = useRef<string | null>(null);
+  turnstileTokenRef.current = turnstileToken;
+
   // Helper function to get model data from connected IFC nodes
   const getConnectedModelData = () => {
     const nodes = getNodes();
@@ -995,6 +1123,18 @@ export const AiNode = memo(({ data, id, selected, isConnectable }: NodeProps<AiN
         const currentModel = getConnectedModelData();
         // Always get the current model from the ref at call time
         const currentSelectedModel = selectedModelRef.current;
+        const currentTurnstileToken = turnstileTokenRef.current;
+        const currentIsNodeVerified = isNodeVerifiedRef.current; // Use ref value
+
+        // Only send token for the first verification, then rely on session
+        const shouldSendToken = currentTurnstileToken && !currentIsNodeVerified;
+
+        console.log('🚀 Transport sending request with:', {
+          hasTurnstileToken: !!shouldSendToken,
+          tokenPreview: shouldSendToken ? currentTurnstileToken.substring(0, 20) + '...' : 'verified-session',
+          isNodeVerified: currentIsNodeVerified
+        });
+
         return {
           model: currentSelectedModel,
           modelData: currentModel ? {
@@ -1004,15 +1144,48 @@ export const AiNode = memo(({ data, id, selected, isConnectable }: NodeProps<AiN
             totalElements: currentModel.totalElements,
             elementCounts: currentModel.elementCounts,
             hasSqlite: currentModel.sqliteSuccess && !!currentModel.sqliteDb
-          } : null
+          } : null,
+          turnstileToken: shouldSendToken ? currentTurnstileToken : undefined, // Only send token once
+          sessionVerified: currentIsNodeVerified // Indicate this is a verified session
         };
       }
     });
-  }, []); // Create transport once, use ref for dynamic model
+  }, []); // No dependencies - transport will always use current ref values
+
+  // Auto-render invisible Turnstile on component mount (one-time only)
+  useEffect(() => {
+    if (sitekey && !isNodeVerified && !showTurnstile) {
+      console.log('🔒 Auto-rendering invisible Turnstile for one-time verification');
+      setShowTurnstile(true);
+    }
+  }, []); // Empty deps - only run once on mount
+
+  // Handle Turnstile verification success (one-time verification)
+  useEffect(() => {
+    if (isTurnstileVerified && turnstileToken && !isNodeVerified) {
+      console.log('✅ Turnstile verification successful - node permanently unlocked', {
+        tokenPreview: turnstileToken.substring(0, 20) + '...',
+        nodeId: id
+      });
+      setIsNodeVerified(true); // Mark this node as permanently verified
+      setShowTurnstile(false);
+      setRateLimitInfo(null);
+
+      // Clear the token after successful verification to prevent reuse
+      setTimeout(() => {
+        resetTurnstile(); // This will clear the token
+        turnstileTokenRef.current = null;
+        console.log('🧹 Cleared Turnstile token after successful verification');
+      }, 1000); // Small delay to ensure first request completes
+
+      // Store verification in node data or session
+      console.log('🔓 AI Node verified - chat permanently enabled for this session');
+    }
+  }, [isTurnstileVerified, turnstileToken, isNodeVerified, id, resetTurnstile]);
 
   // Chat hook using AI SDK UI with transport that forwards model + modelData per request
   // Tools are now handled completely server-side with execute functions
-  const { messages: chatMessages, sendMessage, status: chatStatus } = useChat({
+  const { messages: chatMessages, sendMessage, status: chatStatus, error: chatError } = useChat({
     transport,
     sendAutomaticallyWhen: ({ messages }) => {
       const last: any = messages[messages.length - 1];
@@ -1035,26 +1208,49 @@ export const AiNode = memo(({ data, id, selected, isConnectable }: NodeProps<AiN
 
       const shouldSendAuto = hasToolResult && !hasCompleteText;
 
-      console.log('🔧 [AI-NODE] sendAutomaticallyWhen check:', {
-        lastMessageRole: last?.role,
-        partsCount: parts.length,
-        hasToolResult,
-        hasCompleteText,
-        shouldSendAuto,
-        parts: parts.map((p: any) => ({
-          type: p.type,
-          hasText: !!p.text,
-          state: p.state,
-          preliminary: p.preliminary,
-          toolCallId: p.toolCallId
-        }))
-      });
-
       // Disable automatic sending to reduce stuttering - rely on onFinish instead
       return false;
     },
     onError: (error) => {
       console.error('🔧 [AI-NODE] Chat error:', error);
+
+      // Handle rate limiting errors
+      if (error.message?.includes('Rate limit exceeded') || error.message?.includes('429')) {
+        // Try to parse the error response for more details
+        try {
+          const errorData = JSON.parse(error.message);
+          setRateLimitInfo({
+            remaining: 0,
+            resetTime: Date.now() + ((errorData.retryAfter || 15 * 60) * 1000),
+            blocked: true,
+            requiresTurnstile: errorData.requiresTurnstile
+          });
+
+          // Show Turnstile if required
+          if (errorData.requiresTurnstile && sitekey) {
+            setShowTurnstile(true);
+          }
+        } catch {
+          setRateLimitInfo({
+            remaining: 0,
+            resetTime: Date.now() + (15 * 60 * 1000), // 15 minutes
+            blocked: true
+          });
+        }
+      }
+
+      // Handle security blocks
+      if (error.message?.includes('security') || error.message?.includes('403')) {
+        const errorMessage: Message = {
+          role: "assistant",
+          content: "⚠️ Your request was blocked for security reasons. Please ensure your input follows our usage guidelines.",
+          toolResults: [{
+            type: 'analysis',
+            description: 'Security block - request rejected'
+          }]
+        };
+        setMessages(prev => [...prev, errorMessage]);
+      }
     },
     onFinish: ({ message }) => {
       const parts = Array.isArray((message as any).parts) ? (message as any).parts : [];
@@ -1072,16 +1268,7 @@ export const AiNode = memo(({ data, id, selected, isConnectable }: NodeProps<AiN
         (p.state === 'done' || !p.state) // Only complete text, not streaming
       );
 
-      console.log('🔧 [AI-NODE] Chat finished:', {
-        role: message.role,
-        hasContent: !!(message as any).content,
-        contentLength: ((message as any).content || '').length,
-        partsCount: parts.length,
-        hasToolResult,
-        hasCompleteText,
-        needsContinuation: message.role === 'assistant' && hasToolResult && !hasCompleteText,
-        parts: parts.map((p: any) => ({ type: p.type, hasText: !!p.text, state: p.state, preliminary: p.preliminary }))
-      });
+      // Track conversation completion for potential continuation
 
       // Safety: if assistant message has tool-results but no complete text, nudge continuation
       // BUT avoid infinite loops - only trigger once per unique tool call
@@ -1095,19 +1282,13 @@ export const AiNode = memo(({ data, id, selected, isConnectable }: NodeProps<AiN
           const continuationKey = `continuation-${toolCallIds.join('-')}`;
 
           if (!sessionStorage.getItem(continuationKey)) {
-            console.log('🔧 [AI-NODE] 🚀 TRIGGERING CONTINUATION - Tool result without text detected');
             sessionStorage.setItem(continuationKey, 'triggered');
 
             setTimeout(() => {
               if (!chatIsLoading) {
-                console.log('🔧 [AI-NODE] 📤 Sending empty message to continue conversation');
                 sendMessage({ text: '' });
-              } else {
-                console.log('🔧 [AI-NODE] ⏳ Chat still loading, skipping continuation nudge');
               }
             }, 500); // Increased delay to reduce stuttering
-          } else {
-            console.log('🔧 [AI-NODE] ⏭️ Skipping continuation - already triggered for these tool calls');
           }
         }
       } catch (e) {
@@ -1402,57 +1583,20 @@ export const AiNode = memo(({ data, id, selected, isConnectable }: NodeProps<AiN
 
   return (
     <div
-      className={`bg-white dark:bg-gray-800 rounded-md shadow-md relative ${isResizing ? "nodrag" : ""}`}
+      className={`bg-white dark:bg-gray-800 border-2 border-emerald-500 dark:border-emerald-400 rounded-md shadow-md relative overflow-visible ${isResizing ? "nodrag" : ""}`}
       style={{
         width: `${width}px`,
         height: `${height}px`,
       }}
       data-nodrag={isResizing ? "true" : undefined}
     >
-      <div className="px-3 py-2 bg-gradient-to-r from-sky-500 to-blue-500 text-white rounded-t-md flex items-center gap-2">
-        <Bot className="h-4 w-4" />
+      {/* Header matching other nodes design system */}
+      <div className="bg-emerald-500 text-white px-3 py-2 flex items-center gap-2">
+        <Bot className="h-4 w-4 flex-shrink-0" />
         <span className="text-sm font-medium truncate">{data.label}</span>
 
-        {/* Model Picker */}
-        <div className="ml-auto flex items-center gap-2">
-          <div className="relative" ref={modelPickerRef}>
-            <button
-              onClick={() => setShowModelPicker(!showModelPicker)}
-              className="text-xs bg-white/20 hover:bg-white/30 px-2 py-0.5 rounded transition-colors flex items-center gap-1"
-            >
-              {AI_MODELS.find(m => (m.slug || m.id) === selectedModel)?.name || selectedModel || 'Select Model'}
-              <ChevronDown className="h-3 w-3" />
-            </button>
-
-            {showModelPicker && (
-              <div className="absolute top-full mt-1 right-0 bg-white dark:bg-gray-800 rounded-md shadow-lg border border-gray-200 dark:border-gray-700 z-50 min-w-[150px]">
-                {AI_MODELS.map(model => (
-                  <button
-                    key={model.id}
-                    onClick={() => {
-                      const newModel = model.slug || model.id;
-
-                      // Clear messages when switching models to indicate fresh conversation
-                      setMessages([]);
-
-                      setSelectedModel(newModel);
-                      setShowModelPicker(false);
-                      // Update node data with selected AI model id
-                      setNodes(nodes => nodes.map(n =>
-                        n.id === id ? { ...n, data: { ...n.data, aiModelId: newModel } } : n
-                      ));
-                    }}
-                    className={`w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors ${(selectedModel === (model.slug || model.id)) ? 'bg-sky-50 dark:bg-sky-900/20 text-sky-600 dark:text-sky-400' : 'text-gray-700 dark:text-gray-300'
-                      }`}
-                  >
-                    <div className="font-medium">{model.name}</div>
-                    <div className="text-[10px] opacity-60">{model.provider}</div>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
+        {/* Action buttons in header */}
+        <div className="ml-auto flex items-center gap-1">
           {/* Send Data button */}
           {getConnectedModelData() && (
             <button
@@ -1462,6 +1606,14 @@ export const AiNode = memo(({ data, id, selected, isConnectable }: NodeProps<AiN
             >
               Send Data ↓
             </button>
+          )}
+
+          {/* Turnstile verification status */}
+          {sitekey && isNodeVerified && (
+            <div className="flex items-center gap-1 text-xs bg-green-500/20 hover:bg-green-500/30 px-2 py-0.5 rounded transition-colors">
+              <Shield className="h-3 w-3 text-green-600 dark:text-green-400" />
+              <span className="text-green-700 dark:text-green-300">Verified</span>
+            </div>
           )}
 
           {/* Save SQLite button */}
@@ -1506,16 +1658,14 @@ export const AiNode = memo(({ data, id, selected, isConnectable }: NodeProps<AiN
               Save SQLite
             </button>
           )}
-
-
         </div>
       </div>
-      <div key={selectedModel} className="p-3 text-xs flex flex-col h-[calc(100%-2.5rem)]">
-        <div className="relative flex-1 overflow-hidden border rounded-md bg-gray-50 dark:bg-gray-900" style={{ minHeight: '96px' }}>
+      <div key={selectedModel} className="p-3 text-xs flex flex-col h-[calc(100%-3rem)]">
+        <div className="relative flex-1 overflow-visible border border-gray-200 dark:border-gray-700 rounded-md bg-gray-50 dark:bg-gray-900" style={{ minHeight: '96px' }}>
           <div
             ref={chatContainerRef}
-            className="h-full overflow-y-auto p-2 pb-16"
-            style={{ scrollPaddingBottom: '3.5rem' }}
+            className="h-full overflow-y-auto p-2 pb-10 custom-scrollbar"
+            style={{ scrollPaddingBottom: '3rem' }}
           >
             {messages.map((m, i) => {
               // Skip completely empty messages
@@ -1597,40 +1747,126 @@ export const AiNode = memo(({ data, id, selected, isConnectable }: NodeProps<AiN
             <div ref={messagesEndRef} />
           </div>
           {/* Bottom fade to prevent overlap between content and input */}
-          <div className="pointer-events-none absolute bottom-11 left-0 right-0 h-12 bg-gradient-to-t from-gray-50 dark:from-gray-900 to-transparent" />
+          <div className="pointer-events-none absolute bottom-8 left-0 right-0 h-8 bg-gradient-to-t from-gray-50 dark:from-gray-900 to-transparent" />
+          {/* Invisible Turnstile verification */}
+          {showTurnstile && sitekey && (
+            <div className="absolute bottom-12 left-2 right-2 z-20">
+              <TurnstileComponent
+                theme={document.documentElement.classList.contains('dark') ? 'dark' : 'light'}
+                size="normal"
+              />
+            </div>
+          )}
+
           <form onSubmit={(e) => {
             e.preventDefault();
+            e.stopPropagation();
+
+            // Block submission if Turnstile is required but not verified
+            if (isChatBlocked) {
+              let errorContent = "🔒 Please wait for security verification to complete before chatting. This usually takes a few seconds.";
+              let errorDescription = 'Verification in progress';
+
+              if (turnstileError) {
+                if (turnstileError === '110200') {
+                  errorContent = "🔒 Security verification failed due to domain configuration. The site administrator needs to add this domain to the security settings. Please contact support if this persists.";
+                  errorDescription = 'Domain configuration error';
+                } else {
+                  errorContent = "🔒 Security verification failed. Please check the verification widget below and try again. If issues persist, try disabling browser extensions or using incognito mode.";
+                  errorDescription = 'Verification failed';
+                }
+              }
+
+              const errorMessage: Message = {
+                role: "assistant",
+                content: errorContent,
+                toolResults: [{
+                  type: 'analysis',
+                  description: errorDescription
+                }]
+              };
+              setMessages(prev => [...prev, errorMessage]);
+              return;
+            }
+
             if (!chatIsLoading && input.trim()) {
+              // Double-check Turnstile verification before sending
+              if (isChatBlocked) {
+                console.log('🚫 Blocking message - Turnstile not verified');
+                return;
+              }
+              // Close model picker if it's open
+              if (showModelPicker) {
+                setShowModelPicker(false);
+              }
               sendMessage({ text: input });
               setInput("");
             }
-          }} className="absolute bottom-2 left-2 right-2 z-10 flex items-center gap-2 pointer-events-auto" style={{ maxWidth: 'calc(100% - 3rem)' }}>
-            <input
-              className="min-w-0 flex-1 h-8 rounded-full border border-gray-300 dark:border-gray-700 bg-white/95 dark:bg-gray-800/95 px-3 text-[0.8rem] sm:text-[0.75rem] shadow-sm focus:outline-none focus:ring-2 focus:ring-sky-500 placeholder:text-gray-400 disabled:opacity-50"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder="Ask a question"
-              disabled={chatIsLoading}
-            />
-            <button
-              type="submit"
-              disabled={chatIsLoading || !input.trim()}
-              aria-label="Send message"
-              className="h-8 w-8 rounded-full bg-sky-500 hover:bg-sky-600 text-white shadow-sm disabled:opacity-50 disabled:hover:bg-sky-500 flex items-center justify-center"
-            >
-              {chatIsLoading ? "..." : (
-                <>
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-4 w-4"><path d="M3.4 2.3l18 9a1 1 0 010 1.8l-18 9a1 1 0 01-1.4-1.2l2.7-7.1a1 1 0 01.7-.6l9.7-1.9-9.7-1.9a1 1 0 01-.7-.6L2 3.5A1 1 0 013.4 2.3z" /></svg>
-                  <span className="sr-only">Send</span>
-                </>
-              )}
-            </button>
+          }} className="absolute bottom-4 left-3 right-3 z-[999] pointer-events-auto">
+            {/* OpenAI-style input with model picker */}
+            <div className="flex items-center gap-1 bg-white dark:bg-gray-800 rounded-full border border-gray-300 dark:border-gray-600 shadow-sm overflow-hidden">
+              {/* Model Picker - positioned on the left like OpenAI */}
+              <div className="relative pl-1" ref={modelPickerRef}>
+                <button
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (!chatIsLoading) {
+                      handleModelPickerToggle();
+                    }
+                  }}
+                  className="flex items-center gap-1 text-[10px] text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200 px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-all duration-200 min-w-[90px] justify-between"
+                  disabled={chatIsLoading}
+                  type="button"
+                  title={`Current model: ${AI_MODELS.find(m => (m.slug || m.id) === selectedModel)?.name || selectedModel}`}
+                >
+                  <span className="truncate max-w-[70px] text-left">
+                    {AI_MODELS.find(m => (m.slug || m.id) === selectedModel)?.name || selectedModel.split('/').pop() || 'Model'}
+                  </span>
+                  <ChevronDown className={`h-3 w-3 flex-shrink-0 transition-transform duration-200 ${showModelPicker ? 'rotate-180' : ''}`} />
+                </button>
+              </div>
+
+              {/* Separator */}
+              <div className="w-px h-5 bg-gray-300 dark:bg-gray-600" />
+
+              {/* Text Input */}
+              <input
+                className={`min-w-0 flex-1 h-8 bg-transparent px-2 text-[0.8rem] sm:text-[0.75rem] focus:outline-none focus:ring-1 focus:ring-emerald-500/50 rounded-sm placeholder:text-gray-400 transition-all duration-200 ${isChatBlocked ? 'opacity-50 cursor-not-allowed' : 'disabled:opacity-50'}`}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                placeholder={isChatBlocked ? (turnstileError ? "Verification error - check console" : "Verifying security... please wait") : "Ask a question"}
+                disabled={chatIsLoading || isChatBlocked}
+              />
+
+              {/* Send Button */}
+              <button
+                type="submit"
+                disabled={chatIsLoading || !input.trim() || isChatBlocked}
+                aria-label="Send message"
+                className={`h-8 w-9 rounded-l-none rounded-r-full bg-emerald-500 hover:bg-emerald-600 text-white shadow-sm disabled:opacity-50 disabled:hover:bg-emerald-500 flex items-center justify-center transition-colors border-l border-gray-200 dark:border-gray-700 ${isChatBlocked ? 'cursor-not-allowed' : ''}`}
+              >
+                {isChatBlocked ? "🔒" : (chatIsLoading ? "..." : (
+                  <>
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-4 w-4"><path d="M3.4 2.3l18 9a1 1 0 010 1.8l-18 9a1 1 0 01-1.4-1.2l2.7-7.1a1 1 0 01.7-.6l9.7-1.9-9.7-1.9a1 1 0 01-.7-.6L2 3.5A1 1 0 013.4 2.3z" /></svg>
+                    <span className="sr-only">Send</span>
+                  </>
+                ))}
+              </button>
+            </div>
           </form>
+        </div>
+
+        {/* Disclaimer */}
+        <div className="absolute bottom-1 left-3 right-8 text-[8px] leading-tight text-gray-400 dark:text-gray-500 text-center pointer-events-none pb-1 max-w-full overflow-hidden">
+          <span className="truncate block" title="We log queries and responses during AI node usage to improve system performance">
+            We log queries and responses during AI node usage to improve system performance
+          </span>
         </div>
       </div>
 
       <div
-        className={`absolute bottom-0 right-0 w-6 h-6 cursor-nwse-resize nodrag z-20 ${selected ? "text-sky-600" : "text-gray-400"
+        className={`absolute bottom-0 right-0 w-6 h-6 cursor-nwse-resize nodrag z-30 ${selected ? "text-sky-600" : "text-gray-400"
           } hover:text-sky-500 transition-colors duration-200`}
         onMouseDown={startResize}
       >
@@ -1664,6 +1900,82 @@ export const AiNode = memo(({ data, id, selected, isConnectable }: NodeProps<AiN
 
       <Handle type="target" position={Position.Left} id="input" isConnectable={isConnectable} />
       <Handle type="source" position={Position.Right} id="output" isConnectable={isConnectable} />
+
+      {/* Portal-based Model Picker Dropdown */}
+      {showModelPicker && createPortal(
+        <div
+          className="fixed animate-in fade-in-0 zoom-in-95 duration-200 z-[10000]"
+          style={{
+            top: `${dropdownPosition.top}px`,
+            left: `${dropdownPosition.left}px`,
+            transform: dropdownPosition.top < 100 ? 'translateY(0)' : 'translateY(-100%)'
+          }}
+        >
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-2xl border border-gray-200 dark:border-gray-700 min-w-[180px] max-w-[280px] max-h-64 overflow-hidden p-1" data-dropdown>
+            {/* Search input */}
+            {AI_MODELS.length > 5 && (
+              <div className="p-2 border-b border-gray-200 dark:border-gray-700">
+                <input
+                  type="text"
+                  placeholder="Search models..."
+                  value={modelSearchQuery}
+                  onChange={(e) => setModelSearchQuery(e.target.value)}
+                  className="w-full px-2 py-1 text-xs bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500"
+                  autoFocus
+                />
+              </div>
+            )}
+
+            {/* Model list */}
+            <div className="max-h-40 overflow-y-auto">
+              {filteredModels.length === 0 ? (
+                <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400 text-center">
+                  No models found
+                </div>
+              ) : (
+                filteredModels.map(model => {
+                  const isSelected = selectedModel === (model.slug || model.id);
+                  return (
+                    <button
+                      key={model.id}
+                      onClick={(e) => {
+                        e.stopPropagation(); // Prevent event bubbling
+
+                        const newModel = model.slug || model.id;
+
+                        // Clear messages when switching models to indicate fresh conversation
+                        setMessages([]);
+
+                        setSelectedModel(newModel);
+                        setShowModelPicker(false);
+                        // Update node data with selected AI model id
+                        setNodes(nodes => nodes.map(n =>
+                          n.id === id ? { ...n, data: { ...n.data, aiModelId: newModel } } : n
+                        ));
+                      }}
+                      className={`w-full text-left px-3 py-2 text-xs rounded-md hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors duration-150 flex flex-col gap-0.5 ${isSelected
+                        ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-700'
+                        : 'text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100'
+                        }`}
+                      title={`${model.name} by ${model.provider}${model.slug ? ` (${model.slug})` : ''}`}
+                    >
+                      <div className="font-medium truncate flex items-center justify-between">
+                        <span>{model.name}</span>
+                        {isSelected && (
+                          <svg className="h-3 w-3 text-emerald-600 dark:text-emerald-400 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                            <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                          </svg>
+                        )}
+                      </div>
+                      <div className="text-[10px] opacity-60 truncate">{model.provider}</div>
+                    </button>
+                  );
+                }))}
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
 });

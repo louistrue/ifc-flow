@@ -41,6 +41,7 @@
     "@radix-ui/react-toggle": "^1.1.1",
     "@radix-ui/react-toggle-group": "^1.1.1",
     "@radix-ui/react-tooltip": "^1.1.6",
+    "@types/sqlite3": "^3.1.11",
     "@vercel/kv": "^0.2.0",
     "ai": "^5.0.0",
     "alasql": "^4.6.6",
@@ -70,6 +71,7 @@
     "three": "^0.174.0",
     "vaul": "^0.9.6",
     "web-ifc": "^0.0.68",
+    "winston": "^3.17.0",
     "xlsx": "^0.18.5",
     "zod": "^3.25.76"
   },

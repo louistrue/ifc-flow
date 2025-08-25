@@ -177,13 +177,13 @@ def process_ifc_to_sqlite(file_content, filename):
             file=ifc_file,
             sql_type="SQLite",
             database=sqlite_db_path,
-            full_schema=False,  # Only create tables for classes in the dataset
+            full_schema=True,   # Create all IFC class tables for comprehensive database
             is_strict=False,    # Don't enforce strict null constraints
             should_expand=False,  # Keep ifc_id as primary key
             should_get_inverses=True,   # Get inverse relationships
             should_get_psets=True,      # Get property sets
-            should_get_geometry=False,   # Skip geometry for browser performance
-            should_skip_geometry_data=True  # Skip geometry representation tables
+            should_get_geometry=False,   # Skip geometry processing (Pyodide limitation)
+            should_skip_geometry_data=False  # Include geometry representation tables (but not processed geometry)
         )
         
         print("Executing official ifc2sql patch...")
