@@ -23,18 +23,54 @@ export class ServerSQLiteManager {
     private db: sqlite3.Database | null = null;
     private dbPath: string | null = null;
 
+    private static readonly MAX_SELECT_ROWS = 1000;
+    private static readonly LOG_ROW_CAP = 50;
+    private static readonly SENSITIVE_KEY_REGEX = /(name|email|phone|address|password|secret|token)/i;
+
+    private enforceSelectLimit(originalQuery: string): string {
+        const q = (originalQuery || '').trim();
+        // Only apply to simple SELECT queries (ignore PRAGMA and sqlite_master schema list we already allow)
+        if (!/^select\s+/i.test(q)) return q;
+        // If a LIMIT exists, clamp it to MAX_SELECT_ROWS
+        const limitMatch = q.match(/limit\s+(\d+)/i);
+        if (limitMatch) {
+            const current = parseInt(limitMatch[1], 10);
+            if (Number.isFinite(current) && current > ServerSQLiteManager.MAX_SELECT_ROWS) {
+                return q.replace(/limit\s+\d+/i, `LIMIT ${ServerSQLiteManager.MAX_SELECT_ROWS}`);
+            }
+            return q;
+        }
+        // Append LIMIT if none present
+        return `${q} LIMIT ${ServerSQLiteManager.MAX_SELECT_ROWS}`;
+    }
+
+    private maskSensitiveForLog(row: any): any {
+        if (!row || typeof row !== 'object') return row;
+        const masked: any = Array.isArray(row) ? [...row] : { ...row };
+        if (Array.isArray(row)) return (masked as any[]).map((v: any) => (typeof v === 'object' ? this.maskSensitiveForLog(v) : v));
+        for (const key of Object.keys(masked)) {
+            if (ServerSQLiteManager.SENSITIVE_KEY_REGEX.test(key)) {
+                masked[key] = '***';
+            }
+        }
+        return masked;
+    }
+
     /**
      * Connect to the SQLite database file
      */
     async connectToDatabase(modelId: string): Promise<boolean> {
         try {
-            // Look for the SQLite database file in the project root
+            // Sanitize modelId to prevent path traversal or injection
+            const safeModelId = (modelId || '')
+                .replace(/[^a-zA-Z0-9._-]/g, '')
+                .slice(0, 64) || 'model';
+
+            // Look for the SQLite database file in controlled locations
             // The database should be created by the worker and saved with the model name
             const possiblePaths = [
-                path.join(process.cwd(), `${modelId}.sqlite`),
-                path.join(process.cwd(), 'public', `${modelId}.sqlite`),
-                path.join(process.cwd(), `02_BIMcollab_Example_STR_random_C_ebkp(1).sqlite`), // Current file
-                path.join(process.cwd(), `02_BIMcollab_Example_STR_random_C_ebkp.sqlite`),
+                path.join(process.cwd(), `${safeModelId}.sqlite`),
+                path.join(process.cwd(), 'public', `${safeModelId}.sqlite`),
             ];
 
             // Find the first existing database file
@@ -64,7 +100,8 @@ export class ServerSQLiteManager {
             }
 
             return new Promise((resolve, reject) => {
-                this.db = new sqlite.Database(this.dbPath!, (err) => {
+                // Open database in READONLY mode
+                this.db = new sqlite.Database(this.dbPath!, sqlite3.OPEN_READONLY, (err) => {
                     if (err) {
                         console.error('❌ Error connecting to SQLite database:', err.message);
 
@@ -120,8 +157,46 @@ export class ServerSQLiteManager {
 
         const startTime = Date.now();
 
+        // Enforce strict allowlist: single-statement, read-only queries
+        const isQueryAllowed = (q: string): boolean => {
+            const s = (q || '').trim();
+            if (!s) return false;
+            // Disallow semicolons to prevent multi-statement
+            if (s.includes(';')) return false;
+            const lower = s.toLowerCase();
+            // Allow PRAGMA table_info(TableName)
+            const pragmaOk = /^pragma\s+table_info\s*\([a-zA-Z0-9_]+\)\s*$/.test(lower);
+            // Allow listing tables
+            const listTablesOk = /^select\s+name\s+from\s+sqlite_master\s+where\s+type\s*=\s*'table'(\s+order\s+by\s+name)?\s*$/.test(lower);
+            // Allow generic SELECT ... (basic guard)
+            const selectOk = /^select\s+[\s\S]+$/i.test(s) && !/(insert|update|delete|drop|create|alter|attach|detach|vacuum|reindex|replace|pragma\s+(?!table_info))/i.test(s) && !/\bunion\b/i.test(s);
+            return pragmaOk || listTablesOk || selectOk;
+        };
+
+        if (!isQueryAllowed(query)) {
+            aiLogger.logToolExecution({
+                toolName: 'querySqlite',
+                query,
+                description,
+                result: null,
+                executionTime: 0,
+                success: false,
+                error: 'Blocked non-allowlisted SQL'
+            });
+            return {
+                type: 'error',
+                message: 'Query not allowed',
+                description,
+                query,
+                error: 'Blocked non-allowlisted SQL'
+            };
+        }
+
+        // Apply default LIMIT for SELECT queries without a LIMIT, and clamp excessive limits
+        const enforcedQuery = this.enforceSelectLimit(query);
+
         return new Promise((resolve) => {
-            this.db!.all(query, [], (err, rows) => {
+            this.db!.all(enforcedQuery, [], (err, rows) => {
                 const executionTime = Date.now() - startTime;
 
                 if (err) {
@@ -130,7 +205,7 @@ export class ServerSQLiteManager {
                     // Log the error
                     aiLogger.logToolExecution({
                         toolName: 'querySqlite',
-                        query,
+                        query: enforcedQuery,
                         description,
                         result: null,
                         executionTime,
@@ -142,24 +217,25 @@ export class ServerSQLiteManager {
                         type: 'error',
                         message: err.message,
                         description,
-                        query,
+                        query: enforcedQuery,
                         error: err.message
                     });
                     return;
                 }
 
-                // Log successful execution
+                // Log successful execution with masked, sampled rows only
+                const sample = Array.isArray(rows) ? rows.slice(0, ServerSQLiteManager.LOG_ROW_CAP).map((r) => this.maskSensitiveForLog(r)) : [];
                 aiLogger.logToolExecution({
                     toolName: 'querySqlite',
-                    query,
+                    query: enforcedQuery,
                     description,
-                    result: rows,
+                    result: { rowCount: Array.isArray(rows) ? rows.length : 0, sample },
                     executionTime,
                     success: true
                 });
 
                 // Process results based on query type and content
-                const result = this.processQueryResults(rows, query, description);
+                const result = this.processQueryResults(rows, enforcedQuery, description);
                 resolve(result);
             });
         });

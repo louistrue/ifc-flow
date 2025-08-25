@@ -141,27 +141,17 @@ export function Turnstile({
             return;
         }
 
-        // Log domain info for debugging
-        console.log('🔍 Turnstile domain check:', {
-            hostname: window.location.hostname,
-            sitekey: sitekey?.substring(0, 10) + '...',
-            isTestKey: sitekey === '1x00000000000000000000AA',
-            fullURL: window.location.href
-        });
+        // Domain info available via devtools when needed
 
         loadTurnstileScript()
             .then(() => {
                 renderWidget();
 
-                // For test sitekey, set up a fallback timeout
-                if (sitekey === '1x00000000000000000000AA') {
-                    console.log('🧪 Test sitekey detected, setting up fallback verification');
+                // For test sitekey in non-production, auto-complete after short delay to unblock dev
+                if (sitekey === '1x00000000000000000000AA' && process.env.NODE_ENV !== 'production') {
                     const testTimeout = setTimeout(() => {
-                        console.log('🧪 Test sitekey fallback: auto-completing verification');
                         handleSuccess('XXXX.DUMMY.TOKEN.XXXX');
-                    }, 2000); // 2 second timeout for test keys
-
-                    // Store timeout to clear it if real callback happens
+                    }, 1500);
                     (window as any).turnstileTestTimeout = testTimeout;
                 } else {
                     // For production, add multiple timeout checks for stuck verification
@@ -172,33 +162,29 @@ export function Turnstile({
 
                     const checkVerification = () => {
                         checkCount++;
-                        console.log(`🔍 Checking Turnstile status (attempt ${checkCount}/${maxChecks})`);
+                        // Periodic check for stuck verification
 
                         if (!widgetIdRef.current || !window.turnstile) {
-                            console.warn('⚠️ Turnstile widget or API not available');
+                            // Widget or API not available
                             return;
                         }
 
                         const response = window.turnstile.getResponse(widgetIdRef.current);
-                        console.log('🔍 Turnstile response check:', {
-                            hasResponse: !!response,
-                            widgetExists: !!widgetIdRef.current
-                        });
+                        // Turnstile response check
 
                         if (!response && checkCount < maxChecks) {
-                            console.warn(`⚠️ Turnstile verification stuck (attempt ${checkCount}/${maxChecks}) - resetting widget`);
+                            // Stuck verification; resetting widget
                             try {
                                 window.turnstile.reset(widgetIdRef.current);
                                 // Schedule next check
                                 (window as any).turnstileProdTimeout = setTimeout(checkVerification, 5000);
                             } catch (e) {
-                                console.error('Failed to reset Turnstile:', e);
+                                // Failed to reset Turnstile
                                 // Force re-render widget if reset fails
                                 renderWidget();
                             }
                         } else if (!response && checkCount >= maxChecks) {
-                            console.error('❌ Turnstile verification failed after multiple attempts');
-                            console.warn('🔄 Attempting final widget re-render before fallback');
+                            // Verification failed after multiple attempts; final re-render
 
                             // Try one more re-render before giving up
                             try {
@@ -207,8 +193,7 @@ export function Turnstile({
                                 // Set a final fallback timeout (only for production issues)
                                 setTimeout(() => {
                                     if (!widgetIdRef.current || !window.turnstile?.getResponse(widgetIdRef.current)) {
-                                        console.warn('⚠️ Turnstile persistently failing - this may indicate network issues or browser blocking');
-                                        console.log('💡 Consider checking browser extensions, network connectivity, or DNS settings');
+                                        // Persistently failing; likely network/extension issues
 
                                         // Show error state to user
                                         setHasError(true);
@@ -216,7 +201,7 @@ export function Turnstile({
                                     }
                                 }, 10000); // 10 seconds for final attempt
                             } catch (e) {
-                                console.error('Failed to re-render Turnstile widget:', e);
+                                // Failed to re-render Turnstile widget
                                 setHasError(true);
                                 setIsLoading(false);
                             }

@@ -8,6 +8,7 @@ import { validateAndSanitizeInput, validateModelSelection } from "@/lib/input-va
 import { rateLimit, checkSuspiciousActivity } from "@/lib/rate-limiter";
 import { validateTurnstileToken } from "@/lib/turnstile";
 import { resolveModelSlug } from "@/lib/model-utils";
+import { createHmac } from "crypto";
 
 export async function POST(req: Request) {
     try {
@@ -17,6 +18,58 @@ export async function POST(req: Request) {
             req.headers.get('x-real-ip') || 'unknown';
         const userAgent = req.headers.get('user-agent') || 'unknown';
         const clientId = `${clientIp}-${Buffer.from(userAgent).toString('base64').slice(0, 10)}`;
+
+        // Secure cookie helpers for Turnstile verification (server-trusted)
+        const COOKIE_NAME = 'ai_ts';
+        const cookieHeader = req.headers.get('cookie') || '';
+        const envCookieSecret = process.env.COOKIE_SECRET || process.env.NEXTAUTH_SECRET ||
+            (process.env.NODE_ENV === 'development' ? 'dev-fallback-secret-key-for-turnstile-cookies' : '');
+        const sign = (value: string) => {
+            if (!envCookieSecret) return '';
+            return createHmac('sha256', envCookieSecret).update(value).digest('hex');
+        };
+        const parseCookies = (cookieStr: string): Record<string, string> => {
+            return cookieStr.split(';').map(v => v.trim()).filter(Boolean).reduce((acc, pair) => {
+                const idx = pair.indexOf('=');
+                if (idx === -1) return acc;
+                const k = pair.slice(0, idx).trim();
+                const v = pair.slice(idx + 1).trim();
+                acc[k] = decodeURIComponent(v);
+                return acc;
+            }, {} as Record<string, string>);
+        };
+        const cookies = parseCookies(cookieHeader);
+        const nowTs = Math.floor(Date.now() / 1000);
+        const MAX_AGE = 60 * 60 * 24; // 24h
+        const makeCookie = (payload: string) => {
+            const signature = sign(payload);
+            const cookieVal = encodeURIComponent(`${payload}.${signature}`);
+            const secureFlag = process.env.NODE_ENV === 'production' ? 'Secure; ' : '';
+            return `${COOKIE_NAME}=${cookieVal}; Path=/; HttpOnly; ${secureFlag}SameSite=Lax; Max-Age=${MAX_AGE}`;
+        };
+        const verifyCookie = (cookieValue?: string): boolean => {
+            try {
+                if (!cookieValue || !envCookieSecret) return false;
+                const decoded = decodeURIComponent(cookieValue);
+                const lastDot = decoded.lastIndexOf('.');
+                if (lastDot <= 0) return false;
+                const payload = decoded.substring(0, lastDot);
+                const sig = decoded.substring(lastDot + 1);
+                if (sign(payload) !== sig) return false;
+                const parts = payload.split('|');
+                if (parts.length < 3) return false;
+                const version = parts[0];
+                const ts = Number(parts[2]);
+                if (version !== 'v1' || !Number.isFinite(ts)) return false;
+                if (ts + MAX_AGE < nowTs) return false; // expired
+                // Bind to client fingerprint
+                const expectedFp = Buffer.from(clientId).toString('base64').slice(0, 24);
+                return parts[1] === expectedFp;
+            } catch {
+                return false;
+            }
+        };
+        let setVerificationCookie: string | null = null;
 
         // Check for suspicious activity
         if (checkSuspiciousActivity(clientId)) {
@@ -36,21 +89,7 @@ export async function POST(req: Request) {
         // Parse and validate input - simplified for now
         const rawInput = await req.json();
 
-        // Debug logging to see what we're receiving
-        console.log('🔍 Raw input received:', {
-            hasMessages: !!rawInput.messages,
-            messageCount: rawInput.messages?.length || 0,
-            firstMessage: rawInput.messages?.[0] ? {
-                role: rawInput.messages[0].role,
-                hasContent: !!rawInput.messages[0].content,
-                hasParts: !!rawInput.messages[0].parts,
-                contentLength: rawInput.messages[0].content?.length || 0,
-                partsLength: rawInput.messages[0].parts?.length || 0
-            } : null,
-            hasModelData: !!rawInput.modelData,
-            hasTurnstileToken: !!rawInput.turnstileToken,
-            keys: Object.keys(rawInput)
-        });
+        // (verbose input debug logging removed)
 
         // Basic validation - just check for required fields
         if (!rawInput.messages || !Array.isArray(rawInput.messages) || rawInput.messages.length === 0) {
@@ -96,10 +135,19 @@ export async function POST(req: Request) {
         // Check if this is a verified session or needs initial verification
         let hasTurnstileToken = false;
 
-        // If sessionVerified is true, this node has already been verified
-        if (sessionVerified) {
+        // Server-trusted cookie verification (ignore client-provided session flags)
+        const cookieVerified = verifyCookie(cookies[COOKIE_NAME]);
+        if (cookieVerified) {
             hasTurnstileToken = true;
-            aiLogger.info('Using verified session', { clientId, ip: clientIp });
+            aiLogger.info('Using verified session (cookie)', { clientId, ip: clientIp });
+        } else if (process.env.NODE_ENV === 'development') {
+            // Debug cookie verification in development
+            aiLogger.info('Cookie verification debug', {
+                clientId,
+                hasCookie: !!cookies[COOKIE_NAME],
+                cookieValue: cookies[COOKIE_NAME] ? cookies[COOKIE_NAME].substring(0, 20) + '...' : 'none',
+                hasSecret: !!envCookieSecret
+            });
         }
         // Otherwise, validate the Turnstile token for first-time verification
         else if (turnstileToken) {
@@ -108,6 +156,11 @@ export async function POST(req: Request) {
                 if (turnstileResult.success) {
                     hasTurnstileToken = true;
                     aiLogger.info('Turnstile initial verification successful', { clientId, ip: clientIp });
+
+                    // Set signed, HttpOnly cookie to persist verification (24h)
+                    const fp = Buffer.from(clientId).toString('base64').slice(0, 24);
+                    const payload = `v1|${fp}|${nowTs}`;
+                    setVerificationCookie = envCookieSecret ? makeCookie(payload) : null;
                 } else {
                     aiLogger.warn('Turnstile verification failed', {
                         clientId,
@@ -187,14 +240,7 @@ export async function POST(req: Request) {
             );
         }
 
-        console.log('✅ Security checks passed:', {
-            clientId: clientId.substring(0, 10) + '...',
-            rateLimitRemaining: rateLimitResult.remaining,
-            turnstileVerified: hasTurnstileToken,
-            inputValidated: validationResult.isValid,
-            suspicious: validationResult.isSuspicious,
-            messageCount: messages.length
-        });
+        // (verbose security-checks logging removed)
 
         // Start conversation tracking
         const conversationStart = Date.now();
@@ -243,16 +289,7 @@ export async function POST(req: Request) {
 
         // Use model data from client or fallback to server-side model
         const model = modelData || getLastLoadedModel();
-        console.log("📊 IFC Model Context:", {
-            source: modelData ? "client" : "server",
-            hasModel: !!model,
-            modelId: model?.id,
-            modelName: model?.name,
-            totalElements: model?.totalElements,
-            elementCounts: model?.elementCounts,
-            hasSqlite: modelData?.hasSqlite,
-            elementsCount: model?.elements?.length
-        });
+        // (verbose model context logging removed)
 
         let modelContext = "No IFC model is currently loaded. If you cannot access model data, do not guess. Ask the user to load a model or confirm the requested data cannot be retrieved.";
         if (model) {
@@ -269,8 +306,7 @@ export async function POST(req: Request) {
             // Extract sample elements with rich data (for system message only)
             const sampleElementsData = model.elements?.slice(0, 5) || [];
 
-            // Log actual element count being sent
-            console.log(`📊 Sending ${model.elements?.length || 0} elements to AI for processing`);
+            // (verbose element count logging removed)
 
             // Get property sets from sample elements
             const propertySets = new Set<string>();
@@ -439,12 +475,12 @@ ${modelContext}
 
 IMPORTANT: Always use the querySqlite tool for data questions. Never promise to get data - get it first, then respond with the actual information.`;
 
-        console.log("💬 System Message:", systemMsg.substring(0, 200) + "...");
+        // (system prompt preview logging removed)
 
         // Resolve to OpenRouter model slug and create chat model
         const modelSlug = resolveModelSlug(selectedModel);
         const aiModel = openrouter.chat(modelSlug);
-        console.log(`🤖 Using AI model (OpenRouter): ${modelSlug}`);
+        // (model selection logging removed)
 
         // Do not modify UI messages from the client; include system via the system field below
 
@@ -470,8 +506,9 @@ IMPORTANT: Always use the querySqlite tool for data questions. Never promise to 
 
         // Tools are now handled client-side, so no server-side intent classification needed
 
-        // Check if client supports client-side queries
-        const supportsClientQueries = model?.supportsClientQueries;
+        // Decide client-query support on server (ignore any client-provided flags)
+        // For security, prefer client-side execution markers to avoid server-side SQL
+        const supportsClientQueries = true;
 
         // Create a stateful tool system using AI SDK v5 approach
         const createConditionalTools = () => {
@@ -503,12 +540,8 @@ IMPORTANT: Always use the querySqlite tool for data questions. Never promise to 
                             querySqliteAvailable: z.boolean()
                         }).optional().describe('Current schema discovery progress')
                     }),
-                    onInputStart: ({ toolCallId }: { toolCallId: string }) => {
-                        console.log('🔍 Schema discovery started:', toolCallId);
-                    },
-                    onInputAvailable: ({ input, toolCallId }: { input: any; toolCallId: string }) => {
-                        console.log('🔍 Schema discovery input ready:', input, toolCallId);
-                    },
+                    onInputStart: ({ toolCallId }: { toolCallId: string }) => { },
+                    onInputAvailable: ({ input, toolCallId }: { input: any; toolCallId: string }) => { },
                     execute: async ({ action, tableName }: { action: 'list_tables' | 'table_info' | 'sample_data'; tableName?: string }) => {
                         let query = '';
                         let description = '';
@@ -551,15 +584,12 @@ IMPORTANT: Always use the querySqlite tool for data questions. Never promise to 
                                 }
                             };
 
-                            // Update global tools if schema is now complete
-                            if (schemaState.tablesDiscovered && Object.keys(schemaState.columnsDiscovered).length > 0) {
-                                console.log('🎯 Schema discovery complete - querySqlite now available!');
-                            }
+                            // (schema discovery progress logging removed)
 
                             return result;
                         }
 
-                        // Fallback to server-side execution
+                        // Fallback to server-side execution (read-only enforcement exists in ServerSQLiteManager)
                         try {
                             const sqliteManager = await getServerSQLiteManager(model.id);
                             if (!sqliteManager) {
@@ -746,12 +776,7 @@ IMPORTANT: Always use the querySqlite tool for data questions. Never promise to 
             const isStaleSession = existingState && (Date.now() - existingState.lastActivity) > (5 * 60 * 1000);
 
             if ((isNewConversation || isStaleSession) && existingState && existingState.stepCount > 0) {
-                console.log('🔄 Resetting schema discovery state:', {
-                    reason: isNewConversation ? 'new conversation' : 'stale session',
-                    messageCount: messages?.length || 0,
-                    stepCount: existingState.stepCount,
-                    lastActivity: new Date(existingState.lastActivity).toISOString()
-                });
+                // (schema discovery state reset logging removed)
                 globalAny.schemaDiscoveryState.delete(schemaSessionId);
             }
 
@@ -784,26 +809,15 @@ IMPORTANT: Always use the querySqlite tool for data questions. Never promise to 
         cleanupOldSessions();
 
         const schemaState = getSchemaState();
-        console.log('🔍 Current schema state:', {
-            sessionId: schemaSessionId,
-            messageCount: messages?.length || 0,
-            schemaState: {
-                tablesDiscovered: schemaState.tablesDiscovered,
-                columnsCount: Object.keys(schemaState.discoveredColumns).length,
-                stepCount: schemaState.stepCount,
-                schemaComplete: schemaState.schemaDiscoveryComplete
-            }
-        });
 
         // Manual reset mechanism - if user sends "reset schema" or similar
         const currentUserMessage = messages?.[messages.length - 1];
         const userContent = currentUserMessage?.content || '';
         if (userContent.toLowerCase().includes('reset') && schemaState.stepCount > 0) {
-            console.log('🔄 Manual schema reset requested by user');
+            // (manual schema reset logging removed)
             globalAny.schemaDiscoveryState.delete(schemaSessionId);
             // Get fresh state after reset
             const freshState = getSchemaState();
-            console.log('✅ Schema state reset complete');
         }
 
         // Create dynamic tools with proper AI SDK v5 approach
@@ -823,26 +837,20 @@ IMPORTANT: Always use the querySqlite tool for data questions. Never promise to 
 
                         // Prevent infinite loops - auto-reset if too many attempts
                         if (currentState.stepCount > 10) {
-                            console.log('🔄 Auto-resetting schema state due to too many attempts');
+                            // (auto-resetting schema state due to too many attempts)
                             globalAny.schemaDiscoveryState.delete(schemaSessionId);
                             // Get fresh state after reset
                             const freshState = getSchemaState();
-                            console.log('✅ Schema state auto-reset complete');
                             // Continue with fresh state
                             updateSchemaState({ stepCount: freshState.stepCount + 1 });
                         }
 
                         // ENFORCE SEQUENTIAL EXECUTION - Reject invalid steps
-                        console.log(`🔍 Schema validation for action="${action}":`, {
-                            tablesDiscovered: currentState.tablesDiscovered,
-                            columnsCount: Object.keys(currentState.discoveredColumns).length,
-                            stepCount: currentState.stepCount,
-                            schemaComplete: currentState.schemaDiscoveryComplete
-                        });
+                        // (schema validation logging removed)
 
                         // If schema is already complete, skip validation for new queries
                         if (currentState.schemaDiscoveryComplete) {
-                            console.log('✅ Schema already complete, allowing re-discovery for new query');
+                            // (schema already complete)
                             // Reset for new query but keep schema complete flag
                             if (action === 'list_tables') {
                                 updateSchemaState({
@@ -859,20 +867,20 @@ IMPORTANT: Always use the querySqlite tool for data questions. Never promise to 
                                 throw new Error('Must discover table columns first using action="table_info"');
                             }
                             if (action === 'list_tables' && currentState.tablesDiscovered) {
-                                console.log('🚫 Blocking duplicate list_tables call - tables already discovered');
+                                // (blocking duplicate list_tables call)
                                 throw new Error('Tables already discovered. Use action="table_info" next');
                             }
                         }
 
                         // Update state IMMEDIATELY after validation passes
                         if (action === 'list_tables') {
-                            console.log('✅ Updating state: tablesDiscovered = true');
+                            // (updating state: tablesDiscovered)
                             updateSchemaState({
                                 discoveredTables: ['IfcWall', 'IfcMaterial', 'IfcDoor', 'IfcWindow'], // Common IFC tables
                                 tablesDiscovered: true
                             });
                         } else if (action === 'table_info') {
-                            console.log(`✅ Updating state: columns for ${tableName}`);
+                            // (updating state: columns discovered)
                             const currentStateForColumns = getSchemaState();
                             const newColumns = { ...currentStateForColumns.discoveredColumns };
                             newColumns[tableName!] = ['id', 'Name', 'GlobalId', 'ObjectType', 'Tag']; // Common IFC columns
@@ -916,7 +924,6 @@ IMPORTANT: Always use the querySqlite tool for data questions. Never promise to 
 
                         if (isComplete && !currentSchemaState.schemaDiscoveryComplete) {
                             updateSchemaState({ schemaDiscoveryComplete: true });
-                            console.log('🎯 Schema discovery marked as complete after ALL THREE steps!');
                         }
 
                         // If client supports queries, return a special marker for client execution
@@ -973,12 +980,7 @@ IMPORTANT: Always use the querySqlite tool for data questions. Never promise to 
 
                         // ENFORCE SCHEMA DISCOVERY COMPLETION
                         if (!currentState.schemaDiscoveryComplete && !currentState.sampleDataExecuted) {
-                            console.log('⚠️ Blocking querySqlite - schema discovery incomplete:', {
-                                schemaComplete: currentState.schemaDiscoveryComplete,
-                                sampleDataExecuted: currentState.sampleDataExecuted,
-                                tables: currentState.discoveredTables?.length || 0,
-                                columns: Object.keys(currentState.discoveredColumns || {}).length
-                            });
+                            // Blocking querySqlite - schema discovery incomplete
                             throw new Error('Schema discovery must be completed first. Use discoverSchema with all three actions: list_tables, table_info, and sample_data');
                         }
 
@@ -1036,32 +1038,11 @@ IMPORTANT: Always use the querySqlite tool for data questions. Never promise to 
                 const finishTime = Date.now();
                 const responseTime = finishTime - startTime;
 
-                console.log('🔧 [SERVER] Stream finished:', {
-                    finishReason,
-                    hasText: !!text,
-                    textLength: text?.length || 0,
-                    toolCallsCount: toolCalls?.length || 0,
-                    toolResultsCount: toolResults?.length || 0,
-                    responseTime,
-                    usage: usage ? {
-                        promptTokens: (usage as any).promptTokens || 0,
-                        completionTokens: (usage as any).completionTokens || 0,
-                        totalTokens: usage.totalTokens
-                    } : null
-                });
+                // (stream finished)
 
                 // Log tool calls with detailed information
                 if (toolCalls && toolCalls.length > 0) {
-                    // Debug: Log the complete structure of toolCalls
-                    console.log('🔍 [DEBUG] Complete toolCall structure:', JSON.stringify(toolCalls, null, 2));
-
-                    console.log('🔧 [SERVER] Tool calls made:', toolCalls.map(tc => ({
-                        toolName: tc.toolName,
-                        toolCallId: tc.toolCallId,
-                        args: (tc as any).args,
-                        allKeys: Object.keys(tc),
-                        fullObject: tc
-                    })));
+                    // (tool calls debug logging removed)
 
                     // Log each tool call individually
                     for (const toolCall of toolCalls) {
@@ -1071,11 +1052,7 @@ IMPORTANT: Always use the querySqlite tool for data questions. Never promise to 
                             (toolCall as any).input ||
                             (toolCall as any).parameters;
 
-                        console.log('🔍 [DEBUG] Tool call args extraction:', {
-                            toolCallId: toolCall.toolCallId,
-                            args: args,
-                            allProperties: Object.keys(toolCall)
-                        });
+                        // (tool call args debug logging removed)
 
                         aiLogger.logToolExecution({
                             toolName: toolCall.toolName,
@@ -1094,18 +1071,7 @@ IMPORTANT: Always use the querySqlite tool for data questions. Never promise to 
 
                 // Log tool results with detailed information
                 if (toolResults && toolResults.length > 0) {
-                    // Debug: Log the complete structure of toolResults
-                    console.log('🔍 [DEBUG] Complete toolResult structure:', JSON.stringify(toolResults, null, 2));
-
-                    console.log('🔧 [SERVER] Tool results:', toolResults.map(tr => ({
-                        toolCallId: tr.toolCallId,
-                        result: (tr as any).result,
-                        keys: Object.keys(tr),
-                        outputType: typeof (tr as any).result,
-                        outputValue: (tr as any).result,
-                        outputIsString: typeof (tr as any).result === 'string',
-                        fullObject: tr
-                    })));
+                    // (tool results debug logging removed)
 
                     // Log each tool result individually
                     for (const toolResult of toolResults) {
@@ -1127,12 +1093,7 @@ IMPORTANT: Always use the querySqlite tool for data questions. Never promise to 
                             (toolResult as any).error ||
                             false;
 
-                        console.log('🔍 [DEBUG] Tool result extraction:', {
-                            toolCallId: toolResult.toolCallId,
-                            result: result,
-                            isError: isError,
-                            allProperties: Object.keys(toolResult)
-                        });
+                        // (tool result extraction debug logging removed)
 
                         aiLogger.logToolExecution({
                             toolName: correspondingCall?.toolName || 'unknown',
@@ -1204,16 +1165,7 @@ IMPORTANT: Always use the querySqlite tool for data questions. Never promise to 
                     userPrompt = 'Continuation';
                 }
 
-                console.log('🔍 [DEBUG] User prompt extraction:', {
-                    messagesCount: messages.length,
-                    lastUserMessage: lastUserMessage ? {
-                        role: lastUserMessage.role,
-                        contentType: typeof lastUserMessage.content,
-                        contentIsArray: Array.isArray(lastUserMessage.content),
-                        content: lastUserMessage.content
-                    } : null,
-                    extractedPrompt: userPrompt
-                });
+                // (user prompt extraction debug logging removed)
 
                 aiLogger.logConversationTurn({
                     sessionId: clientId,
@@ -1247,16 +1199,20 @@ IMPORTANT: Always use the querySqlite tool for data questions. Never promise to 
 
                 // With maxSteps enabled, the AI will automatically continue after tool execution
                 // No need to warn about incomplete responses - this is expected behavior
-                if (toolResults && toolResults.length > 0 && (!text || text.trim() === '')) {
-                    console.log('🔧 [SERVER] Tool executed, AI will continue in next step (maxSteps enabled)');
-                }
+                // (continuation notice removed)
             }
         });
 
         // Track conversation completion and return response
-        // AI SDK v5: Return the stream response without modifications
+        // AI SDK v5: Return the stream response, appending verification cookie if applicable
         // The messages are already in correct chronological order
-        return result.toUIMessageStreamResponse();
+        const resp = result.toUIMessageStreamResponse();
+        if (setVerificationCookie) {
+            try {
+                resp.headers.append('Set-Cookie', setVerificationCookie);
+            } catch { }
+        }
+        return resp;
     } catch (error) {
         console.error("Chat API error:", error);
         return new Response(

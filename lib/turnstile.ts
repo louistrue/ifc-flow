@@ -46,10 +46,16 @@ declare global {
 // Get appropriate keys based on environment
 function getTurnstileKeys() {
     const isLocalhost = typeof window !== 'undefined'
-        ? window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+        ? (window.location.hostname === 'localhost' ||
+            window.location.hostname === '127.0.0.1' ||
+            window.location.hostname === '0.0.0.0')
         : process.env.NODE_ENV === 'development';
 
-    if (isLocalhost) {
+    // Optional env override to force test keys in non-production builds
+    const forceTestKeys = (process.env.NEXT_PUBLIC_TURNSTILE_USE_TEST_KEYS === 'true' || process.env.TURNSTILE_USE_TEST_KEYS === 'true')
+        && process.env.NODE_ENV !== 'production';
+
+    if (isLocalhost || forceTestKeys) {
         // Use Cloudflare test keys for localhost development
         return {
             sitekey: '1x00000000000000000000AA', // Always passes

@@ -411,7 +411,7 @@ const loadModelListFromEnv = (): UiModelOption[] => {
     });
     return models.length > 0 ? models : defaultModels;
   } catch (e) {
-    console.warn('Failed to parse MODEL_LIST env var. Using defaults.', e);
+    // Using default model list due to parse failure
     return defaultModels;
   }
 };
@@ -470,7 +470,7 @@ export const AiNode = memo(({ data, id, selected, isConnectable }: NodeProps<AiN
       }
 
       await navigator.clipboard.writeText(textToCopy);
-      console.log('Message copied to clipboard');
+      // Message copied to clipboard
     } catch (error) {
       console.error('Failed to copy message:', error);
     }
@@ -536,7 +536,7 @@ export const AiNode = memo(({ data, id, selected, isConnectable }: NodeProps<AiN
       const targetNode = nodes.find(n => n.id === edge.target);
 
       if (targetNode) {
-        console.log(`📤 Propagating data to ${targetNode.type} node ${targetNode.id}`, data);
+        // Propagating data downstream
 
         // Update the target node's inputData with raw data
         // Use immediate update to avoid race conditions
@@ -552,7 +552,7 @@ export const AiNode = memo(({ data, id, selected, isConnectable }: NodeProps<AiN
                   ...(targetNode.type === 'aiNode' && data.model ? { model: data.model } : {})
                 }
               };
-              console.log(`Updated ${n.type} node ${n.id} with full data`);
+              // Updated node with full data
               return updatedNode;
             }
             return n;
@@ -578,11 +578,7 @@ export const AiNode = memo(({ data, id, selected, isConnectable }: NodeProps<AiN
       const targetNode = nodes.find(n => n.id === edge.target);
 
       if (targetNode) {
-        console.log(`📤 Propagating structured tool results to ${targetNode.type} node ${targetNode.id}`, {
-          targetId: targetNode.id,
-          targetType: targetNode.type,
-          toolResultsPreview: toolResults.slice(0, 2)
-        });
+        // Propagating structured tool results downstream
 
         // Format the tool results based on target node type
         let formattedData: any;
@@ -639,18 +635,9 @@ export const AiNode = memo(({ data, id, selected, isConnectable }: NodeProps<AiN
         }
 
         if (targetNode.type === 'watchNode') {
-          console.log('📦 Formatted data for watch node:', {
-            type: formattedData?.type,
-            rows: Array.isArray(formattedData?.value) ? formattedData.value.length : (formattedData?.value?.rowCount || 0),
-            sample: Array.isArray(formattedData?.value) ? formattedData.value.slice(0, 2) : formattedData?.value
-          });
+          // Formatted data for watch node
         } else {
-          console.log(`📊 Sending structured data to ${targetNode.type}:`, {
-            nodeId: targetNode.id,
-            dataType: formattedData.type,
-            hasItems: !!formattedData.items,
-            itemCount: formattedData.items?.length || formattedData.count || 0
-          });
+          // Sending structured data to target
         }
 
         // Update the target node's inputData with structured data
@@ -664,7 +651,7 @@ export const AiNode = memo(({ data, id, selected, isConnectable }: NodeProps<AiN
                   inputData: formattedData
                 }
               };
-              console.log(`✅ Updated ${n.type} node ${n.id} with structured data`);
+              // Updated node with structured data
               return updatedNode;
             }
             return n;
@@ -1333,14 +1320,10 @@ export const AiNode = memo(({ data, id, selected, isConnectable }: NodeProps<AiN
         const currentTurnstileToken = turnstileTokenRef.current;
         const currentIsNodeVerified = isNodeVerifiedRef.current; // Use ref value
 
-        // Only send token for the first verification, then rely on session
-        const shouldSendToken = currentTurnstileToken && !currentIsNodeVerified;
+        // Send token if we have one and haven't established a session yet
+        const shouldSendToken = currentTurnstileToken && currentTurnstileToken !== 'used';
 
-        console.log('🚀 Transport sending request with:', {
-          hasTurnstileToken: !!shouldSendToken,
-          tokenPreview: shouldSendToken ? currentTurnstileToken.substring(0, 20) + '...' : 'verified-session',
-          isNodeVerified: currentIsNodeVerified
-        });
+        // Sending request
 
         return {
           model: currentSelectedModel,
@@ -1363,7 +1346,7 @@ export const AiNode = memo(({ data, id, selected, isConnectable }: NodeProps<AiN
   // Auto-render invisible Turnstile on component mount (one-time only)
   useEffect(() => {
     if (sitekey && !isNodeVerified && !showTurnstile) {
-      console.log('🔒 Auto-rendering invisible Turnstile for one-time verification');
+      // Auto-rendering invisible Turnstile
       setShowTurnstile(true);
     }
   }, []); // Empty deps - only run once on mount
@@ -1371,23 +1354,19 @@ export const AiNode = memo(({ data, id, selected, isConnectable }: NodeProps<AiN
   // Handle Turnstile verification success (one-time verification)
   useEffect(() => {
     if (isTurnstileVerified && turnstileToken && !isNodeVerified) {
-      console.log('✅ Turnstile verification successful - node permanently unlocked', {
-        tokenPreview: turnstileToken.substring(0, 20) + '...',
-        nodeId: id
-      });
+      // Turnstile verification successful
       setIsNodeVerified(true); // Mark this node as permanently verified
       setShowTurnstile(false);
       setRateLimitInfo(null);
 
-      // Clear the token after successful verification to prevent reuse
+      // Mark the token as used to prevent reuse, but keep it for the first request
       setTimeout(() => {
-        resetTurnstile(); // This will clear the token
-        turnstileTokenRef.current = null;
-        console.log('🧹 Cleared Turnstile token after successful verification');
-      }, 1000); // Small delay to ensure first request completes
+        turnstileTokenRef.current = 'used';
+        // Marked Turnstile token as used after successful verification
+      }, 2000); // Delay to ensure first request completes
 
       // Store verification in node data or session
-      console.log('🔓 AI Node verified - chat permanently enabled for this session');
+      // AI Node verified
     }
   }, [isTurnstileVerified, turnstileToken, isNodeVerified, id, resetTurnstile]);
 
@@ -1424,7 +1403,7 @@ export const AiNode = memo(({ data, id, selected, isConnectable }: NodeProps<AiN
 
       // Disable automatic sending - we handle continuation differently
       // to prevent multiple requests and stuttering
-      console.log('🔧 [AI-NODE] Auto-send check:', { hasToolResult, hasCompleteText, shouldSendAuto });
+      // Auto-send check
       return false; // Disabled to prevent duplicate requests
     },
     onError: (error) => {
@@ -1485,46 +1464,28 @@ export const AiNode = memo(({ data, id, selected, isConnectable }: NodeProps<AiN
       // Check if the message contains a client query request
       if (message.role === 'assistant' && Array.isArray((message as any).parts)) {
         const parts = (message as any).parts;
-        console.log('🔍 Checking message parts for client queries:', {
-          messageRole: message.role,
-          partsCount: parts.length,
-          partTypes: parts.map((p: any) => p.type)
-        });
+        // Checking message parts for client queries
 
         // Look for tool results that need client execution
         for (const part of parts) {
-          console.log('🔍 Examining part:', {
-            type: part.type,
-            hasResult: !!part.result,
-            hasOutput: !!part.output,
-            requiresClientExecution: part.result?.requiresClientExecution || part.output?.requiresClientExecution,
-            resultData: part.result,
-            outputData: part.output
-          });
+          // Examining part
 
           if ((part.type === 'tool-result' || part.type === 'tool-querySqlite') &&
             (part.result?.requiresClientExecution || part.output?.requiresClientExecution)) {
             const toolData = part.result || part.output;
             const { query, description } = toolData;
 
-            console.log('📱 Executing SQLite query on client:', { query, description });
+            // Executing SQLite query on client
 
             try {
               // Execute the query locally using the connected model
               const currentModel = getConnectedModelData();
-              console.log('🔍 Current model data:', {
-                hasModel: !!currentModel,
-                modelId: currentModel?.id,
-                modelName: currentModel?.name
-              });
+              // Current model data
 
               if (currentModel) {
                 const results = await querySqliteDatabase(currentModel, query);
 
-                console.log('✅ Client query successful:', {
-                  query,
-                  resultCount: Array.isArray(results) ? results.length : 0
-                });
+                // Client query successful
 
                 // Format the results
                 let formattedResult: any;
@@ -1671,7 +1632,7 @@ export const AiNode = memo(({ data, id, selected, isConnectable }: NodeProps<AiN
       // Handle continuation after tool execution
       // Only send continuation if we have tool results but no text response
       if (message.role === 'assistant' && hasToolResult && !hasCompleteText) {
-        console.log('🔄 Tool executed, checking if continuation needed...');
+        // Tool executed, checking if continuation needed
 
         // Check if this is a client query that needs to send results back
         const hasClientQuery = Array.isArray((message as any).parts) &&
@@ -1680,7 +1641,7 @@ export const AiNode = memo(({ data, id, selected, isConnectable }: NodeProps<AiN
           );
 
         if (hasClientQuery) {
-          console.log('📱 Client query detected - results will be sent automatically');
+          // Client query detected - results will be sent automatically
           // Client query execution will handle sending results back
           return;
         }
@@ -1693,7 +1654,7 @@ export const AiNode = memo(({ data, id, selected, isConnectable }: NodeProps<AiN
           sessionStorage.setItem(continuationKey, 'sent');
 
           setTimeout(() => {
-            console.log('📤 Sending continuation message');
+            // Sending continuation message
             sendMessage({ text: '' });
           }, 100);
         }
@@ -1956,10 +1917,10 @@ export const AiNode = memo(({ data, id, selected, isConnectable }: NodeProps<AiN
                     } as ToolResult
                   ]);
                 })
-                .catch((err) => console.warn('Follow-up GUID fetch failed:', err));
+                .catch((err) => { });
             }
           } catch (e) {
-            console.warn('Post-process dispatch failed:', e);
+            // Post-process dispatch failed
           }
         }
       }
@@ -2076,11 +2037,11 @@ export const AiNode = memo(({ data, id, selected, isConnectable }: NodeProps<AiN
   const sendModelDataDownstream = useCallback(() => {
     const currentModel = getConnectedModelData();
     if (!currentModel) {
-      console.log("No model data to send downstream");
+      // No model data to send downstream
       return;
     }
 
-    console.log(`📊 Sending full model data downstream: ${currentModel.totalElements} elements`);
+    // Sending full model data downstream
 
     // Create a comprehensive data package
     const dataPackage = {
@@ -2385,7 +2346,7 @@ export const AiNode = memo(({ data, id, selected, isConnectable }: NodeProps<AiN
               if (!chatIsLoading && input.trim()) {
                 // Double-check Turnstile verification before sending
                 if (isChatBlocked) {
-                  console.log('🚫 Blocking message - Turnstile not verified');
+                  // Blocking message - Turnstile not verified
                   return;
                 }
                 // Close model picker if it's open
