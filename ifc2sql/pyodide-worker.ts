@@ -110,9 +110,26 @@ print("Installing lark dependency...")
 await micropip.install('lark')
 print("Lark installed successfully")
 
-print("Installing IfcOpenShell wheel...")
-await micropip.install('https://cdn.jsdelivr.net/gh/IfcOpenShell/wasm-wheels@33b437e5fd5425e606f34aff602c42034ff5e6dc/ifcopenshell-0.8.1+latest-cp312-cp312-emscripten_3_1_58_wasm32.whl')
-print("IfcOpenShell installed successfully")
+print("Installing IfcOpenShell wheel (try newest, then fallback)...")
+wheel_urls = [
+    'https://cdn.jsdelivr.net/gh/IfcOpenShell/wasm-wheels@main/ifcopenshell-0.8.3+34a1bc6-cp313-cp313-emscripten_4_0_9_wasm32.whl',
+    'https://cdn.jsdelivr.net/gh/IfcOpenShell/wasm-wheels@33b437e5fd5425e606f34aff602c42034ff5e6dc/ifcopenshell-0.8.1+latest-cp312-cp312-emscripten_3_1_58_wasm32.whl'
+]
+last_exc = None
+installed = False
+for url in wheel_urls:
+    try:
+        print(f"Attempting IfcOpenShell install: {url}")
+        await micropip.install(url, keep_going=True)
+        import ifcopenshell
+        print('IfcOpenShell import OK:', getattr(ifcopenshell, 'version', 'unknown'))
+        installed = True
+        break
+    except Exception as e:
+        last_exc = e
+        print(f"Install/import failed for {url}: {e}")
+if not installed:
+    raise last_exc or RuntimeError('Failed to install IfcOpenShell')
 
 print("Installing ifcpatch dependency...")
 try:

@@ -188,18 +188,38 @@ async function initPyodide() {
       WheelInfo.check_compatible = lambda self: None
     `);
 
-    // Install IfcOpenShell 0.8.1
+    // Install IfcOpenShell (try newest first, fallback to known-good)
     self.postMessage({
       type: "progress",
-      message: "Installing IfcOpenShell 0.8.1...",
+      message: "Installing IfcOpenShell...",
       percentage: 50,
     });
 
     await pyodide.runPythonAsync(`
-      import micropip
+      import micropip, importlib
       # Install lark for stream support
       await micropip.install('lark')
-      await micropip.install('https://cdn.jsdelivr.net/gh/IfcOpenShell/wasm-wheels@33b437e5fd5425e606f34aff602c42034ff5e6dc/ifcopenshell-0.8.1+latest-cp312-cp312-emscripten_3_1_58_wasm32.whl')
+
+      wheel_urls = [
+          'https://cdn.jsdelivr.net/gh/IfcOpenShell/wasm-wheels@main/ifcopenshell-0.8.3+34a1bc6-cp313-cp313-emscripten_4_0_9_wasm32.whl',
+          'https://cdn.jsdelivr.net/gh/IfcOpenShell/wasm-wheels@33b437e5fd5425e606f34aff602c42034ff5e6dc/ifcopenshell-0.8.1+latest-cp312-cp312-emscripten_3_1_58_wasm32.whl'
+      ]
+      last_exc = None
+      installed = False
+      for url in wheel_urls:
+          try:
+              print(f"Attempting IfcOpenShell install: {url}")
+              await micropip.install(url, keep_going=True)
+              # Verify import works
+              import ifcopenshell
+              print('IfcOpenShell import OK:', getattr(ifcopenshell, 'version', 'unknown'))
+              installed = True
+              break
+          except Exception as e:
+              last_exc = e
+              print(f"Install/import failed for {url}: {e}")
+      if not installed:
+          raise last_exc or RuntimeError('Failed to install IfcOpenShell')
     `);
 
     // Try to enable Python sqlite3 for ifcopenshell.sql usage (if available)
@@ -807,7 +827,7 @@ async function handleExtractData({ types = ["IfcWall"], messageId }) {
     // Add error handling for Python execution
     try {
       console.log(
-        "handleExtractData: Running Python to extract elements using IfcOpenShell 0.8.1"
+        "handleExtractData: Running Python to extract elements using IfcOpenShell"
       );
 
       // Create a dedicated namespace for this operation

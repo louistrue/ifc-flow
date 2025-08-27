@@ -54,7 +54,7 @@ IFC Flow Map provides a graphical interface for viewing, filtering, transforming
 - ⌨️ **Keyboard Shortcuts** - Efficient workflow creation with keyboard shortcuts
 - 🔄 **Advanced Property Handling** - Get, set, add, and remove properties in IFC elements
 - 📤 **IFC Export** - Export modified IFC files with your property changes
-- 🧰 **IfcOpenShell Integration** - Leverage IfcOpenShell 0.8.1 for reliable IFC processing
+- 🧰 **IfcOpenShell Integration** - Leverage latest IfcOpenShell WASM wheels for reliable IFC processing
 
 ## 🚀 Getting Started
 
@@ -92,7 +92,7 @@ Open [http://localhost:3000](http://localhost:3000) with your browser to see the
 ## 📚 Technical Details
 
 - **Web-Based Processing** - All IFC processing happens client-side using WebAssembly
-- **IfcOpenShell Integration** - Uses IfcOpenShell 0.8.1 via Pyodide for robust IFC handling
+- **IfcOpenShell Integration** - Uses the latest available IfcOpenShell WASM via Pyodide (with fallback)
 - **Property Management** - Comprehensive property handling across property sets (Psets) and quantities
 - **JSON-Based IFC Model** - Efficient conversion between IFC and JSON for manipulation
 
