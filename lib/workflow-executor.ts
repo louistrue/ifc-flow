@@ -425,6 +425,7 @@ export class WorkflowExecutor {
               // Get quantityType and groupBy from node properties with defaults
               const quantityType = node.data.properties?.quantityType || "area";
               const groupBy = node.data.properties?.groupBy || "none";
+              const ignoreUnknownRefs = node.data.properties?.ignoreUnknownRefs || false;
 
               // Store the current settings back to the node data to ensure they persist
               // This is the key fix - we persist these values by updating the node data
@@ -433,7 +434,8 @@ export class WorkflowExecutor {
                 properties: {
                   ...node.data.properties,
                   quantityType: quantityType,
-                  groupBy: groupBy
+                  groupBy: groupBy,
+                  ignoreUnknownRefs: ignoreUnknownRefs
                 }
               });
 
@@ -452,12 +454,14 @@ export class WorkflowExecutor {
                     properties: {
                       ...node.data.properties,
                       quantityType: quantityType,
-                      groupBy: groupBy
+                      groupBy: groupBy,
+                      ignoreUnknownRefs: ignoreUnknownRefs
                     }
                   });
                   console.log(`Stored messageId ${messageId} for quantity node ${nodeId}`);
-                }
+                },
                 // ---------------------------------------------------------
+                ignoreUnknownRefs // Pass the ignore unknown references option
               );
 
               // Add the groupBy property to the result

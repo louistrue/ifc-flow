@@ -8,6 +8,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Button } from "@/components/ui/button";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 
 type QuantityType = NonNullable<QuantityNodeData['properties']>['quantityType'];
 type GroupByType = NonNullable<QuantityNodeData['properties']>['groupBy'];
@@ -16,11 +17,13 @@ export const QuantityNode = memo(({ data, id, isConnectable, selected }: NodePro
   // Local state for the properties while the popover is open
   const [localQuantityType, setLocalQuantityType] = useState<QuantityType>(data.properties?.quantityType || "area");
   const [localGroupBy, setLocalGroupBy] = useState<GroupByType>(data.properties?.groupBy || "none");
+  const [localIgnoreUnknownRefs, setLocalIgnoreUnknownRefs] = useState<boolean>(data.properties?.ignoreUnknownRefs || false);
   const [isOpen, setIsOpen] = useState(false);
 
   // Get the current values from node data with defaults
   const quantityType = data.properties?.quantityType || "area";
   const groupBy = data.properties?.groupBy || "none";
+  const ignoreUnknownRefs = data.properties?.ignoreUnknownRefs || false;
 
   // Format the labels for display
   const quantityTypeLabel = {
@@ -32,10 +35,11 @@ export const QuantityNode = memo(({ data, id, isConnectable, selected }: NodePro
 
   const groupByLabel = {
     "none": "None",
-    "type": "By Class",
+    "class": "By Class",
+    "type": "By Type Name",
     "level": "By Level",
     "material": "By Material"
-  }[groupBy as 'none' | 'type' | 'level' | 'material'] || "None";
+  }[groupBy as 'none' | 'class' | 'type' | 'level' | 'material'] || "None";
 
   return (
     <div className={`bg-white dark:bg-gray-800 border-2 border-amber-500 dark:border-amber-400 rounded-md w-48 shadow-md ${selected ? 'ring-2 ring-amber-300' : ''
@@ -102,7 +106,7 @@ export const QuantityNode = memo(({ data, id, isConnectable, selected }: NodePro
               </PopoverTrigger>
             </div>
 
-            <PopoverContent className="w-44 p-2" align="end">
+            <PopoverContent className="w-56 p-2" align="end">
               <RadioGroup
                 defaultValue={groupBy}
                 onValueChange={(value) => {
@@ -119,20 +123,44 @@ export const QuantityNode = memo(({ data, id, isConnectable, selected }: NodePro
                   <Label htmlFor="none" className="text-xs cursor-pointer">None</Label>
                 </div>
                 <div className="flex items-center space-x-2 mb-1">
+                  <RadioGroupItem value="class" id="class" />
+                  <Label htmlFor="class" className="text-xs cursor-pointer">By Class</Label>
+                </div>
+                <div className="flex items-center space-x-2 mb-1">
                   <RadioGroupItem value="type" id="type" />
-                  <Label htmlFor="type" className="text-xs cursor-pointer">By Class</Label>
+                  <Label htmlFor="type" className="text-xs cursor-pointer">By Type Name</Label>
                 </div>
                 <div className="flex items-center space-x-2 mb-1">
                   <RadioGroupItem value="level" id="level" />
                   <Label htmlFor="level" className="text-xs cursor-pointer">By Level</Label>
                 </div>
-                <div className="flex items-center space-x-2">
+                <div className="flex items-center space-x-2 mb-1">
                   <RadioGroupItem value="material" id="material" />
                   <Label htmlFor="material" className="text-xs cursor-pointer">By Material</Label>
                 </div>
               </RadioGroup>
             </PopoverContent>
           </Popover>
+
+          {/* Ignore Unknown References Toggle */}
+          <div className="flex items-center justify-between">
+            <Label htmlFor="ignore-unknown-refs" className="text-xs cursor-pointer">
+              Ignore Unknown References
+            </Label>
+            <Switch
+              id="ignore-unknown-refs"
+              checked={ignoreUnknownRefs}
+              onCheckedChange={(checked) => {
+                setLocalIgnoreUnknownRefs(checked);
+                // Update node data directly
+                data.properties = {
+                  ...data.properties,
+                  ignoreUnknownRefs: checked
+                };
+              }}
+              className="scale-75"
+            />
+          </div>
 
           <div className="flex justify-between">
             <span>Unit:</span>

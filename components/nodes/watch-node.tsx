@@ -1259,9 +1259,10 @@ export const WatchNode = memo(
 
       // Get the groupBy type for display
       const groupByType = groupBy || 'none';
-      const groupByLabel = groupByType === 'type' ? 'By Class' :
-        groupByType === 'level' ? 'By Level' :
-          groupByType === 'material' ? 'By Material' : '';
+      const groupByLabel = groupByType === 'class' ? 'By Class' :
+        groupByType === 'type' ? 'By Type Name' :
+          groupByType === 'level' ? 'By Level' :
+            groupByType === 'material' ? 'By Material' : '';
 
       // Format data for pie chart
       const pieData = groupEntries.map(([name, value], index) => ({
@@ -1470,7 +1471,7 @@ export const WatchNode = memo(
                 <div className="space-y-1">
                   {groupEntries.slice(0, 5).map(([key, value]: [string, unknown], i) => (
                     <div key={i} className="flex justify-between text-xs">
-                      <span>{key.replace('Ifc', '')}:</span>
+                      <span>{key}:</span>
                       <span className="font-medium">{value} {unit === 'count' ? '' : unit}</span>
                     </div>
                   ))}

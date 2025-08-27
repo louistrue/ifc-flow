@@ -541,7 +541,8 @@ export async function querySqliteDatabase(
         messageId,
         data: {
           query,
-          modelId: model.id,
+          // Use filename-based keying to match persistence keys in the worker
+          modelId: model.name,
         },
       });
 
@@ -608,6 +609,7 @@ export async function warmupSqliteDatabase(model: IfcModel): Promise<{ tableCoun
       ifcWorker!.postMessage({
         action: "warmSqlite",
         messageId,
+        // Pass filename-based modelKey to align with build/warm logic in the worker
         data: { modelKey: model.name }
       });
       setTimeout(() => {
@@ -615,7 +617,7 @@ export async function warmupSqliteDatabase(model: IfcModel): Promise<{ tableCoun
           reject(new Error("SQLite warm-up timed out"));
           workerPromiseResolvers.delete(messageId);
         }
-      }, 20000);
+      }, 120000);
     });
 
     sqliteWarmStatus.set(model.id, 'ready');
@@ -938,7 +940,9 @@ export async function extractQuantities(
   // unit parameter is removed, worker will determine it
   onProgress?: (progress: number, message?: string) => void,
   // ADDED: Callback to update the node with the messageId
-  updateNodeCallback?: (messageId: string) => void
+  updateNodeCallback?: (messageId: string) => void,
+  // Option to ignore unknown references when grouping
+  ignoreUnknownRefs = false
 ): Promise<QuantityResults> {
   console.log("Requesting quantity extraction from worker:", quantityType, groupBy, model.name);
 
@@ -951,7 +955,18 @@ export async function extractQuantities(
     return { groups: { Total: 0 }, unit: "", total: 0 };
   }
 
-  // Ensure worker is initialized
+  // Try fast path: client-side SQL using the comprehensive SQLite DB
+  try {
+    const sqlBased = await computeQuantitiesFromSql(model, quantityType, groupBy, ignoreUnknownRefs);
+    if (sqlBased) {
+      console.log("Using SQL-based quantity results");
+      return sqlBased;
+    }
+  } catch (e) {
+    console.warn("SQL-based quantity computation failed; falling back to worker path", e);
+  }
+
+  // Ensure worker is initialized (fallback path)
   await initializeWorker();
   if (!ifcWorker) {
     throw new Error("IFC worker is not available for quantity extraction");
@@ -1018,7 +1033,7 @@ export async function extractQuantities(
           workerPromiseResolvers.delete(messageId);
           if (onProgress) ifcWorker!.removeEventListener("message", progressHandler);
         }
-      }, 60000); // 60 second timeout
+      }, 240000); // 4 minute timeout for large models
 
       // Define cleanup actions
       const cleanup = () => {
@@ -1073,6 +1088,224 @@ export async function extractQuantities(
       `Quantity extraction failed: ${error instanceof Error ? error.message : String(error)}`
     );
   }
+}
+
+// Infer a display unit for the given quantity type
+function inferQuantityUnit(quantityType: string): string {
+  switch (String(quantityType).toLowerCase()) {
+    case "length":
+      return "m";
+    case "area":
+      return "m²";
+    case "volume":
+      return "m³";
+    case "count":
+    default:
+      return "";
+  }
+}
+
+// Build a prioritized CTE for BaseQuantities selection per element
+function buildQuantityCte(quantityType: string, selectedIds?: number[]): { cte: string; filterClause: string } {
+  const qt = String(quantityType).toLowerCase();
+  let triples: Array<{ name: string; pr: number }> = [];
+  if (qt === "area") {
+    triples = [
+      { name: "NetArea", pr: 1 },
+      { name: "GrossArea", pr: 2 },
+      { name: "Area", pr: 3 },
+    ];
+  } else if (qt === "volume") {
+    triples = [
+      { name: "NetVolume", pr: 1 },
+      { name: "GrossVolume", pr: 2 },
+      { name: "Volume", pr: 3 },
+    ];
+  } else if (qt === "length") {
+    triples = [
+      { name: "Length", pr: 1 },
+    ];
+  }
+
+  // Optional filter for selected element ids
+  const idFilter = (selectedIds && selectedIds.length)
+    ? ` AND p.ifc_id IN (${selectedIds.join(",")})`
+    : "";
+
+  const unionParts = triples.map(t =>
+    `SELECT p.ifc_id, CAST(p.value AS REAL) AS v, ${t.pr} AS pr\n` +
+    `FROM psets p\n` +
+    `WHERE p.pset_name = 'BaseQuantities' AND p.name = '${t.name}'${idFilter}`
+  );
+
+  const cte = `WITH q AS (\n${unionParts.join("\nUNION ALL\n")}\n),\nminpr AS (\n  SELECT ifc_id, MIN(pr) AS min_pr FROM q GROUP BY ifc_id\n),\nbest AS (\n  SELECT q.ifc_id, q.v\n  FROM q JOIN minpr ON q.ifc_id = minpr.ifc_id AND q.pr = minpr.min_pr\n)`;
+
+  return { cte, filterClause: idFilter };
+}
+
+// Compute quantities via client-side SQL (sql.js) if available
+async function computeQuantitiesFromSql(
+  model: IfcModel,
+  quantityType: string,
+  groupBy: string,
+  ignoreUnknownRefs: boolean = false
+): Promise<QuantityResults | null> {
+  // Ensure DB is available (non-throw warmup)
+  try { await warmupSqliteDatabase(model); } catch { /* ignore */ }
+
+  // Derive selected element ids from the model if present
+  const selectedIds: number[] | undefined = Array.isArray(model?.elements)
+    ? model.elements.map(e => e.expressId).filter((v) => Number.isFinite(v)) as number[]
+    : undefined;
+
+  const unit = inferQuantityUnit(quantityType);
+  const gb = String(groupBy).toLowerCase();
+  const qt = String(quantityType).toLowerCase();
+
+  // Count can be handled directly via id_map
+  if (qt === "count") {
+    if (gb === "none") {
+      let where = "";
+      if (selectedIds && selectedIds.length) where = ` WHERE ifc_id IN (${selectedIds.join(',')})`;
+      const rows = await querySqliteDatabase(model, `SELECT COUNT(*) AS total FROM id_map${where}`);
+      const total = Number(rows?.[0]?.total || rows?.[0]?.['COUNT(*)'] || 0);
+      return { groups: { Total: total }, unit: "", total };
+    }
+    if (gb === "class") {
+      let where = "";
+      if (selectedIds && selectedIds.length) where = ` WHERE m.ifc_id IN (${selectedIds.join(',')})`;
+      const rows = await querySqliteDatabase(model, `SELECT m.ifc_class AS groupKey, COUNT(*) AS total FROM id_map m${where} GROUP BY m.ifc_class ORDER BY total DESC`);
+      const groups: Record<string, number> = {};
+      let total = 0;
+      for (const r of rows || []) {
+        const key = r.groupKey || r.ifc_class || "Unknown";
+        const val = Number(r.total || r.count || 0);
+        if (!Number.isFinite(val)) continue;
+
+        // Skip unknown entries if ignoreUnknownRefs is enabled
+        if (ignoreUnknownRefs && (key === "Unknown" || key === "")) {
+          continue;
+        }
+
+        groups[key] = val;
+        total += val;
+      }
+      return { groups, unit: "", total };
+    }
+    // For other groupings (level/material) not yet supported via SQL reliably
+    return null;
+  }
+
+  // Preferred: derive from IfcQuantity tables via inverses to ElementQuantity and RelDefines
+  // JSON1 path
+  const json1Test = await querySqliteDatabase(model, `SELECT json_extract('{"a":1}', '$.a') AS v`)
+    .then(rows => (Array.isArray(rows) && rows.length > 0 && rows[0].v === 1))
+    .catch(() => false);
+
+  if (json1Test) {
+    const qv = `SELECT inv.value AS ElementQuantityId, CAST(v.VolumeValue AS REAL) AS v, v.Name AS qname, v.Unit AS unit FROM IfcQuantityVolume v JOIN json_each(v.inverses) inv`;
+    const qa = `SELECT inv.value AS ElementQuantityId, CAST(a.AreaValue AS REAL) AS v, a.Name AS qname, a.Unit AS unit FROM IfcQuantityArea a JOIN json_each(a.inverses) inv`;
+    const ql = `SELECT inv.value AS ElementQuantityId, CAST(l.LengthValue AS REAL) AS v, l.Name AS qname, l.Unit AS unit FROM IfcQuantityLength l JOIN json_each(l.inverses) inv`;
+    const allq = `WITH ALLQ AS ( ${qv} UNION ALL ${qa} UNION ALL ${ql} ), E2Q AS ( SELECT ro.value AS element_id, r.RelatingPropertyDefinition AS ElementQuantityId FROM IfcRelDefinesByProperties r, json_each(r.RelatedObjects) ro )`;
+
+    // Optional filter on selected ids
+    const idFilter = (selectedIds && selectedIds.length) ? ` WHERE e.element_id IN (${selectedIds.join(',')})` : '';
+
+    if (gb === 'none') {
+      const sql = `${allq} SELECT SUM(q.v) AS total FROM E2Q e JOIN ALLQ q ON e.ElementQuantityId = q.ElementQuantityId${idFilter}`;
+      const rows = await querySqliteDatabase(model, sql);
+      const total = Number(rows?.[0]?.total || 0);
+      return { groups: { Total: total }, unit, total };
+    }
+
+    if (gb === 'class') {
+      const sql = `${allq} SELECT m.ifc_class AS groupKey, SUM(q.v) AS total FROM E2Q e JOIN ALLQ q ON e.ElementQuantityId = q.ElementQuantityId JOIN id_map m ON e.element_id = m.ifc_id${idFilter} GROUP BY m.ifc_class ORDER BY total DESC`;
+      const rows = await querySqliteDatabase(model, sql);
+      const groups: Record<string, number> = {}; let total = 0;
+      for (const r of rows || []) {
+        const key = r.groupKey || r.ifc_class || 'Unknown';
+        const val = Number(r.total || 0);
+        if (!Number.isFinite(val)) continue;
+
+        // Skip unknown entries if ignoreUnknownRefs is enabled
+        if (ignoreUnknownRefs && (key === 'Unknown' || key === '')) {
+          continue;
+        }
+
+        groups[key] = val;
+        total += val;
+      }
+      return { groups, unit, total };
+    }
+
+    if (gb === 'type') {
+      // Group by IfcTypeObject Name via IfcRelDefinesByType mapping
+      // First, get all available tables to avoid querying non-existent ones
+      const allTablesRows = await querySqliteDatabase(model, "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '%Type'");
+      const availableTypeTables = allTablesRows?.map(r => r.name).filter(name => name && name.endsWith('Type')) || [];
+
+      if (availableTypeTables.length === 0) {
+        // Fallback to class grouping if no type tables exist
+        console.log("No type tables found, falling back to class grouping");
+        const sql = `${allq} SELECT m.ifc_class AS groupKey, SUM(q.v) AS total FROM E2Q e JOIN ALLQ q ON e.ElementQuantityId = q.ElementQuantityId JOIN id_map m ON e.element_id = m.ifc_id${idFilter} GROUP BY m.ifc_class ORDER BY total DESC`;
+        const rows = await querySqliteDatabase(model, sql);
+        const groups: Record<string, number> = {}; let total = 0;
+        for (const r of rows || []) { const key = r.groupKey || r.ifc_class || 'Unknown'; const val = Number(r.total || 0); if (!Number.isFinite(val)) continue; groups[key] = val; total += val; }
+        return { groups, unit, total };
+      }
+
+      const unionT = availableTypeTables.map(t => `SELECT ifc_id AS type_id, Name AS type_name FROM ${t}`).join('\nUNION ALL\n');
+      const sql = `${allq}\n, R AS (\n  SELECT r.RelatingType AS type_id, ro.value AS element_id FROM IfcRelDefinesByType r, json_each(r.RelatedObjects) ro\n),\nT AS (\n${unionT}\n)\nSELECT COALESCE(T.type_name, 'Unknown Type') AS groupKey, SUM(q.v) AS total\nFROM E2Q e\nJOIN ALLQ q ON e.ElementQuantityId = q.ElementQuantityId\nLEFT JOIN R ON e.element_id = R.element_id\nLEFT JOIN T ON R.type_id = T.type_id${idFilter}\nGROUP BY groupKey\nORDER BY total DESC`;
+      const rows = await querySqliteDatabase(model, sql);
+      const groups: Record<string, number> = {}; let total = 0;
+      for (const r of rows || []) {
+        const key = (r.groupKey && String(r.groupKey).trim()) || 'Unknown Type';
+        const val = Number(r.total || 0);
+        if (!Number.isFinite(val)) continue;
+
+        // Skip "Unknown Type" entries if ignoreUnknownRefs is enabled
+        if (ignoreUnknownRefs && key === 'Unknown Type') {
+          continue;
+        }
+
+        groups[key] = (groups[key] || 0) + val;
+        total += val;
+      }
+      return { groups, unit, total };
+    }
+  }
+
+  // Fallback to BaseQuantities psets prioritization if JSON1 not available
+  const { cte } = buildQuantityCte(qt, selectedIds);
+  if (gb === 'none') {
+    const rows = await querySqliteDatabase(model, `${cte}\nSELECT SUM(best.v) AS total FROM best`);
+    const total = Number(rows?.[0]?.total || 0);
+    return { groups: { Total: total }, unit, total };
+  }
+  if (gb === 'class') {
+    const rows = await querySqliteDatabase(model, `${cte}\nSELECT m.ifc_class AS groupKey, SUM(best.v) AS total FROM best JOIN id_map m ON best.ifc_id = m.ifc_id GROUP BY m.ifc_class ORDER BY total DESC`);
+    const groups: Record<string, number> = {}; let total = 0;
+    for (const r of rows || []) {
+      const key = r.groupKey || r.ifc_class || 'Unknown';
+      const val = Number(r.total || 0);
+      if (!Number.isFinite(val)) continue;
+
+      // Skip unknown entries if ignoreUnknownRefs is enabled
+      if (ignoreUnknownRefs && (key === 'Unknown' || key === '')) {
+        continue;
+      }
+
+      groups[key] = val;
+      total += val;
+    }
+    return { groups, unit, total };
+  }
+  if (gb === 'type') {
+    // Without JSON1 and unified view, deriving ObjectType generically is unreliable; fall back
+    return null;
+  }
+  // Level and material groupings require additional relations; not implemented here
+  return null;
 }
 
 // Function to manage properties on elements
@@ -1866,7 +2099,21 @@ export async function exportData(
   if (Array.isArray(input)) {
     rows = input;
   } else if (input && typeof input === "object") {
-    if (Array.isArray(input.elements)) {
+    // Special handling for quantity results
+    if ((input.type === "quantityResults" && input.value && input.value.groups) ||
+      (input.groups && input.unit !== undefined && input.total !== undefined)) {
+      // Handle both wrapped quantity results (from watch node) and raw quantity results (from quantity node)
+      const quantityData = input.type === "quantityResults" ? input.value : input;
+      const { groups, unit, total, groupBy } = quantityData;
+      // Convert groups object into individual rows
+      rows = Object.entries(groups).map(([groupName, groupValue]) => ({
+        group: groupName,
+        value: groupValue,
+        unit: unit || '',
+        total: total || 0,
+        groupBy: groupBy || ''
+      }));
+    } else if (Array.isArray(input.elements)) {
       rows = input.elements;
     } else {
       rows = [input];

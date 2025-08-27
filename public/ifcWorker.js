@@ -622,13 +622,13 @@ async function handleLoadIfc({ arrayBuffer, filename, messageId }) {
                               file=ifc_file,
                               sql_type="SQLite",
                               database=sqlite_db_path,
-                              full_schema=True,   # Create all IFC class tables for comprehensive database
+                              full_schema=True,
                               is_strict=False,
                               should_expand=False,
                               should_get_inverses=True,
                               should_get_psets=True,
-                              should_get_geometry=False,   # Skip geometry processing (Pyodide limitation)
-                              should_skip_geometry_data=False  # Include geometry representation tables (but not processed geometry)
+                              should_get_geometry=False,
+                              should_skip_geometry_data=False
                           )
                           patcher.patch()
                           sqlite_success = os.path.exists(sqlite_db_path)
@@ -2540,8 +2540,9 @@ async function handleSqliteQuery({ query, modelId, messageId }) {
       console.warn("handleSqliteQuery: Could not list tables:", debugError.message);
     }
     // Normalize or synthesize SQL if a natural language prompt was provided
+    // Permit standard SELECT queries and CTEs that start with WITH
     let rewritten = String(query || '').trim();
-    if (!/^select\b/i.test(rewritten)) {
+    if (!/^(with|select)\b/i.test(rewritten)) {
       const nl = rewritten.toLowerCase();
       // Heuristics
       const wantCount = /\bcount\b|how many|number of/.test(nl);
@@ -2594,34 +2595,48 @@ async function handleSqliteQuery({ query, modelId, messageId }) {
     // Rewrite common aliases so prompts using IfcElement.* work
 
     // Column normalizations
-    rewritten = rewritten.replace(/\bIfcGuid\b/gi, 'GlobalId');
+    // Only perform heavy normalization if we generated a heuristic query above.
+    // Detect this based on whether the query begins with WITH/SELECT.
+    const isExplicitSql = /^(with|select)\b/i.test(rewritten);
+    if (isExplicitSql) {
+      // For explicit SQL (like CTEs used by our quantities), only trivial normalization.
+      rewritten = rewritten.replace(/\bIfcGuid\b/gi, 'GlobalId');
+    } else {
+      rewritten = rewritten.replace(/\bIfcGuid\b/gi, 'GlobalId');
+    }
 
     // Legacy table/alias prefixes from previous schemas → map to IfcElement view
-    rewritten = rewritten
-      .replace(/\bIfcBuildingElementElement\./gi, 'IfcElement.')
-      .replace(/\bIfcBuildingElement\./gi, 'IfcElement.')
-      .replace(/\bIfcObject\./gi, 'IfcElement.');
+    if (!isExplicitSql) {
+      rewritten = rewritten
+        .replace(/\bIfcBuildingElementElement\./gi, 'IfcElement.')
+        .replace(/\bIfcBuildingElement\./gi, 'IfcElement.')
+        .replace(/\bIfcObject\./gi, 'IfcElement.');
+    }
 
     // Table/view and type normalizations
 
-    rewritten = rewritten
-      .replace(/\bFROM\s+elements\s+AS\s+IfcElement\b/gi, 'FROM IfcElement AS IfcElement')
-      .replace(/\bFROM\s+elements\b/gi, 'FROM IfcElement')
-      .replace(/\bJOIN\s+elements\b/gi, 'JOIN IfcElement')
-      .replace(/\bIfcElement\.element_type\b/gi, 'IfcElement.type')
-      .replace(/\belement_type\b/gi, 'type')
-      .replace(/\bIfcType\b/gi, 'type');
+    if (!isExplicitSql) {
+      rewritten = rewritten
+        .replace(/\bFROM\s+elements\s+AS\s+IfcElement\b/gi, 'FROM IfcElement AS IfcElement')
+        .replace(/\bFROM\s+elements\b/gi, 'FROM IfcElement')
+        .replace(/\bJOIN\s+elements\b/gi, 'JOIN IfcElement')
+        .replace(/\bIfcElement\.element_type\b/gi, 'IfcElement.type')
+        .replace(/\belement_type\b/gi, 'type')
+        .replace(/\bIfcType\b/gi, 'type');
+    }
 
     // Normalize type comparisons when users use category names (Wall, Slab, ...)
     // type = 'Wall'  => category = 'Wall'
-    rewritten = rewritten.replace(/\btype\s*=\s*'([A-Za-z]+)'/gi, (m, val) => {
-      if (/^Ifc/i.test(val)) return m; // already full Ifc type
-      return `category='${val}'`;
-    });
-    // type IN ('Wall','Door') => category IN (...)
-    rewritten = rewritten.replace(/\btype\s+IN\s*\(([^\)]+)\)/gi, (m, list) => `category IN (${list})`);
-    // LOWER(type) = 'wall' => LOWER(category) = 'wall'
-    rewritten = rewritten.replace(/LOWER\(\s*type\s*\)/gi, 'LOWER(category)');
+    if (!isExplicitSql) {
+      rewritten = rewritten.replace(/\btype\s*=\s*'([A-Za-z]+)'/gi, (m, val) => {
+        if (/^Ifc/i.test(val)) return m; // already full Ifc type
+        return `category='${val}'`;
+      });
+      // type IN ('Wall','Door') => category IN (...)
+      rewritten = rewritten.replace(/\btype\s+IN\s*\(([^\)]+)\)/gi, (m, list) => `category IN (${list})`);
+      // LOWER(type) = 'wall' => LOWER(category) = 'wall'
+      rewritten = rewritten.replace(/LOWER\(\s*type\s*\)/gi, 'LOWER(category)');
+    }
     const result = sqliteDb.exec(rewritten);
     // sql.js returns an array of result sets; map first set to list of objects
     let rows = [];
@@ -2714,7 +2729,12 @@ async function handleWarmSqlite({ modelKey, messageId }) {
     let bytes = await idbGet(preferredKey);
     if (!bytes) {
       try { postSqliteStatus('building', modelKey, {}); } catch { }
-      await handleBuildSqlite({ modelKey, dbKey: ifcModelCache?.dbKey });
+      // Ensure model.ifc exists: if missing and we have a recent load buffer, skip build with explicit error
+      try {
+        await handleBuildSqlite({ modelKey, dbKey: ifcModelCache?.dbKey });
+      } catch (e) {
+        throw e;
+      }
       bytes = await idbGet(preferredKey);
     }
     if (!bytes) throw new Error("No SQLite bytes found in IndexedDB to load");
@@ -2798,7 +2818,16 @@ except Exception as e:
     self.postMessage({ type: "progress", message: "IFC parsed. Continuing processing...", percentage: 95, messageId });
     self.postMessage({ type: "loadComplete", messageId, ...result, sqlite_db: null, sqlite_success: false });
 
-    // Do not build SQL here. Build/warm is deferred to AI node connection.
+    // Background build of comprehensive SQLite for ALL models (non-blocking)
+    try { postSqliteStatus('building', result.model_id || result.filename, {}); } catch { }
+    setTimeout(async () => {
+      try {
+        await handleBuildSqlite({ modelKey: result.model_id || result.filename, dbKey });
+      } catch (e) {
+        console.error('Background SQLite build failed:', e);
+        try { postSqliteStatus('error', result.model_id || result.filename, { message: e.message }); } catch { }
+      }
+    }, 0);
   } catch (error) {
     console.error("handleLoadIfcFast error:", error);
     self.postMessage({ type: "error", message: `Error loading IFC (fast): ${error.message}`, messageId });

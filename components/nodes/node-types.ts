@@ -117,7 +117,8 @@ export interface PropertyNodeData extends BaseNodeData {
 export interface QuantityNodeData extends BaseNodeData {
     properties?: {
         quantityType?: 'area' | 'volume' | 'length' | 'count';
-        groupBy?: 'none' | 'type' | 'level' | 'material';
+        groupBy?: 'none' | 'class' | 'type' | 'level' | 'material';
+        ignoreUnknownRefs?: boolean;
         unit?: string;
         [key: string]: any;
     };
