@@ -89,6 +89,35 @@ async function idbDelete(key) {
   });
 }
 
+// Fast CRC32 implementation for Uint8Array
+function crc32(uint8) {
+  let crc = -1 >>> 0;
+  for (let i = 0; i < uint8.length; i++) {
+    crc = (crc ^ uint8[i]) >>> 0;
+    for (let j = 0; j < 8; j++) {
+      const mask = -(crc & 1);
+      crc = (crc >>> 1) ^ (0xEDB88320 & mask);
+    }
+  }
+  return (crc ^ (-1 >>> 0)) >>> 0;
+}
+
+function computeDbKeyFromBuffer(filename, arrayBuffer) {
+  try {
+    const u8 = new Uint8Array(arrayBuffer);
+    const size = u8.length >>> 0;
+    const slice = 16 * 1024 * 1024;
+    const first = u8.subarray(0, Math.min(slice, size));
+    const last = size > slice ? u8.subarray(size - slice, size) : first;
+    const c1 = crc32(first).toString(16);
+    const c2 = crc32(last).toString(16);
+    return `db:${size}-${c1}-${c2}`;
+  } catch {
+    // Fallback to filename-based key
+    return `db:${filename || 'default'}`;
+  }
+}
+
 // buildSqlJsDb function removed - we only use comprehensive database from ifc2sql
 
 // Clean up old fallback databases from IndexedDB
@@ -356,6 +385,14 @@ self.onmessage = async (event) => {
         await handleLoadIfc({ ...data, messageId });
         break;
 
+      case "loadIfcFast":
+        console.log("Starting to load IFC file (fast)...", {
+          filename: data.filename,
+          size: data.arrayBuffer.byteLength,
+        });
+        await handleLoadIfcFast({ ...data, messageId });
+        break;
+
       case "extractData":
         console.log("Starting to extract data...", { types: data.types });
         await handleExtractData({ ...data, messageId });
@@ -403,6 +440,16 @@ self.onmessage = async (event) => {
         await handleSqliteExport({ ...data, messageId });
         break;
 
+      case "warmSqlite":
+        console.log("Pre-warming SQLite (sql.js)...");
+        await handleWarmSqlite({ ...data, messageId });
+        break;
+
+      case "buildSqlite":
+        console.log("Building SQLite database in background...");
+        await handleBuildSqlite({ ...data, messageId });
+        break;
+
       default:
         throw new Error(`Unknown action: ${action}`);
     }
@@ -416,6 +463,15 @@ self.onmessage = async (event) => {
     });
   }
 };
+
+// Helper to post SQLite background build status to main thread
+function postSqliteStatus(status, modelKey, extra) {
+  try {
+    self.postMessage({ type: "sqliteStatus", status, modelKey, ...extra });
+  } catch (e) {
+    // ignore
+  }
+}
 
 // Handle loading an IFC file
 async function handleLoadIfc({ arrayBuffer, filename, messageId }) {
@@ -2643,6 +2699,193 @@ async function handleSqliteExport({ modelId, messageId }) {
       message: `Error exporting SQLite DB: ${error.message}`,
       messageId,
     });
+  }
+}
+
+// Warm sql.js by opening the persisted DB bytes
+async function handleWarmSqlite({ modelKey, messageId }) {
+  try {
+    await initSqlJsModule();
+    const key = currentSqlKey || (modelKey ? `model-sqlite-db:${modelKey}` : null);
+    if (!key) throw new Error("No SQLite database key available to warm");
+
+    const dbLoaded = await ensureDbLoaded(key);
+    if (!dbLoaded) throw new Error("No SQLite bytes found in IndexedDB to load");
+
+    let tableCount = 0;
+    try {
+      const res = sqliteDb.exec("SELECT name FROM sqlite_master WHERE type='table'");
+      tableCount = res.length > 0 ? (res[0].values?.length || 0) : 0;
+    } catch (e) { }
+
+    self.postMessage({ type: "sqliteWarmed", messageId, key, tableCount });
+  } catch (error) {
+    console.error("handleWarmSqlite error:", error);
+    self.postMessage({ type: "error", message: `Error warming SQLite: ${error.message}`, messageId });
+  }
+}
+
+// Fast path loader: parse IFC metadata and counts, then build SQLite in background
+async function handleLoadIfcFast({ arrayBuffer, filename, messageId }) {
+  try {
+    await initPyodide();
+
+    const uint8Array = new Uint8Array(arrayBuffer);
+    pyodide.FS.writeFile("model.ifc", uint8Array);
+
+    const ns = pyodide.globals.get("dict")();
+    await pyodide.runPythonAsync(
+      `
+import ifcopenshell, json
+try:
+  f = ifcopenshell.open('model.ifc')
+  schema = f.schema
+  projects = f.by_type('IfcProject')
+  project_info = None
+  if projects:
+    p = projects[0]
+    project_info = {
+      'GlobalId': getattr(p,'GlobalId', None),
+      'Name': getattr(p,'Name', None) or 'Unnamed Project',
+      'Description': getattr(p,'Description', None) or ''
+    }
+  counts = {}
+  for t in ["IfcWall","IfcSlab","IfcBeam","IfcColumn","IfcDoor","IfcWindow","IfcRoof","IfcStair","IfcFurnishingElement"]:
+    try:
+      counts[t] = len(f.by_type(t))
+    except Exception:
+      counts[t] = 0
+  result_obj = {
+    'filename': '${filename}',
+    'schema': schema,
+    'project': project_info,
+    'element_counts': counts,
+    'total_elements': sum(counts.values()),
+    'model_id': '${filename}'
+  }
+  result_json = json.dumps(result_obj)
+  success = True
+except Exception as e:
+  result_json = None
+  error_msg = str(e)
+  success = False
+      `,
+      { globals: ns }
+    );
+
+    const ok = ns.get("success");
+    if (!ok) {
+      const em = ns.get("error_msg") || "Unknown error";
+      throw new Error(String(em));
+    }
+    const result = JSON.parse(ns.get("result_json"));
+    ns.destroy();
+
+    const dbKey = computeDbKeyFromBuffer(result.model_id || result.filename, arrayBuffer);
+    ifcModelCache = { filename: result.filename, schema: result.schema, model_id: result.model_id, dbKey };
+
+    self.postMessage({ type: "progress", message: "IFC parsed. Continuing processing...", percentage: 95, messageId });
+    self.postMessage({ type: "loadComplete", messageId, ...result, sqlite_db: null, sqlite_success: false });
+  } catch (error) {
+    console.error("handleLoadIfcFast error:", error);
+    self.postMessage({ type: "error", message: `Error loading IFC (fast): ${error.message}`, messageId });
+  }
+}
+
+// Build comprehensive SQLite using Ifc2Sql
+async function handleBuildSqlite({ modelKey, dbKey, messageId }) {
+  try {
+    await initPyodide();
+    try { postSqliteStatus('building', modelKey, {}); } catch { }
+
+    const ns = pyodide.globals.get("dict")();
+    await pyodide.runPythonAsync(
+      `
+import os, sqlite3, json
+try:
+  from ifc2sql import Patcher
+except Exception:
+  Patcher = globals().get('Patcher', None)
+success = False
+db_path = '/model.db'
+try:
+  import ifcopenshell
+  if not os.path.exists('model.ifc'):
+    raise FileNotFoundError('model.ifc not found')
+  f = ifcopenshell.open('model.ifc')
+  if Patcher is None:
+    import ifcopenshell.ifcpatch
+    cfg = {
+      'input': 'model.ifc',
+      'file': None,
+      'recipe': 'Ifc2Sql',
+      'arguments': {
+        'sqlite_path': db_path,
+        'full_schema': True,
+        'should_get_psets': True,
+        'should_get_inverses': True,
+        'should_get_geometry': False,
+        'should_skip_geometry_data': True
+      }
+    }
+    ifcopenshell.ifcpatch.execute(cfg)
+    success = os.path.exists(db_path)
+  else:
+    if os.path.exists(db_path):
+      os.remove(db_path)
+    patcher = Patcher(
+      file=f,
+      sql_type='SQLite',
+      database=db_path,
+      full_schema=True,
+      is_strict=False,
+      should_expand=False,
+      should_get_inverses=True,
+      should_get_psets=True,
+      should_get_geometry=False,
+      should_skip_geometry_data=False
+    )
+    patcher.patch()
+    success = os.path.exists(db_path)
+  # Minimal metadata only; avoid per-table row counting/logging
+  table_count = 0
+  if success:
+    try:
+      conn = sqlite3.connect(db_path)
+      c = conn.cursor()
+      c.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table'")
+      table_count = int(c.fetchone()[0])
+      conn.close()
+    except Exception:
+      table_count = 0
+  result = json.dumps({'success': success, 'db_path': db_path, 'table_count': table_count})
+except Exception as e:
+  result = json.dumps({'success': False, 'error': str(e)})
+      `,
+      { globals: ns }
+    );
+    const pyRes = JSON.parse(ns.get("result"));
+    ns.destroy();
+    if (!pyRes.success) throw new Error(pyRes.error || 'SQLite build failed');
+
+    // If a duplicate exists under dbKey, skip storing/building
+    const dbBytes = pyodide.FS.readFile(pyRes.db_path);
+    const effectiveKey = dbKey || (ifcModelCache?.dbKey);
+    const key = effectiveKey || `model-sqlite-db:${modelKey || (ifcModelCache?.model_id || ifcModelCache?.filename || 'default')}`;
+    currentSqlKey = key;
+    try { await idbDelete(key); } catch { }
+    await idbPut(key, dbBytes);
+
+    // Defer sql.js warm-up; only persist now. AI node will warm on demand.
+
+    try { postSqliteStatus('ready', modelKey, { tableCount: pyRes.table_count }); } catch { }
+    self.postMessage({ type: 'sqliteBuilt', key, tableCount: pyRes.table_count, byteLength: dbBytes.length });
+  } catch (error) {
+    console.error('handleBuildSqlite error:', error);
+    try { postSqliteStatus('error', modelKey, { message: error.message }); } catch { }
+    if (messageId) {
+      self.postMessage({ type: 'error', message: `Error building SQLite: ${error.message}`, messageId });
+    }
   }
 }
 

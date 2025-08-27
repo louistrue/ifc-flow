@@ -133,6 +133,18 @@ const workerPromiseResolvers: Map<
 > = new Map();
 const workerMessageId = 0;
 
+// SQLite warm-up status and events
+type WarmStatus = 'idle' | 'warming' | 'ready' | 'error' | 'building';
+const sqliteWarmStatus = new Map<string, WarmStatus>();
+export function getSqliteWarmStatus(model: IfcModel): WarmStatus {
+  return sqliteWarmStatus.get(model.id) || 'idle';
+}
+function dispatchWarmStatus(modelId: string, status: WarmStatus, extra?: any) {
+  try {
+    window.dispatchEvent(new CustomEvent('sqlite:warm-status', { detail: { modelId, status, ...extra } }));
+  } catch { }
+}
+
 // Initialize the worker
 export async function initializeWorker(): Promise<void> {
   if (isWorkerInitialized) {
@@ -227,6 +239,26 @@ export async function initializeWorker(): Promise<void> {
           workerPromiseResolvers.get(messageId)!.resolve(data.bytes);
           workerPromiseResolvers.delete(messageId);
         }
+      } else if (type === "sqliteWarmed") {
+        if (messageId && workerPromiseResolvers.has(messageId)) {
+          workerPromiseResolvers.get(messageId)!.resolve({ key: data.key, tableCount: data.tableCount });
+          workerPromiseResolvers.delete(messageId);
+        }
+      } else if (type === "sqliteStatus") {
+        // Background status from worker: building/ready/error
+        const model = getLastLoadedModel();
+        if (model) {
+          if (data.status === 'ready') {
+            sqliteWarmStatus.set(model.id, 'ready');
+            dispatchWarmStatus(model.id, 'ready', { tableCount: data.tableCount });
+          } else if (data.status === 'building') {
+            sqliteWarmStatus.set(model.id, 'building');
+            dispatchWarmStatus(model.id, 'warming');
+          } else if (data.status === 'error') {
+            sqliteWarmStatus.set(model.id, 'error');
+            dispatchWarmStatus(model.id, 'error', { message: data.message });
+          }
+        }
       }
       // Progress messages don't resolve promises
     };
@@ -277,10 +309,15 @@ export async function loadIfcFile(
       throw new Error("IFC worker initialization failed");
     }
 
-    // Set up a progress handler for this operation
+    // Track progress only for the current load/extract message IDs
+    const allowedProgressIds = new Set<string>();
+    // Set up a progress handler for this operation (filters by messageId)
     const progressHandler = (event: MessageEvent) => {
-      if (event.data && event.data.type === "progress" && onProgress) {
-        onProgress(event.data.percentage, event.data.message);
+      const msg = event.data;
+      if (!msg || msg.type !== "progress" || !onProgress) return;
+      // Only forward progress for this load/extract flow
+      if (msg.messageId && allowedProgressIds.has(msg.messageId)) {
+        onProgress(msg.percentage, msg.message);
       }
     };
 
@@ -303,16 +340,17 @@ export async function loadIfcFile(
       .toString(36)
       .substr(2, 9)}`;
     console.log("Generated message ID for file load:", messageId);
+    allowedProgressIds.add(messageId);
 
     // Create a promise for this operation
-    console.log("Sending loadIfc message to worker");
+    console.log("Sending loadIfcFast message to worker");
     const result = await new Promise((resolve, reject) => {
       workerPromiseResolvers.set(messageId, { resolve, reject });
 
       // Send the message to the worker
       ifcWorker!.postMessage(
         {
-          action: "loadIfc",
+          action: "loadIfcFast",
           messageId,
           data: {
             arrayBuffer,
@@ -358,6 +396,7 @@ export async function loadIfcFile(
       .toString(36)
       .substr(2, 9)}`;
     console.log("Starting element extraction with ID:", messageId2);
+    allowedProgressIds.add(messageId2);
 
     const elementResult = await new Promise((resolve, reject) => {
       workerPromiseResolvers.set(messageId2, { resolve, reject });
@@ -379,7 +418,7 @@ export async function loadIfcFile(
         data: { types },
       });
 
-      // Set a timeout to detect if the worker doesn't respond
+      // Set a timeout to detect if the worker doesn't respond (larger for big files)
       setTimeout(() => {
         if (workerPromiseResolvers.has(messageId2)) {
           console.error(
@@ -392,7 +431,7 @@ export async function loadIfcFile(
           );
           workerPromiseResolvers.delete(messageId2);
         }
-      }, 30000); // 30 second timeout for element extraction
+      }, 180000); // 3 minute timeout for element extraction
     });
 
     // Remove the progress event listener
@@ -432,8 +471,10 @@ export async function loadIfcFile(
       "elements"
     );
 
-    // Store the file object in the cache (redundant if already done, but safe)
     cacheIfcFile(file);
+
+    // Non-blocking warm-up of sql.js DB in the worker
+    try { warmupSqliteDatabase(model).catch(() => { }); } catch { }
 
     return model;
   } catch (err) {
@@ -525,6 +566,41 @@ export async function exportSqliteDatabase(model: IfcModel): Promise<Uint8Array>
   }) as any;
 
   return bytes;
+}
+
+// Fire-and-forget warm-up of sql.js DB in the worker
+export async function warmupSqliteDatabase(model: IfcModel): Promise<{ tableCount: number }> {
+  await initializeWorker();
+  if (!ifcWorker) throw new Error("IFC worker initialization failed");
+
+  const messageId = `sqlite_warm_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  sqliteWarmStatus.set(model.id, 'warming');
+  dispatchWarmStatus(model.id, 'warming');
+
+  try {
+    const res = await new Promise<{ tableCount: number }>((resolve, reject) => {
+      workerPromiseResolvers.set(messageId, { resolve, reject });
+      ifcWorker!.postMessage({
+        action: "warmSqlite",
+        messageId,
+        data: { modelKey: model.name }
+      });
+      setTimeout(() => {
+        if (workerPromiseResolvers.has(messageId)) {
+          reject(new Error("SQLite warm-up timed out"));
+          workerPromiseResolvers.delete(messageId);
+        }
+      }, 20000);
+    });
+
+    sqliteWarmStatus.set(model.id, 'ready');
+    dispatchWarmStatus(model.id, 'ready');
+    return { tableCount: (res && (res as any).tableCount) || 0 };
+  } catch (e) {
+    sqliteWarmStatus.set(model.id, 'error');
+    dispatchWarmStatus(model.id, 'error');
+    throw e;
+  }
 }
 
 // Extract geometry from IFC elements (Standard method without GEOM worker)
