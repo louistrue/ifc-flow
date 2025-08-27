@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "build:worker": "tsup --config tsup.config.ts --tsconfig tsconfig.worker.json && mv -f public/index.global.js public/ifcWorker.js && [ -f public/index.global.js.map ] && mv -f public/index.global.js.map public/ifcWorker.js.map || true"
   },
   "dependencies": {
     "@ai-sdk/openai": "^2.0.19",
@@ -84,6 +85,7 @@
     "eslint-config-next": "15.5.0",
     "postcss": "^8",
     "tailwindcss": "^3.4.17",
-    "typescript": "^5"
+    "tsup": "^8.5.0",
+    "typescript": "^5.9.2"
   }
 }
