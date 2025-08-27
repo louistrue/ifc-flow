@@ -2,7 +2,6 @@
 
 import { useTurnstile } from "@/components/ui/turnstile";
 import { querySqliteDatabase } from "@/lib/ifc-utils";
-import { getSqliteWarmStatus } from "@/lib/ifc-utils";
 import { getTurnstileSitekey } from "@/lib/turnstile";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
@@ -430,8 +429,7 @@ export const AiNode = memo(({ data, id, selected, isConnectable }: NodeProps<AiN
     data.aiModelId || (AI_MODELS[0]?.slug || AI_MODELS[0]?.id || 'openai/gpt-5-mini')
   );
 
-  // SQLite warm-up status
-  const [sqliteStatus, setSqliteStatus] = useState<'idle' | 'warming' | 'ready' | 'error' | 'unknown'>('unknown');
+  // (Removed DB status overlay and tracking)
 
   // Use ref to ensure transport always has latest model
   const selectedModelRef = useRef(selectedModel);
@@ -1258,24 +1256,16 @@ export const AiNode = memo(({ data, id, selected, isConnectable }: NodeProps<AiN
     };
   }, [showModelPicker]);
 
-  // Listen for SQLite warm-up status for the connected model
+  // Optionally trigger a silent warm-up on connect (no UI overlay)
   useEffect(() => {
     const model = getConnectedModelData();
     if (!model) return;
-    try { setSqliteStatus(getSqliteWarmStatus(model)); } catch { }
-    const handler = (e: any) => {
-      if (e?.detail?.modelId !== model.id) return;
-      const status = e?.detail?.status as string;
-      if (status === 'building') {
-        setSqliteStatus('warming');
-      } else if (status === 'ready' || status === 'warming' || status === 'idle' || status === 'error') {
-        setSqliteStatus(status as any);
-      } else {
-        setSqliteStatus('unknown');
-      }
-    };
-    window.addEventListener('sqlite:warm-status', handler as any);
-    return () => window.removeEventListener('sqlite:warm-status', handler as any);
+    (async () => {
+      try {
+        const { warmupSqliteDatabase } = await import('@/lib/ifc-utils');
+        await warmupSqliteDatabase(model);
+      } catch { }
+    })();
   }, []);
 
   // Rate limiting state
@@ -2140,34 +2130,7 @@ export const AiNode = memo(({ data, id, selected, isConnectable }: NodeProps<AiN
             </div>
           )}
 
-          {/* DB warm-up status */}
-          {(() => {
-            if (sqliteStatus === 'ready') {
-              return (
-                <div className="flex items-center gap-1 text-xs bg-emerald-500/20 hover:bg-emerald-500/30 px-2 py-0.5 rounded transition-colors">
-                  <Database className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
-                  <span className="text-emerald-700 dark:text-emerald-300">DB Ready</span>
-                </div>
-              );
-            }
-            if (sqliteStatus === 'warming' || sqliteStatus === 'unknown' || sqliteStatus === 'idle') {
-              return (
-                <div className="flex items-center gap-1 text-xs bg-yellow-500/20 hover:bg-yellow-500/30 px-2 py-0.5 rounded transition-colors" title="Preparing local SQLite for fast queries">
-                  <Database className="h-3 w-3 text-yellow-600 dark:text-yellow-400" />
-                  <span className="text-yellow-700 dark:text-yellow-300">DB Warming…</span>
-                </div>
-              );
-            }
-            if (sqliteStatus === 'error') {
-              return (
-                <div className="flex items-center gap-1 text-xs bg-red-500/20 hover:bg-red-500/30 px-2 py-0.5 rounded transition-colors" title="Failed to prepare local SQLite">
-                  <Database className="h-3 w-3 text-red-600 dark:text-red-400" />
-                  <span className="text-red-700 dark:text-red-300">DB Error</span>
-                </div>
-              );
-            }
-            return null;
-          })()}
+          {/* DB warm-up status overlay moved to chat area below */}
 
           {/* Save SQLite button */}
           {getConnectedModelData() && (
@@ -2247,6 +2210,7 @@ export const AiNode = memo(({ data, id, selected, isConnectable }: NodeProps<AiN
             className="flex-1 overflow-y-auto p-2 custom-scrollbar nowheel"
             style={{ paddingBottom: '0.5rem' }}
           >
+            {/* DB status overlay removed */}
             {[...messages, ...localMessages]
               .sort((a: Message, b: Message) => {
                 // Use the monotonic sequence as the primary ordering so tool calls

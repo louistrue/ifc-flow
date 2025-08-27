@@ -134,7 +134,7 @@ const workerPromiseResolvers: Map<
 const workerMessageId = 0;
 
 // SQLite warm-up status and events
-type WarmStatus = 'idle' | 'warming' | 'ready' | 'error' | 'building';
+type WarmStatus = 'idle' | 'warming' | 'ready' | 'error' | 'building' | 'unknown';
 const sqliteWarmStatus = new Map<string, WarmStatus>();
 export function getSqliteWarmStatus(model: IfcModel): WarmStatus {
   return sqliteWarmStatus.get(model.id) || 'idle';
@@ -233,13 +233,38 @@ export async function initializeWorker(): Promise<void> {
           workerPromiseResolvers.get(messageId)!.resolve(data.result);
           workerPromiseResolvers.delete(messageId);
         }
+        // A successful query implies the DB is open in sql.js → mark as ready
+        try {
+          const model = getLastLoadedModel();
+          if (model) {
+            sqliteWarmStatus.set(model.id, 'ready');
+            dispatchWarmStatus(model.id, 'ready');
+            window.dispatchEvent(new CustomEvent('sqlite:ready', { detail: { modelId: model.id } }));
+          }
+        } catch { }
       } else if (type === "sqliteExport") {
         console.log("Received SQLite export bytes", { byteLength: (data.bytes && data.bytes.length) || 0 });
         if (messageId && workerPromiseResolvers.has(messageId)) {
           workerPromiseResolvers.get(messageId)!.resolve(data.bytes);
           workerPromiseResolvers.delete(messageId);
         }
+      } else if (type === "sqliteBuilt") {
+        // DB bytes persisted; notify UI listeners of warm/build status
+        const model = getLastLoadedModel();
+        if (model) {
+          sqliteWarmStatus.set(model.id, 'warming');
+          dispatchWarmStatus(model.id, 'warming');
+        }
+        if (messageId && workerPromiseResolvers.has(messageId)) {
+          workerPromiseResolvers.get(messageId)!.resolve(data);
+          workerPromiseResolvers.delete(messageId);
+        }
       } else if (type === "sqliteWarmed") {
+        const model = getLastLoadedModel();
+        if (model) {
+          sqliteWarmStatus.set(model.id, 'ready');
+          dispatchWarmStatus(model.id, 'ready', { tableCount: data.tableCount });
+        }
         if (messageId && workerPromiseResolvers.has(messageId)) {
           workerPromiseResolvers.get(messageId)!.resolve({ key: data.key, tableCount: data.tableCount });
           workerPromiseResolvers.delete(messageId);

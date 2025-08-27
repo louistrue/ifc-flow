@@ -2706,11 +2706,22 @@ async function handleSqliteExport({ modelId, messageId }) {
 async function handleWarmSqlite({ modelKey, messageId }) {
   try {
     await initSqlJsModule();
-    const key = currentSqlKey || (modelKey ? `model-sqlite-db:${modelKey}` : null);
-    if (!key) throw new Error("No SQLite database key available to warm");
+    // Prefer content-based dbKey if available in cache
+    const preferredKey = (ifcModelCache?.dbKey) || currentSqlKey || (modelKey ? `model-sqlite-db:${modelKey}` : null);
+    if (!preferredKey) throw new Error("No SQLite database key available to warm");
 
-    const dbLoaded = await ensureDbLoaded(key);
-    if (!dbLoaded) throw new Error("No SQLite bytes found in IndexedDB to load");
+    // If no bytes exist yet, build the DB now (deferred build path)
+    let bytes = await idbGet(preferredKey);
+    if (!bytes) {
+      try { postSqliteStatus('building', modelKey, {}); } catch { }
+      await handleBuildSqlite({ modelKey, dbKey: ifcModelCache?.dbKey });
+      bytes = await idbGet(preferredKey);
+    }
+    if (!bytes) throw new Error("No SQLite bytes found in IndexedDB to load");
+
+    // Load into sql.js
+    sqliteDb = new SQLModule.Database(new Uint8Array(bytes));
+    currentSqlKey = preferredKey;
 
     let tableCount = 0;
     try {
@@ -2718,7 +2729,7 @@ async function handleWarmSqlite({ modelKey, messageId }) {
       tableCount = res.length > 0 ? (res[0].values?.length || 0) : 0;
     } catch (e) { }
 
-    self.postMessage({ type: "sqliteWarmed", messageId, key, tableCount });
+    self.postMessage({ type: "sqliteWarmed", messageId, key: preferredKey, tableCount });
   } catch (error) {
     console.error("handleWarmSqlite error:", error);
     self.postMessage({ type: "error", message: `Error warming SQLite: ${error.message}`, messageId });
@@ -2786,6 +2797,8 @@ except Exception as e:
 
     self.postMessage({ type: "progress", message: "IFC parsed. Continuing processing...", percentage: 95, messageId });
     self.postMessage({ type: "loadComplete", messageId, ...result, sqlite_db: null, sqlite_success: false });
+
+    // Do not build SQL here. Build/warm is deferred to AI node connection.
   } catch (error) {
     console.error("handleLoadIfcFast error:", error);
     self.postMessage({ type: "error", message: `Error loading IFC (fast): ${error.message}`, messageId });
