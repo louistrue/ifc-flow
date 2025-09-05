@@ -47,6 +47,7 @@ import { useToast } from "@/hooks/use-toast";
 import { FileUp } from "lucide-react";
 import type { Workflow } from "@/lib/workflow-storage";
 import { useHotkeys } from "react-hotkeys-hook";
+import CoffeeSupport from "@/components/coffee-support";
 import {
   parseKeyCombination,
   useKeyboardShortcuts,
@@ -58,6 +59,8 @@ import { nodeCategories } from "@/components/sidebar";
 
 // Import the centralized nodeTypes to prevent React Flow warning
 import { nodeTypes } from "@/components/nodes";
+
+// Footer Pill Component (moved inside FlowWithProvider to access currentWorkflow)
 
 // Define all ReactFlow props outside the component to prevent warnings
 const edgeTypes = {};
@@ -185,6 +188,34 @@ function FlowWithProvider() {
   // Mobile placement mode state
   const [selectedNodeType, setSelectedNodeType] = useState<string | null>(null);
   const [placementMode, setPlacementMode] = useState(false);
+
+  // Footer Pill Component (inside FlowWithProvider to access currentWorkflow)
+  function FooterPill() {
+    const [isHovered, setIsHovered] = useState(false);
+
+    return (
+      <div
+        className="bg-card/90 backdrop-blur rounded-full px-3 py-1.5 shadow-sm border cursor-pointer transition-all duration-300"
+        onMouseEnter={() => setIsHovered(true)}
+        onMouseLeave={() => setIsHovered(false)}
+      >
+        <div className="flex items-center gap-2 transition-all duration-300 justify-start">
+          {!isHovered && (
+            <>
+              <div className="text-[11px] text-muted-foreground">
+                <span className="font-medium text-foreground/80">
+                  {currentWorkflow ? currentWorkflow.name : "IFCflow"}
+                </span>
+                <span className="text-foreground/50 ml-2">v0.2.0</span>
+              </div>
+              <div className="border-l border-border/50 h-5"></div>
+            </>
+          )}
+          <CoffeeSupport isHovered={isHovered} />
+        </div>
+      </div>
+    );
+  }
 
   // Get the ReactFlow utility functions
   const reactFlowInstance = useReactFlow();
@@ -1285,24 +1316,7 @@ function FlowWithProvider() {
                 {isSettingsLoaded && showGrid && <Background color="#aaa" gap={16} />}
                 {isSettingsLoaded && showMinimap && <MiniMap />}
                 <Panel position="bottom-right">
-                  <div className="bg-card/90 backdrop-blur rounded-full px-3 py-1.5 text-[11px] text-muted-foreground flex items-center gap-2 shadow-sm border">
-                    <span className="font-medium text-foreground/80">
-                      {currentWorkflow ? currentWorkflow.name : "IFCflow"}
-                    </span>
-                    <span className="text-foreground/50">v0.2.0</span>
-                    <span className="text-foreground/30">•</span>
-                    <a
-                      href="https://www.lt.plus/"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="hover:text-primary transition-colors"
-                      aria-label="Made with love by Louis Trümpler at LT.plus"
-                      title="Made with ❤️ by Louis Trümpler"
-                    >
-                      <span className="sm:hidden align-middle">❤️ LT.plus</span>
-                      <span className="hidden sm:inline align-middle">Made with ❤️ by Louis Trümpler</span>
-                    </a>
-                  </div>
+                  <FooterPill />
                 </Panel>
               </ReactFlow>
             </div>
