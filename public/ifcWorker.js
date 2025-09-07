@@ -1,7 +1,7 @@
 /* global importScripts */
 
-// Import Pyodide
-importScripts("https://cdn.jsdelivr.net/pyodide/v0.23.4/full/pyodide.js");
+// Import Pyodide v0.28.0 (optimal compatibility with ifcopenshell-0.8.3 wheel)
+importScripts("https://cdn.jsdelivr.net/pyodide/v0.28.0/full/pyodide.js");
 // Load sql.js (SQLite WASM)
 importScripts("https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.2/sql-wasm.js");
 
@@ -164,9 +164,9 @@ async function initPyodide() {
 
   try {
     console.log("initPyodide: Starting Pyodide initialization");
-    // Load Pyodide
+    // Load Pyodide v0.28.0 (optimal compatibility with ifcopenshell-0.8.3 wheel)
     pyodide = await loadPyodide({
-      indexURL: "https://cdn.jsdelivr.net/pyodide/v0.23.4/full/",
+      indexURL: "https://cdn.jsdelivr.net/pyodide/v0.28.0/full/",
     });
     console.log("initPyodide: Pyodide loaded successfully");
 
@@ -181,11 +181,32 @@ async function initPyodide() {
     await pyodide.loadPackage(["micropip", "numpy", "typing-extensions"]);
     console.log("initPyodide: Basic packages loaded");
 
-    // Bypass Emscripten version compatibility check for wheels
+    // Simple bypass - just patch the core compatibility function
     await pyodide.runPythonAsync(`
+      import sys
+
+      # SIMPLE BYPASS: Just replace the core check function
+      def simple_bypass(filename):
+        print(f"🚫 BYPASSED: Allowing wheel {filename}")
+        return None
+
+      # Import micropip first
       import micropip
-      from micropip._micropip import WheelInfo
-      WheelInfo.check_compatible = lambda self: None
+      print("Micropip imported successfully")
+
+      # Only patch the essential compatibility check
+      import micropip._utils
+      micropip._utils.check_compatible = simple_bypass
+      print("✅ Disabled micropip._utils.check_compatible")
+
+      # Verify the patch worked
+      try:
+        result = micropip._utils.check_compatible("test.whl")
+        print(f"🧪 Compatibility check result: {result}")
+      except Exception as e:
+        print(f"❌ Error testing compatibility check: {e}")
+
+      print("🎯 SIMPLE BYPASS COMPLETE")
     `);
 
     // Install IfcOpenShell (try newest first, fallback to known-good)
@@ -197,29 +218,73 @@ async function initPyodide() {
 
     await pyodide.runPythonAsync(`
       import micropip, importlib
-      # Install lark for stream support
-      await micropip.install('lark')
 
+      # SIMPLE BYPASS RE-APPLICATION FOR INSTALLATIONS
+      def simple_bypass(filename):
+          print(f"🚫 BYPASSED: Allowing wheel {filename}")
+          return None
+
+      # Ensure bypass is active before installations
+      import micropip._utils
+      micropip._utils.check_compatible = simple_bypass
+      print("✅ Bypass ready for installations")
+
+      # Install lark for stream support
+      print("📦 Installing lark...")
+      await micropip.install('lark')
+      print("✅ Lark installed successfully")
+
+      # ONLY USE 0.8.3 as requested by user - this wheel has IFC4X2 support
       wheel_urls = [
-          'https://cdn.jsdelivr.net/gh/IfcOpenShell/wasm-wheels@main/ifcopenshell-0.8.3+34a1bc6-cp313-cp313-emscripten_4_0_9_wasm32.whl',
-          'https://cdn.jsdelivr.net/gh/IfcOpenShell/wasm-wheels@33b437e5fd5425e606f34aff602c42034ff5e6dc/ifcopenshell-0.8.1+latest-cp312-cp312-emscripten_3_1_58_wasm32.whl'
+          'https://cdn.jsdelivr.net/gh/IfcOpenShell/wasm-wheels@main/ifcopenshell-0.8.3+34a1bc6-cp313-cp313-emscripten_4_0_9_wasm32.whl'
       ]
       last_exc = None
       installed = False
       for url in wheel_urls:
           try:
-              print(f"Attempting IfcOpenShell install: {url}")
-              await micropip.install(url, keep_going=True)
+              print(f"🎯 Installing ONLY 0.8.3: {url}")
+
+              # Ensure bypass is active before each install
+              micropip._utils.check_compatible = simple_bypass
+
+              await micropip.install(url, keep_going=True, deps=False)
+
               # Verify import works
               import ifcopenshell
-              print('IfcOpenShell import OK:', getattr(ifcopenshell, 'version', 'unknown'))
+              print('✅ IfcOpenShell 0.8.3 import OK:', getattr(ifcopenshell, 'version', 'unknown'))
+
+              # Test basic functionality
+              schemas = ifcopenshell.schema_names()
+              print(f"📋 Available IFC schemas: {schemas}")
+
+              # Check for IFC4X2
+              if 'IFC4X2' in schemas:
+                  print("🎉 IFC4X2 SUPPORT CONFIRMED WITH 0.8.3!")
+                  print("✅ SUCCESS: 0.8.3 with IFC4X2 is working!")
+              else:
+                  print("⚠️  IFC4X2 not found - this should not happen with 0.8.3")
+
               installed = True
               break
           except Exception as e:
               last_exc = e
-              print(f"Install/import failed for {url}: {e}")
+              print(f"❌ Install/import failed for 0.8.3: {e}")
+              # Clean up failed installation
+              try:
+                import sys
+                if 'ifcopenshell' in sys.modules:
+                  del sys.modules['ifcopenshell']
+                import importlib
+                importlib.invalidate_caches()
+                print("🧹 Cleaned up failed 0.8.3 installation")
+              except Exception as cleanup_e:
+                print(f"❌ Cleanup failed: {cleanup_e}")
+
       if not installed:
-          raise last_exc or RuntimeError('Failed to install IfcOpenShell')
+          if last_exc:
+              raise last_exc
+          else:
+              raise RuntimeError('Failed to install IfcOpenShell 0.8.3')
     `);
 
     // Try to enable Python sqlite3 for ifcopenshell.sql usage (if available)

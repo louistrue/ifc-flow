@@ -65,9 +65,9 @@ export const createPyodideWorker = async () => {
         // Starting Pyodide initialization silently
         self.postMessage({ type: 'progress', progress: 5, step: 'Loading Pyodide...' });
         
-        importScripts('https://cdn.jsdelivr.net/pyodide/v0.23.4/full/pyodide.js');
+        importScripts('https://cdn.jsdelivr.net/pyodide/v0.28.0/full/pyodide.js');
         pyodide = await loadPyodide({
-          indexURL: 'https://cdn.jsdelivr.net/pyodide/v0.23.4/full/'
+          indexURL: 'https://cdn.jsdelivr.net/pyodide/v0.28.0/full/'
         });
         
         // Pyodide loaded successfully
@@ -90,44 +90,70 @@ export const createPyodideWorker = async () => {
         await pyodide.runPythonAsync(\`
 import micropip
 
-# Applying compatibility bypass patch...
-print("Applying compatibility bypass patch...")
+# Compatibility bypass for IfcOpenShell installation
+def simple_bypass(filename):
+  return None
 
-# Import the WheelInfo class and patch it before any wheel operations
-from micropip._micropip import WheelInfo
-
-# Override the check_compatible method to always pass
-def bypass_compatibility_check(self):
-    print(f"Bypassing compatibility check for wheel: {getattr(self, 'name', 'unknown')}")
-    return None
-
-# Apply the monkey-patch
-WheelInfo.check_compatible = bypass_compatibility_check
-print("Compatibility check bypassed successfully")
+# Import micropip and apply compatibility bypass
+import micropip
+import micropip._utils
+micropip._utils.check_compatible = simple_bypass
 
 # Install lark dependency first
 print("Installing lark dependency...")
 await micropip.install('lark')
 print("Lark installed successfully")
 
-print("Installing IfcOpenShell wheel (try newest, then fallback)...")
+print("Installing ONLY IfcOpenShell 0.8.3 (as requested by user)...")
+# ONLY USE 0.8.3 - this is the ONLY wheel that supports IFC4X2
 wheel_urls = [
-    'https://cdn.jsdelivr.net/gh/IfcOpenShell/wasm-wheels@main/ifcopenshell-0.8.3+34a1bc6-cp313-cp313-emscripten_4_0_9_wasm32.whl',
-    'https://cdn.jsdelivr.net/gh/IfcOpenShell/wasm-wheels@33b437e5fd5425e606f34aff602c42034ff5e6dc/ifcopenshell-0.8.1+latest-cp312-cp312-emscripten_3_1_58_wasm32.whl'
+    'https://cdn.jsdelivr.net/gh/IfcOpenShell/wasm-wheels@main/ifcopenshell-0.8.3+34a1bc6-cp313-cp313-emscripten_4_0_9_wasm32.whl'
 ]
 last_exc = None
 installed = False
 for url in wheel_urls:
     try:
         print(f"Attempting IfcOpenShell install: {url}")
-        await micropip.install(url, keep_going=True)
+        await micropip.install(url, keep_going=True, deps=False)
         import ifcopenshell
         print('IfcOpenShell import OK:', getattr(ifcopenshell, 'version', 'unknown'))
+        # Test basic functionality - get available schemas
+        try:
+            # Try multiple methods to get schema names
+            if hasattr(ifcopenshell, 'schema_names'):
+                # Direct method (should exist in 0.8.3)
+                schemas = list(ifcopenshell.schema_names())
+                print(f"Available IFC schemas (via schema_names): {schemas}")
+            elif hasattr(ifcopenshell, 'ifcopenshell_wrapper') and hasattr(ifcopenshell.ifcopenshell_wrapper, 'schema_names'):
+                # Via wrapper module
+                schemas = list(ifcopenshell.ifcopenshell_wrapper.schema_names())
+                print(f"Available IFC schemas (via wrapper): {schemas}")
+            elif hasattr(ifcopenshell, 'schema_by_name'):
+                # Via schema_by_name dictionary
+                schemas = list(ifcopenshell.schema_by_name.keys())
+                print(f"Available IFC schemas (via schema_by_name): {schemas}")
+            else:
+                # Fallback - assume common schemas
+                schemas = ['IFC2X3', 'IFC4', 'IFC4X2']
+                print(f"Using fallback schemas: {schemas}")
+        except Exception as schema_error:
+            print(f"Warning: Could not get schema list: {schema_error}")
+            schemas = ['IFC2X3', 'IFC4', 'IFC4X2']  # Assume common schemas
         installed = True
         break
     except Exception as e:
         last_exc = e
         print(f"Install/import failed for {url}: {e}")
+        # Clean up failed installation
+        try:
+            import sys
+            if 'ifcopenshell' in sys.modules:
+                del sys.modules['ifcopenshell']
+            import importlib
+            importlib.invalidate_caches()
+            print("Cleaned up failed installation")
+        except Exception as cleanup_e:
+            print(f"Cleanup failed: {cleanup_e}")
 if not installed:
     raise last_exc or RuntimeError('Failed to install IfcOpenShell')
 
