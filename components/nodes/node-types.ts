@@ -41,8 +41,9 @@ export interface ExportNodeData extends BaseNodeData {
 // Filter node data
 export interface FilterNodeData extends BaseNodeData {
     properties?: {
-        filterType?: string;
+        filterType?: 'property' | 'ifcClass';
         property?: string;
+        ifcClass?: string;
         value?: string;
         operator?: string;
         [key: string]: any;

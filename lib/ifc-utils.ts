@@ -722,12 +722,13 @@ export async function extractGeometryWithGeom(
   }
 }
 
-// Filter elements by property
+// Filter elements by property or IFC class
 export function filterElements(
   elements: IfcElement[],
   property: string,
   operator: string,
-  value: string
+  value: string,
+  filterType: 'property' | 'ifcClass' = 'property'
 ): IfcElement[] {
 
 
@@ -738,36 +739,35 @@ export function filterElements(
   }
 
   return elements.filter((element) => {
-    // Split property path (e.g., "Pset_WallCommon.FireRating")
-    const propParts = property.split(".");
-
-    if (propParts.length === 1) {
-      // Direct property lookup
-      let propValue = element.properties[property];
-      if (propValue === undefined) return false;
-
-      // Convert to string for comparison
-      propValue = String(propValue);
+    if (filterType === 'ifcClass') {
+      // Filter by IFC class
+      const ifcClass = property; // In ifcClass mode, property parameter contains the class pattern
+      const elementType = element.type || '';
+      
+      // Case-insensitive matching
+      const lowerElementType = elementType.toLowerCase();
+      const lowerIfcClass = ifcClass.toLowerCase();
 
       switch (operator) {
         case "equals":
-          return propValue === value;
+          return lowerElementType === lowerIfcClass;
         case "contains":
-          return propValue.includes(value);
+          return lowerElementType.includes(lowerIfcClass);
         case "startsWith":
-          return propValue.startsWith(value);
+          return lowerElementType.startsWith(lowerIfcClass);
         case "endsWith":
-          return propValue.endsWith(value);
+          return lowerElementType.endsWith(lowerIfcClass);
         default:
           return false;
       }
-    } else if (propParts.length === 2) {
-      // Property set lookup (e.g., "Pset_WallCommon.FireRating")
-      const [psetName, propName] = propParts;
+    } else {
+      // Original property-based filtering
+      // Split property path (e.g., "Pset_WallCommon.FireRating")
+      const propParts = property.split(".");
 
-      // Check in property sets
-      if (element.psets && element.psets[psetName]) {
-        let propValue = element.psets[psetName][propName];
+      if (propParts.length === 1) {
+        // Direct property lookup
+        let propValue = element.properties[property];
         if (propValue === undefined) return false;
 
         // Convert to string for comparison
@@ -785,11 +785,36 @@ export function filterElements(
           default:
             return false;
         }
+      } else if (propParts.length === 2) {
+        // Property set lookup (e.g., "Pset_WallCommon.FireRating")
+        const [psetName, propName] = propParts;
+
+        // Check in property sets
+        if (element.psets && element.psets[psetName]) {
+          let propValue = element.psets[psetName][propName];
+          if (propValue === undefined) return false;
+
+          // Convert to string for comparison
+          propValue = String(propValue);
+
+          switch (operator) {
+            case "equals":
+              return propValue === value;
+            case "contains":
+              return propValue.includes(value);
+            case "startsWith":
+              return propValue.startsWith(value);
+            case "endsWith":
+              return propValue.endsWith(value);
+            default:
+              return false;
+          }
+        }
+        return false;
       }
+
       return false;
     }
-
-    return false;
   });
 }
 
@@ -1219,6 +1244,13 @@ export function manageProperties(
   let elementsModified = 0;
 
   if (isMapping) {
+    // Extract the mappings from the value object
+    if (propertyValue.mappings) {
+      elementValueMap = propertyValue.mappings;
+    } else if (propertyValue.elements) {
+      elementValueMap = propertyValue.elements;
+    }
+    console.log(`Using element-specific values for ${Object.keys(elementValueMap).length} elements`);
   }
 
   // Check for undefined or empty elements
@@ -1252,7 +1284,12 @@ export function manageProperties(
   // Create a new array to return
   const result = elements.map((element) => {
     // Clone the element to avoid modifying the original
-    const updatedElement = { ...element };
+    const updatedElement = { 
+      ...element,
+      properties: element.properties ? { ...element.properties } : {},
+      psets: element.psets ? JSON.parse(JSON.stringify(element.psets)) : {},
+      qtos: element.qtos ? JSON.parse(JSON.stringify(element.qtos)) : {}
+    };
 
     // Function to check if property exists and get its location and value
     const findProperty = (
@@ -1410,25 +1447,26 @@ export function manageProperties(
         }
 
         // Set or add the property
-        if (element.properties) {
-          // Always update the direct properties for convenient access
-          element.properties[actualPropertyName] = valueToSet;
+        if (!updatedElement.properties) {
+          updatedElement.properties = {};
         }
+        // Always update the direct properties for convenient access
+        updatedElement.properties[actualPropertyName] = valueToSet;
 
         // Determine where to store the property
         if (effectiveTargetPset !== "any") {
           // Make sure psets exists
-          if (!element.psets) {
-            element.psets = {};
+          if (!updatedElement.psets) {
+            updatedElement.psets = {};
           }
 
           // Make sure the target pset exists
-          if (!element.psets[effectiveTargetPset]) {
-            element.psets[effectiveTargetPset] = {};
+          if (!updatedElement.psets[effectiveTargetPset]) {
+            updatedElement.psets[effectiveTargetPset] = {};
           }
 
           // Add the property to the target pset
-          element.psets[effectiveTargetPset][actualPropertyName] =
+          updatedElement.psets[effectiveTargetPset][actualPropertyName] =
             valueToSet;
         }
 
@@ -1447,26 +1485,26 @@ export function manageProperties(
         let removed = false;
 
         // Remove from direct properties
-        if (element.properties && actualPropertyName in element.properties) {
-          delete element.properties[actualPropertyName];
+        if (updatedElement.properties && actualPropertyName in updatedElement.properties) {
+          delete updatedElement.properties[actualPropertyName];
           removed = true;
         }
 
         // If a specific pset is targeted, only remove from there
         if (effectiveTargetPset !== "any") {
           if (
-            element.psets?.[effectiveTargetPset]?.[actualPropertyName] !==
+            updatedElement.psets?.[effectiveTargetPset]?.[actualPropertyName] !==
             undefined
           ) {
-            delete element.psets[effectiveTargetPset][actualPropertyName];
+            delete updatedElement.psets[effectiveTargetPset][actualPropertyName];
             removed = true;
           }
         } else {
           // Otherwise remove from all psets
-          if (element.psets) {
-            for (const psetName in element.psets) {
-              if (actualPropertyName in element.psets[psetName]) {
-                delete element.psets[psetName][actualPropertyName];
+          if (updatedElement.psets) {
+            for (const psetName in updatedElement.psets) {
+              if (actualPropertyName in updatedElement.psets[psetName]) {
+                delete updatedElement.psets[psetName][actualPropertyName];
                 removed = true;
               }
             }
@@ -1474,10 +1512,10 @@ export function manageProperties(
         }
 
         // Also clean up qtos
-        if (effectiveTargetPset === "any" && element.qtos) {
-          for (const qtoName in element.qtos) {
-            if (actualPropertyName in element.qtos[qtoName]) {
-              delete element.qtos[qtoName][actualPropertyName];
+        if (effectiveTargetPset === "any" && updatedElement.qtos) {
+          for (const qtoName in updatedElement.qtos) {
+            if (actualPropertyName in updatedElement.qtos[qtoName]) {
+              delete updatedElement.qtos[qtoName][actualPropertyName];
               removed = true;
             }
           }

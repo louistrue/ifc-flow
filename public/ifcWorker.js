@@ -1326,6 +1326,15 @@ async function handleExportIfc(data) {
             if not ifc_file:
                 raise RuntimeError("IFC file object is None after attempting to load from filesystem.")
             
+            # Get the OwnerHistory from the file to use for new property sets
+            owner_history = None
+            try:
+                owner_histories = ifc_file.by_type("IfcOwnerHistory")
+                if owner_histories:
+                    owner_history = owner_histories[0]
+            except Exception as e:
+                print(f"Warning: Could not get OwnerHistory: {e}")
+            
             # Create a temporary file to store the modified IFC
             ifc_temp = tempfile.NamedTemporaryFile(suffix=".ifc", delete=False)
             temp_path = ifc_temp.name
@@ -1451,7 +1460,7 @@ async function handleExportIfc(data) {
                         
                         # Only log first few modifications to reduce noise
                         if modified_count < 3:
-                            pass  # Reduced logging
+                            print(f"🔧 Setting {pset_name}.{prop_name} = {repr(prop_value)} (type: {type(prop_value).__name__})")
                             # print(f"Modifying {element.is_a()} (GlobalId: {change.get('globalId', 'unknown')[:8]}...) - Setting {pset_name}.{prop_name} = {prop_value}")
                         
                         # Wrap the entire property modification in a try-except block
@@ -1583,14 +1592,19 @@ async function handleExportIfc(data) {
                                     pset = ifc_file.create_entity(
                                         "IfcPropertySet",
                                         GlobalId=ifcopenshell.guid.new(),
+                                        OwnerHistory=owner_history,
                                         Name=pset_name,
+                                        Description=None,
                                         HasProperties=[new_prop]
                                     )
                                     
                                     # Relate property set to element
                                     rel_props = ifc_file.create_entity(
                                         "IfcRelDefinesByProperties",
-                                        GlobalId=ifcopenshell.guid.new()
+                                        GlobalId=ifcopenshell.guid.new(),
+                                        OwnerHistory=owner_history,
+                                        Name=None,
+                                        Description=None
                                     )
                                     rel_props.RelatingPropertyDefinition = pset
                                     rel_props.RelatedObjects = [element]

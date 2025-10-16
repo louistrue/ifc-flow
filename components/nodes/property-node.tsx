@@ -39,16 +39,24 @@ export const PropertyNode = memo(
     const { properties, label = "Property Node" } = data;
 
     // Extract property information from component data
-    // This handles both formats: "IsExternal" and "Pset_WallCommon:IsExternal"
+    // This handles both formats: "IsExternal", "Pset_WallCommon:IsExternal", and "MyCustomPset.PropertyName"
     const rawPropertyName = properties?.propertyName || "";
     let propertyName = rawPropertyName;
     let explicitPset = "";
 
-    // Check if property name includes the Pset prefix (e.g., "Pset_WallCommon:IsExternal")
+    // Check if property name includes the Pset prefix (colon notation: "Pset_WallCommon:IsExternal")
     if (rawPropertyName.includes(":")) {
       const parts = rawPropertyName.split(":");
       explicitPset = parts[0];
       propertyName = parts[1];
+    }
+    // Check if property name includes dot notation (e.g., "MyCustomPset.PropertyName")
+    else if (rawPropertyName.includes(".")) {
+      const parts = rawPropertyName.split(".");
+      if (parts.length === 2) {
+        explicitPset = parts[0];
+        propertyName = parts[1];
+      }
     }
 
     const action = properties?.action || "Get";
@@ -231,7 +239,8 @@ export const PropertyNode = memo(
     // Helper to display complete property name with Pset if available
     const getDisplayPropertyName = () => {
       if (explicitPset) {
-        return `${explicitPset}:${propertyName}`;
+        // Use dot notation for display since it's more intuitive
+        return `${explicitPset}.${propertyName}`;
       }
       return propertyName;
     };
