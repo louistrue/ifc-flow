@@ -345,11 +345,17 @@ export class WorkflowExecutor {
             ? inputValues.input
             : inputValues.input.elements;
 
+          const filterType = node.data.properties?.filterType || "property";
+          const property = filterType === "ifcClass" 
+            ? node.data.properties?.ifcClass || ""
+            : node.data.properties?.property || "";
+
           result = filterElements(
             elementsToFilter || [],
-            node.data.properties?.property || "",
-            node.data.properties?.operator || "equals",
-            node.data.properties?.value || ""
+            property,
+            node.data.properties?.operator || (filterType === "ifcClass" ? "contains" : "equals"),
+            node.data.properties?.value || "",
+            filterType
           );
         }
         break;
@@ -541,10 +547,23 @@ export class WorkflowExecutor {
         }
 
         // Extract properties from the node configuration
-        const propertyName = node.data.properties?.propertyName || "";
+        const rawPropertyName = node.data.properties?.propertyName || "";
         const action = node.data.properties?.action || "get";
         const propertyValue = node.data.properties?.propertyValue || "";
         const targetPset = node.data.properties?.targetPset || "any";
+
+        // Parse property name for dot notation (e.g., "MyCustomPset.PropertyName")
+        let propertyName = rawPropertyName;
+        let effectiveTargetPset = targetPset;
+
+        if (rawPropertyName.includes(".")) {
+          const parts = rawPropertyName.split(".");
+          if (parts.length === 2) {
+            effectiveTargetPset = parts[0]; // Use the pset name from dot notation
+            propertyName = parts[1]; // Use the actual property name
+            console.log(`Parsed property: ${effectiveTargetPset}.${propertyName}`);
+          }
+        }
 
         // Determine where property values should come from
         let valueToUse = propertyValue;
@@ -553,7 +572,9 @@ export class WorkflowExecutor {
           inputValues.valueInput !== undefined
         ) {
           // Log the original input value for debugging
-          // console.log("Using value from input:", inputValues.valueInput);
+          console.log("🔍 Using value from input. Type:", typeof inputValues.valueInput);
+          console.log("🔍 Input keys:", Object.keys(inputValues.valueInput || {}));
+          console.log("🔍 Has mappings?", 'mappings' in (inputValues.valueInput || {}));
 
           // Handle different input types for valueInput
           const inputValue = inputValues.valueInput;
@@ -606,14 +627,22 @@ export class WorkflowExecutor {
           }
         }
 
-        // console.log("Final value used for property:", valueToUse);
+        console.log("Final value used for property:", typeof valueToUse, valueToUse);
+        
+        // Check if it has the mappings structure
+        if (valueToUse && typeof valueToUse === 'object') {
+          console.log("Value keys:", Object.keys(valueToUse));
+          if (valueToUse.mappings) {
+            console.log("✓ Has mappings property with", Object.keys(valueToUse.mappings).length, "entries");
+          }
+        }
 
         // Manage properties using the utility function with options object
         const updatedElements = manageProperties(nodeElements, {
           action: action.toLowerCase(),
           propertyName,
           propertyValue: valueToUse,
-          targetPset,
+          targetPset: effectiveTargetPset,
         });
 
         // Return the result with the updated elements

@@ -13,8 +13,12 @@ export const FilterNode = memo(({ data, isConnectable }: NodeProps<FilterNodeDat
         <div className="text-sm font-medium truncate">{data.label}</div>
       </div>
       <div className="p-3 text-xs">
-        {data.properties?.property ? (
+        {data.properties?.filterType === "property" && data.properties?.property ? (
           <div className="space-y-1">
+            <div className="flex justify-between">
+              <span>Type:</span>
+              <span className="font-medium">Property</span>
+            </div>
             <div className="flex justify-between">
               <span>Property:</span>
               <span className="font-medium">{data.properties.property}</span>
@@ -26,6 +30,21 @@ export const FilterNode = memo(({ data, isConnectable }: NodeProps<FilterNodeDat
             <div className="flex justify-between">
               <span>Value:</span>
               <span className="font-medium">{data.properties?.value || ""}</span>
+            </div>
+          </div>
+        ) : data.properties?.filterType === "ifcClass" && data.properties?.ifcClass ? (
+          <div className="space-y-1">
+            <div className="flex justify-between">
+              <span>Type:</span>
+              <span className="font-medium">IFC Class</span>
+            </div>
+            <div className="flex justify-between">
+              <span>Class:</span>
+              <span className="font-medium">{data.properties.ifcClass}</span>
+            </div>
+            <div className="flex justify-between">
+              <span>Operator:</span>
+              <span className="font-medium">{data.properties?.operator || "contains"}</span>
             </div>
           </div>
         ) : (

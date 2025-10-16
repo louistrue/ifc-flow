@@ -107,54 +107,132 @@ export function NodePropertyRenderer({
       return (
         <div className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="property">Property</Label>
-            <Input
-              id="property"
-              list="model-properties"
-              value={properties.property || ""}
-              onChange={(e) =>
-                setProperties({ ...properties, property: e.target.value })
-              }
-              placeholder="e.g. Pset_WallCommon.FireRating"
-            />
-            {modelProps.length > 0 && (
-              <datalist id="model-properties">
-                {modelProps.map((p) => (
-                  <option key={p} value={p} />
-                ))}
-              </datalist>
-            )}
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="operator">Operator</Label>
+            <Label htmlFor="filterType">Filter Type</Label>
             <Select
-              value={properties.operator || "equals"}
+              value={properties.filterType || "property"}
               onValueChange={(value) =>
-                setProperties({ ...properties, operator: value })
+                setProperties({ ...properties, filterType: value })
               }
             >
-              <SelectTrigger id="operator">
-                <SelectValue placeholder="Select operator" />
+              <SelectTrigger id="filterType">
+                <SelectValue placeholder="Select filter type" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="equals">Equals</SelectItem>
-                <SelectItem value="contains">Contains</SelectItem>
-                <SelectItem value="startsWith">Starts With</SelectItem>
-                <SelectItem value="endsWith">Ends With</SelectItem>
+                <SelectItem value="property">Property</SelectItem>
+                <SelectItem value="ifcClass">IFC Class</SelectItem>
               </SelectContent>
             </Select>
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="value">Value</Label>
-            <Input
-              id="value"
-              value={properties.value || ""}
-              onChange={(e) =>
-                setProperties({ ...properties, value: e.target.value })
-              }
-              placeholder="Value to match"
-            />
-          </div>
+
+          {properties.filterType === "property" && (
+            <>
+              <div className="space-y-2">
+                <Label htmlFor="property">Property</Label>
+                <Input
+                  id="property"
+                  list="model-properties"
+                  value={properties.property || ""}
+                  onChange={(e) =>
+                    setProperties({ ...properties, property: e.target.value })
+                  }
+                  placeholder="e.g. Pset_WallCommon.FireRating"
+                />
+                {modelProps.length > 0 && (
+                  <datalist id="model-properties">
+                    {modelProps.map((p) => (
+                      <option key={p} value={p} />
+                    ))}
+                  </datalist>
+                )}
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="operator">Operator</Label>
+                <Select
+                  value={properties.operator || "equals"}
+                  onValueChange={(value) =>
+                    setProperties({ ...properties, operator: value })
+                  }
+                >
+                  <SelectTrigger id="operator">
+                    <SelectValue placeholder="Select operator" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="equals">Equals</SelectItem>
+                    <SelectItem value="contains">Contains</SelectItem>
+                    <SelectItem value="startsWith">Starts With</SelectItem>
+                    <SelectItem value="endsWith">Ends With</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="value">Value</Label>
+                <Input
+                  id="value"
+                  value={properties.value || ""}
+                  onChange={(e) =>
+                    setProperties({ ...properties, value: e.target.value })
+                  }
+                  placeholder="Value to match"
+                />
+              </div>
+            </>
+          )}
+
+          {properties.filterType === "ifcClass" && (
+            <>
+              <div className="space-y-2">
+                <Label htmlFor="ifcClass">IFC Class</Label>
+                <Input
+                  id="ifcClass"
+                  list="ifc-classes"
+                  value={properties.ifcClass || ""}
+                  onChange={(e) =>
+                    setProperties({ ...properties, ifcClass: e.target.value })
+                  }
+                  placeholder="e.g. IfcWall, IfcDoor, Wall"
+                />
+                <datalist id="ifc-classes">
+                  <option value="IfcWall" />
+                  <option value="IfcDoor" />
+                  <option value="IfcWindow" />
+                  <option value="IfcSlab" />
+                  <option value="IfcColumn" />
+                  <option value="IfcBeam" />
+                  <option value="IfcSpace" />
+                  <option value="IfcStair" />
+                  <option value="IfcRoof" />
+                  <option value="IfcRailing" />
+                  <option value="IfcCurtainWall" />
+                  <option value="IfcPlate" />
+                  <option value="IfcWallStandardCase" />
+                  <option value="IfcDoorStandardCase" />
+                  <option value="IfcWindowStandardCase" />
+                </datalist>
+                <div className="text-xs text-muted-foreground">
+                  Use "contains" operator with "Wall" to match both "IfcWall" and "IfcWallStandardCase"
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="operator">Operator</Label>
+                <Select
+                  value={properties.operator || "contains"}
+                  onValueChange={(value) =>
+                    setProperties({ ...properties, operator: value })
+                  }
+                >
+                  <SelectTrigger id="operator">
+                    <SelectValue placeholder="Select operator" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="equals">Equals</SelectItem>
+                    <SelectItem value="contains">Contains</SelectItem>
+                    <SelectItem value="startsWith">Starts With</SelectItem>
+                    <SelectItem value="endsWith">Ends With</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </>
+          )}
         </div>
       );
 
@@ -492,6 +570,9 @@ export function NodePropertyRenderer({
             <div className="text-xs text-muted-foreground">
               Common properties: IsExternal, FireRating, LoadBearing,
               ThermalTransmittance
+            </div>
+            <div className="text-xs text-muted-foreground">
+              Use dot notation to override Property Set: MyCustomPset.MyProperty
             </div>
           </div>
 
