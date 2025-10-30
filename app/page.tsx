@@ -21,6 +21,7 @@ import ReactFlow, {
   type SelectionMode,
 } from "reactflow";
 import "reactflow/dist/style.css";
+import "@/styles/reactflow-overrides.css";
 import { Sidebar } from "@/components/sidebar";
 import { PropertiesDialog } from "@/components/dialogs/properties-dialog";
 import { IfcNode } from "@/components/nodes/ifc-node";
@@ -1316,7 +1317,10 @@ function FlowWithProvider() {
                 nodesFocusable={true}
                 edgesFocusable={true}
                 // Disable interactions when viewer is in focus mode or in placement mode
-                panOnDrag={!focusedViewerId && !(isMobile && placementMode)}
+                // panOnDrag={[1, 2]} means pan only with middle/right mouse buttons
+                // This frees up left-click drag for selection box
+                panOnDrag={!focusedViewerId && !(isMobile && placementMode) ? [1, 2] : false}
+                panOnScroll={!focusedViewerId && !(isMobile && placementMode)}
                 zoomOnScroll={!focusedViewerId && !(isMobile && placementMode)}
                 zoomOnPinch={!focusedViewerId && !(isMobile && placementMode)}
                 zoomOnDoubleClick={!focusedViewerId && !(isMobile && placementMode)}

@@ -273,23 +273,23 @@ body {
     box-shadow: none !important;
     z-index: 10 !important;
   }
-  
+
   /* Disable transitions when dragging for smooth movement */
   .react-flow__node.dragging {
     transition: none !important;
   }
-  
+
   .react-flow__node.dragging.selected {
     transition: none !important;
   }
-  
+
   /* Scale the inner content instead, not the wrapper */
-  .react-flow__node.selected > div {
+  .react-flow__node.selected>div {
     transform: scale(1.015);
     transition: transform 0.15s ease-out;
   }
-  
-  .react-flow__node.dragging.selected > div {
+
+  .react-flow__node.dragging.selected>div {
     transform: scale(1);
     transition: none;
   }

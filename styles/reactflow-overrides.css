@@ -1,0 +1,35 @@
+.react-flow__nodesselection-rect,
+.react-flow__selection {
+    position: relative;
+    border: none !important;
+    border-radius: 12px !important;
+    background: transparent !important;
+}
+
+.react-flow__nodesselection-rect::after,
+.react-flow__selection::after {
+    content: "";
+    position: absolute;
+    top: -14px;
+    left: -14px;
+    right: -14px;
+    bottom: -14px;
+    border: 2px dashed rgba(148, 163, 184, 0.7);
+    border-radius: 18px;
+    background: linear-gradient(135deg,
+            rgba(148, 163, 184, 0.08) 0%,
+            rgba(148, 163, 184, 0.03) 100%);
+    box-shadow: 0 8px 20px rgba(15, 23, 42, 0.18),
+        inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    pointer-events: none;
+}
+
+.dark .react-flow__nodesselection-rect::after,
+.dark .react-flow__selection::after {
+    border-color: rgba(203, 213, 225, 0.55);
+    background: linear-gradient(135deg,
+            rgba(203, 213, 225, 0.12) 0%,
+            rgba(203, 213, 225, 0.05) 100%);
+    box-shadow: 0 12px 28px rgba(15, 23, 42, 0.45),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
