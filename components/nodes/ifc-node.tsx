@@ -1,10 +1,11 @@
 "use client";
 
 import { memo, useState, useCallback, useRef } from "react";
-import { Handle, Position, useReactFlow, type NodeProps } from "reactflow";
-import { FileUp, Info, Building } from "lucide-react";
-import { NodeLoadingIndicator } from "./node-loading-indicator";
+import { type NodeProps, useReactFlow } from "reactflow";
+import { Info, Building } from "lucide-react";
 import { IfcNodeData as BaseIfcNodeData } from "./node-types";
+import { BaseNode } from "./base/base-node";
+import { nodeThemes } from "./base/node-themes";
 import { getElementTypeColor, formatElementType } from "../../lib/ifc/element-utils";
 
 interface ExtendedIfcNodeData extends BaseIfcNodeData {
@@ -20,7 +21,8 @@ interface ExtendedIfcNodeData extends BaseIfcNodeData {
   fileName?: string;
 }
 
-export const IfcNode = memo(({ id, data, isConnectable }: NodeProps<ExtendedIfcNodeData>) => {
+export const IfcNode = memo((props: NodeProps<ExtendedIfcNodeData>) => {
+  const { id, data } = props;
   const dropRef = useRef<HTMLDivElement>(null);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const [progress, setProgress] = useState({ percentage: 0, message: "" });
@@ -352,68 +354,53 @@ export const IfcNode = memo(({ id, data, isConnectable }: NodeProps<ExtendedIfcN
   return (
     <div
       ref={dropRef}
-      className={`bg-white dark:bg-gray-800 border-2 ${isDraggingOver ? "border-blue-700 bg-blue-50 dark:bg-blue-900 dark:border-blue-500" : "border-blue-500 dark:border-blue-400"
-        } rounded-md shadow-md w-60 transition-colors duration-200 ease-in-out relative`}
+      className={`w-full h-full ${isDraggingOver ? "border-blue-700 bg-blue-50 dark:bg-blue-900 dark:border-blue-500" : ""} transition-colors duration-200 ease-in-out relative`}
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
       onDoubleClick={onDoubleClick}
     >
-      <div className="bg-blue-500 text-white px-3 py-1 flex items-center gap-2">
-        <FileUp className="h-4 w-4 flex-shrink-0" />
-        <div className="text-sm font-medium truncate" title={data.label}>
-          {data.label}
-        </div>
-      </div>
-      <NodeLoadingIndicator
+      <BaseNode
+        {...props}
         isLoading={data.isLoading || false}
-        message="Loading IFC file..."
-        progressMessage={progress.message}
-        percentage={progress.percentage}
-      />
-      {!data.isLoading && data.error && (
-        <div className="p-3 text-xs text-red-500 break-words">
-          Error: {data.error}
-        </div>
-      )}
-      {!data.isLoading && !data.error && data.properties?.file && (
-        <div className="p-3 text-xs">
-          {data.model ? (
-            renderModelInfo()
-          ) : (
-            <div className="text-muted-foreground text-xs mt-1">
-              Loaded. Drag & drop to replace.
-            </div>
-          )}
-        </div>
-      )}
-      {!data.isLoading && !data.error && !data.properties?.file && !data.isEmptyNode && (
-        <div className="p-3 text-xs text-muted-foreground">
-          {isDraggingOver ? "Drop IFC file here" : "No file selected"}
-        </div>
-      )}
-      {!data.isLoading && !data.error && data.isEmptyNode && (
-        <div className="p-3">
-          <div className="text-xs text-orange-600 dark:text-orange-400 font-medium">
-            IFC file needs to be reloaded
+        error={data.error || null}
+        progress={progress.percentage > 0 ? progress : null}
+        showStatusIcon={true}
+        theme={nodeThemes.ifc}
+        hideInputHandle={true}
+      >
+        {!data.isLoading && !data.error && data.properties?.file && (
+          <div className="p-3 text-xs">
+            {data.model ? (
+              renderModelInfo()
+            ) : (
+              <div className="text-muted-foreground text-xs mt-1">
+                Loaded. Drag & drop to replace.
+              </div>
+            )}
           </div>
-          {data.fileName && (
+        )}
+        {!data.isLoading && !data.error && !data.properties?.file && !data.isEmptyNode && (
+          <div className="p-3 text-xs text-muted-foreground">
+            {isDraggingOver ? "Drop IFC file here" : "No file selected"}
+          </div>
+        )}
+        {!data.isLoading && !data.error && data.isEmptyNode && (
+          <div className="p-3">
+            <div className="text-xs text-orange-600 dark:text-orange-400 font-medium">
+              IFC file needs to be reloaded
+            </div>
+            {data.fileName && (
+              <div className="text-xs text-muted-foreground mt-1">
+                Original file: {data.fileName}
+              </div>
+            )}
             <div className="text-xs text-muted-foreground mt-1">
-              Original file: {data.fileName}
+              Drag & drop or click to load IFC file
             </div>
-          )}
-          <div className="text-xs text-muted-foreground mt-1">
-            Drag & drop or click to load IFC file
           </div>
-        </div>
-      )}
-      <Handle
-        type="source"
-        position={Position.Right}
-        id="output"
-        style={{ background: "#555", width: 8, height: 8 }}
-        isConnectable={isConnectable}
-      />
+        )}
+      </BaseNode>
     </div>
   );
 });

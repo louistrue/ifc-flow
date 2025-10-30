@@ -1,11 +1,13 @@
 "use client";
 
 import { memo } from "react";
-import { Handle, Position, type NodeProps } from "reactflow";
-import { Shuffle, AlertTriangle, CheckCircle, Info } from "lucide-react";
+import { type NodeProps, Position } from "reactflow";
 import { DataTransformNodeData } from "./node-types";
+import { BaseNode } from "./base/base-node";
+import { nodeThemes } from "./base/node-themes";
 
-export const DataTransformNode = memo(({ data, isConnectable }: NodeProps<DataTransformNodeData>) => {
+export const DataTransformNode = memo((props: NodeProps<DataTransformNodeData>) => {
+    const { data } = props;
     const { properties, preview } = data;
     const steps = properties?.steps || [];
     const enabledSteps = steps.filter(step => step.enabled);
@@ -59,29 +61,26 @@ export const DataTransformNode = memo(({ data, isConnectable }: NodeProps<DataTr
         }
     };
 
-    // Helper to get status color and icon
-    const getStatusInfo = () => {
-        if (!preview) {
-            return { color: 'text-gray-500', icon: Info, text: 'Not executed' };
-        }
-
-        if (preview.warnings.length > 0) {
-            return { color: 'text-yellow-500', icon: AlertTriangle, text: `${preview.warnings.length} warning${preview.warnings.length !== 1 ? 's' : ''}` };
-        }
-
-        return { color: 'text-green-500', icon: CheckCircle, text: 'Success' };
-    };
-
-    const statusInfo = getStatusInfo();
-    const StatusIcon = statusInfo.icon;
+    // Determine if we need the second input handle
+    const needsSecondInput = properties?.restrictToIncomingElements ||
+        steps.some(step => step.type === 'join' && step.enabled);
 
     return (
-        <div className="bg-white dark:bg-gray-800 border-2 border-cyan-500 dark:border-cyan-400 rounded-md w-64 shadow-md">
-            <div className="bg-cyan-500 text-white px-3 py-1 flex items-center gap-2">
-                <Shuffle className="h-4 w-4" />
-                <div className="text-sm font-medium truncate">{data.label || "Data Transform"}</div>
-            </div>
-
+        <BaseNode
+            {...props}
+            isLoading={(data as any).isLoading || false}
+            error={(data as any).error || null}
+            showStatusIcon={true}
+            theme={nodeThemes.dataTransform}
+            extraHandles={needsSecondInput ? [
+                {
+                    type: 'target',
+                    position: Position.Left,
+                    id: 'inputB',
+                    style: { background: "#06b6d4", width: 8, height: 8, top: '75%' }
+                }
+            ] : undefined}
+        >
             <div className="p-3 text-xs space-y-2">
                 {/* Steps summary */}
                 <div>
@@ -97,8 +96,11 @@ export const DataTransformNode = memo(({ data, isConnectable }: NodeProps<DataTr
                         <div className="flex items-center justify-between">
                             <span className="text-gray-600 dark:text-gray-400">Status:</span>
                             <div className="flex items-center gap-1">
-                                <StatusIcon className={`h-3 w-3 ${statusInfo.color}`} />
-                                <span className={`text-xs ${statusInfo.color}`}>{statusInfo.text}</span>
+                                {preview.warnings.length > 0 ? (
+                                    <span className="text-xs text-yellow-500">⚠ {preview.warnings.length} warning{preview.warnings.length !== 1 ? 's' : ''}</span>
+                                ) : (
+                                    <span className="text-xs text-green-500">✓ Success</span>
+                                )}
                             </div>
                         </div>
 
@@ -169,48 +171,7 @@ export const DataTransformNode = memo(({ data, isConnectable }: NodeProps<DataTr
                     </div>
                 )}
             </div>
-
-            {/* Primary input handle */}
-            <Handle
-                type="target"
-                position={Position.Left}
-                id="input"
-                style={{ background: "#555", width: 10, height: 10, top: '40%' }}
-                isConnectable={isConnectable}
-            />
-
-            {/* Optional second input for joins/restrictions - only show if needed */}
-            {(properties?.restrictToIncomingElements ||
-                steps.some(step => step.type === 'join' && step.enabled)) && (
-                    <Handle
-                        type="target"
-                        position={Position.Left}
-                        id="inputB"
-                        style={{ background: "#06b6d4", width: 8, height: 8, top: '75%' }}
-                        isConnectable={isConnectable}
-                    />
-                )}
-
-            {/* Handle labels */}
-            <div className="absolute -left-12 top-[35%] text-[10px] text-gray-500 pointer-events-none">
-                data
-            </div>
-            {(properties?.restrictToIncomingElements ||
-                steps.some(step => step.type === 'join' && step.enabled)) && (
-                    <div className="absolute -left-16 top-[70%] text-[10px] text-cyan-600 pointer-events-none">
-                        filter
-                    </div>
-                )}
-
-            {/* Output handle */}
-            <Handle
-                type="source"
-                position={Position.Right}
-                id="output"
-                style={{ background: "#555", width: 8, height: 8 }}
-                isConnectable={isConnectable}
-            />
-        </div>
+        </BaseNode>
     );
 });
 

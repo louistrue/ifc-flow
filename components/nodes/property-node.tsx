@@ -1,9 +1,11 @@
 "use client";
 
 import { memo } from "react";
-import { Handle, Position, type NodeProps } from "reactflow";
+import { type NodeProps } from "reactflow";
 import { Edit, List, FileSearch, AlertTriangle } from "lucide-react";
 import { PropertyNodeData } from "./node-types";
+import { BaseNode } from "./base/base-node";
+import { nodeThemes } from "./base/node-themes";
 // Define proper types for the component
 interface PropertyInfo {
   name: string;
@@ -19,24 +21,14 @@ interface PropertyNodeElement {
   [key: string]: any;
 }
 
-interface PropertyNodeProps {
-  data: {
-    label?: string;
-    properties?: {
-      propertyName?: string;
-      action?: string;
-      propertyValue?: string;
-      targetPset?: string;
-      useValueInput?: boolean;
-    };
-    results?: PropertyNodeElement[];
-  };
-  isConnectable?: boolean;
-}
+// Note: PropertyNode now uses BaseNode, but handles are managed by BaseNode
 
 export const PropertyNode = memo(
-  ({ data, isConnectable }: PropertyNodeProps) => {
+  (props: NodeProps<PropertyNodeData>) => {
+    const { data } = props;
     const { properties, label = "Property Node" } = data;
+    // PropertyNodeData may have results at runtime even if not in type
+    const nodeData = data as PropertyNodeData & { results?: PropertyNodeElement[] };
 
     // Extract property information from component data
     // This handles both formats: "IsExternal", "Pset_WallCommon:IsExternal", and "MyCustomPset.PropertyName"
@@ -75,23 +67,23 @@ export const PropertyNode = memo(
 
     // Helper to get count of elements with property
     const getElementsWithPropertyCount = (): string => {
-      if (!data.results) return "0 of 0 elements";
+      if (!nodeData.results) return "0 of 0 elements";
 
-      const withProperty = data.results.filter(
+      const withProperty = nodeData.results.filter(
         (e) => e.propertyInfo?.exists
       ).length;
-      return `${withProperty} of ${data.results.length} elements`;
+      return `${withProperty} of ${nodeData.results.length} elements`;
     };
 
     // Prepare output data for watch node in a more concise format
     const getOutputData = () => {
-      if (!data.results || action.toLowerCase() !== "get") return data.results;
+      if (!nodeData.results || action.toLowerCase() !== "get") return nodeData.results;
 
-      if (data.results.length === 0)
+      if (nodeData.results.length === 0)
         return { message: "No elements processed" };
 
       // Extract the property results
-      const elementsWithProperty = data.results.filter(
+      const elementsWithProperty = nodeData.results.filter(
         (e) => e.propertyInfo?.exists
       );
 
@@ -125,7 +117,7 @@ export const PropertyNode = memo(
         targetPset: targetPset !== "any" ? targetPset : null,
         found: true,
         count: {
-          total: data.results.length,
+          total: nodeData.results.length,
           withProperty: elementsWithProperty.length,
         },
         foundIn: [
@@ -144,10 +136,10 @@ export const PropertyNode = memo(
 
     // Show property info for a Get operation with results
     const renderPropertyResults = () => {
-      if (!data.results || action.toLowerCase() !== "get") return null;
+      if (!nodeData.results || action.toLowerCase() !== "get") return null;
 
       // Count elements with the property
-      const elementsWithProperty = data.results.filter(
+      const elementsWithProperty = nodeData.results.filter(
         (e) => e.propertyInfo?.exists
       );
 
@@ -246,11 +238,13 @@ export const PropertyNode = memo(
     };
 
     return (
-      <div className="bg-white dark:bg-gray-800 border-2 border-pink-500 dark:border-pink-400 rounded-md w-48 shadow-md">
-        <div className="bg-pink-500 text-white px-3 py-1 flex items-center gap-2">
-          <Edit className="h-4 w-4" />
-          <div className="text-sm font-medium truncate">{label}</div>
-        </div>
+      <BaseNode
+        {...props}
+        isLoading={(nodeData as any).isLoading || false}
+        error={(nodeData as any).error || null}
+        showStatusIcon={true}
+        theme={nodeThemes.property}
+      >
         <div className="p-3 text-xs">
           {propertyName ? (
             <div className="space-y-1">
@@ -287,9 +281,9 @@ export const PropertyNode = memo(
                 )}
 
               {/* Warning if no results found */}
-              {data.results &&
-                data.results.length > 0 &&
-                data.results.filter((e) => e.propertyInfo?.exists).length ===
+              {nodeData.results &&
+                nodeData.results.length > 0 &&
+                nodeData.results.filter((e) => e.propertyInfo?.exists).length ===
                 0 &&
                 action.toLowerCase() === "get" && (
                   <div className="mt-2 pt-1 border-t border-gray-200 text-amber-600 flex items-center gap-1">
@@ -313,35 +307,7 @@ export const PropertyNode = memo(
             <div className="text-muted-foreground">No property configured</div>
           )}
         </div>
-        <Handle
-          type="target"
-          position={Position.Left}
-          id="input"
-          style={{ background: "#555", width: 8, height: 8 }}
-          isConnectable={isConnectable}
-        />
-        {/* Second input for property values */}
-        {properties?.useValueInput &&
-          (action.toLowerCase() === "set" ||
-            action.toLowerCase() === "add") && (
-            <Handle
-              type="target"
-              position={Position.Top}
-              id="valueInput"
-              style={{ background: "#7c3aed", width: 8, height: 8 }}
-              isConnectable={isConnectable}
-            />
-          )}
-        <Handle
-          type="source"
-          position={Position.Right}
-          id="output"
-          style={{ background: "#555", width: 8, height: 8 }}
-          isConnectable={isConnectable}
-          // Add data attribute to pass the processed output
-          data-output={JSON.stringify(getOutputData())}
-        />
-      </div>
+      </BaseNode>
     );
   }
 );

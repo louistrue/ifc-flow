@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useState, useCallback, useEffect, useLayoutEffect, useRef } from "react";
-import { Handle, Position, useReactFlow, NodeProps } from "reactflow";
+import { useReactFlow, NodeProps } from "reactflow";
 import {
   FileText,
   Table,
@@ -15,6 +15,7 @@ import {
 import { formatPropertyValue } from "@/lib/ifc/property-utils";
 import React from "react";
 import { PieChart, Pie, Cell, Legend, Tooltip, ResponsiveContainer } from "recharts";
+import { BaseNode } from "./base/base-node";
 
 // Define proper types
 interface WatchNodeData {
@@ -127,7 +128,8 @@ interface OccupancyResults {
 type WatchNodeProps = NodeProps<WatchNodeData>;
 
 export const WatchNode = memo(
-  ({ data, id, selected, isConnectable }: WatchNodeProps) => {
+  (props: WatchNodeProps) => {
+    const { data, id, selected, isConnectable } = props;
     // Colors for pie chart - updated for better contrast and distinction
     const COLORS = [
       '#0088FE', // bright blue
@@ -1986,15 +1988,22 @@ export const WatchNode = memo(
     };
 
     return (
-      <div
-        key={keyRef.current}
-        className={`bg-white dark:bg-gray-800 border-2 ${selected ? "border-teal-600 dark:border-teal-400" : "border-teal-500 dark:border-teal-400"
-          } rounded-md shadow-md relative overflow-hidden ${isResizing ? "nodrag" : ""
-          }`}
-        style={{ width: `${width}px` }}
-        data-nodrag={isResizing ? "true" : undefined}
-        data-watch-counter={updateCounter}
+      <BaseNode
+        {...props}
+        isLoading={false}
+        error={null}
+        showStatusIcon={false}
+        hideDefaultWrapper={true}
       >
+        <div
+          key={keyRef.current}
+          className={`bg-white dark:bg-gray-800 border-2 ${selected ? "border-teal-600 dark:border-teal-400" : "border-teal-500 dark:border-teal-400"
+            } rounded-md shadow-md relative overflow-hidden ${isResizing ? "nodrag" : ""
+            }`}
+          style={{ width: `${width}px` }}
+          data-nodrag={isResizing ? "true" : undefined}
+          data-watch-counter={updateCounter}
+        >
         <div className={`bg-teal-500 text-white px-3 py-1 flex items-center gap-2 nodrag-handle transition-all duration-200 ${isReceivingData ? 'bg-green-500 shadow-lg shadow-green-400/50' : ''}`}>
           <Database className={`h-4 w-4 transition-all duration-200 ${isReceivingData ? 'animate-pulse' : ''}`} />
           <div className="text-sm font-medium truncate">
@@ -2077,14 +2086,8 @@ export const WatchNode = memo(
           </svg>
         </div>
 
-        <Handle
-          type="target"
-          position={Position.Left}
-          id="input"
-          style={{ background: "#555", width: 8, height: 8 }}
-          isConnectable={isConnectable}
-        />
-      </div>
+        </div>
+      </BaseNode>
     );
   }
 );

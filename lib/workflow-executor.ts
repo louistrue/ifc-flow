@@ -19,6 +19,10 @@ import { performAnalysis } from "@/lib/ifc/analysis-utils";
 import { withActiveViewer, hasActiveModel } from "@/lib/ifc/viewer-manager";
 import * as THREE from "three";
 import { buildClusters, buildClustersFromElements, applyClusterColors, ClusterConfig, getClusterStats } from "@/lib/ifc/cluster-utils";
+import { executorRegistry } from "./execution/executor-registry";
+import { ExecutionContext } from "./execution/execution-context";
+// Import executors to register them
+import "./execution/executors/index";
 
 // Add TypeScript interfaces at the top of the file
 interface PropertyInfo {
@@ -158,7 +162,36 @@ export class WorkflowExecutor {
     // Get input values by processing upstream nodes
     const inputValues = await this.getInputValues(nodeId);
 
-    // Process the node based on its type
+    // Try to use executor registry first (new architecture)
+    const executor = executorRegistry.getForNode(node);
+    
+    if (executor) {
+      // Use new executor-based approach
+      const context = new ExecutionContext(
+        node,
+        nodeId,
+        inputValues,
+        this.nodeResults,
+        this.onNodeUpdate,
+        (nodeId: string, data: any) => this.updateNodeDataInList(nodeId, data),
+        (nodeId: string) => this.hasDownstreamGLBExport(nodeId),
+        (nodeId: string) => this.hasDownstreamViewer(nodeId),
+      );
+
+      try {
+        const result = await executor.execute(context);
+        this.nodeResults.set(nodeId, result);
+        if (this.onNodeUpdate) {
+          this.onNodeUpdate(nodeId, result);
+        }
+        return result;
+      } catch (error) {
+        console.error(`Error executing node ${nodeId} with executor:`, error);
+        throw error;
+      }
+    }
+
+    // Fallback to legacy switch statement for nodes without executors yet
     let result;
     switch (node.type) {
       case "ifcNode":

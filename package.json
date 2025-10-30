@@ -5,8 +5,16 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "build:worker": "node scripts/build-worker-esbuild.js",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test": "vitest",
+    "test:ui": "vitest --ui",
+    "test:coverage": "vitest --coverage",
+    "test:watch": "vitest --watch",
+    "test:unit": "vitest tests/unit",
+    "test:integration": "vitest tests/integration",
+    "test:performance": "vitest tests/performance"
   },
   "dependencies": {
     "@ai-sdk/openai": "^2.0.19",
@@ -76,14 +84,25 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.0",
+    "@testing-library/user-event": "^14.6.1",
     "@types/node": "^22",
     "@types/react": "^18",
     "@types/react-dom": "^18",
     "@types/three": "^0.175.0",
+    "@vitejs/plugin-react": "^5.1.0",
+    "@vitest/coverage-v8": "^4.0.5",
+    "@vitest/ui": "^4.0.5",
+    "esbuild": "^0.25.11",
     "eslint": "8.57.1",
     "eslint-config-next": "15.5.0",
+    "fake-indexeddb": "^6.2.4",
+    "happy-dom": "^20.0.10",
+    "msw": "^2.11.6",
     "postcss": "^8",
     "tailwindcss": "^3.4.17",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.0.5"
   }
 }

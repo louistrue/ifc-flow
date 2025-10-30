@@ -111,6 +111,13 @@ export function getModelPropertyNames(model?: IfcModel): string[] {
 // Worker management
 let ifcWorker: Worker | null = null;
 let isWorkerInitialized = false;
+
+// Export reset function for testing
+export function resetWorker(): void {
+  ifcWorker = null;
+  isWorkerInitialized = false;
+  workerPromiseResolvers.clear();
+}
 const workerPromiseResolvers: Map<
   string,
   { resolve: Function; reject: Function }

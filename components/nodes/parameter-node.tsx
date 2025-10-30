@@ -1,20 +1,24 @@
 "use client"
 
 import { memo } from "react"
-import { Handle, Position, type NodeProps } from "reactflow"
-import { Sliders } from "lucide-react"
+import { type NodeProps } from "reactflow"
 import { ParameterNodeData } from "./node-types";
+import { BaseNode } from "./base/base-node";
+import { nodeThemes } from "./base/node-themes";
 
-export const ParameterNode = memo(({ data, isConnectable }: NodeProps<ParameterNodeData>) => {
+export const ParameterNode = memo((props: NodeProps<ParameterNodeData>) => {
+  const { data } = props;
   const paramType = data.properties?.paramType || "number"
   const value = data.properties?.value || (paramType === "number" ? "0" : "")
 
   return (
-    <div className="bg-white dark:bg-gray-800 border-2 border-yellow-500 dark:border-yellow-400 rounded-md w-48 shadow-md">
-      <div className="bg-yellow-500 text-white px-3 py-1 flex items-center gap-2">
-        <Sliders className="h-4 w-4" />
-        <div className="text-sm font-medium truncate">{data.label}</div>
-      </div>
+    <BaseNode
+      {...props}
+      isLoading={(data as any).isLoading || false}
+      error={(data as any).error || null}
+      showStatusIcon={true}
+      theme={nodeThemes.transform}
+    >
       <div className="p-3 text-xs">
         <div className="space-y-1">
           <div className="flex justify-between">
@@ -35,14 +39,7 @@ export const ParameterNode = memo(({ data, isConnectable }: NodeProps<ParameterN
           )}
         </div>
       </div>
-      <Handle
-        type="source"
-        position={Position.Right}
-        id="output"
-        style={{ background: "#555", width: 8, height: 8 }}
-        isConnectable={isConnectable}
-      />
-    </div>
+    </BaseNode>
   )
 })
 

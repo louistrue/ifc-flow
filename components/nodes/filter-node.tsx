@@ -1,17 +1,22 @@
 "use client"
 
 import { memo } from "react"
-import { Handle, Position, type NodeProps } from "reactflow"
-import { Filter } from "lucide-react"
+import { type NodeProps } from "reactflow"
 import { FilterNodeData } from "./node-types";
+import { BaseNode } from "./base/base-node";
+import { nodeThemes } from "./base/node-themes";
 
-export const FilterNode = memo(({ data, isConnectable }: NodeProps<FilterNodeData>) => {
+export const FilterNode = memo((props: NodeProps<FilterNodeData>) => {
+  const { data } = props;
+  
   return (
-    <div className="bg-white dark:bg-gray-800 border-2 border-purple-500 dark:border-purple-400 rounded-md w-48 shadow-md">
-      <div className="bg-purple-500 text-white px-3 py-1 flex items-center gap-2">
-        <Filter className="h-4 w-4" />
-        <div className="text-sm font-medium truncate">{data.label}</div>
-      </div>
+    <BaseNode
+      {...props}
+      isLoading={(data as any).isLoading || false}
+      error={(data as any).error || null}
+      showStatusIcon={true}
+      theme={nodeThemes.filter}
+    >
       <div className="p-3 text-xs">
         {data.properties?.filterType === "property" && data.properties?.property ? (
           <div className="space-y-1">
@@ -51,21 +56,7 @@ export const FilterNode = memo(({ data, isConnectable }: NodeProps<FilterNodeDat
           <div className="text-muted-foreground">No filter configured</div>
         )}
       </div>
-      <Handle
-        type="target"
-        position={Position.Left}
-        id="input"
-        style={{ background: "#555", width: 8, height: 8 }}
-        isConnectable={isConnectable}
-      />
-      <Handle
-        type="source"
-        position={Position.Right}
-        id="output"
-        style={{ background: "#555", width: 8, height: 8 }}
-        isConnectable={isConnectable}
-      />
-    </div>
+    </BaseNode>
   )
 })
 

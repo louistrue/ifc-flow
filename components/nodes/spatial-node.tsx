@@ -1,17 +1,30 @@
 "use client"
 
 import { memo } from "react"
-import { Handle, Position, type NodeProps } from "reactflow"
-import { Layers } from "lucide-react"
+import { type NodeProps, Position } from "reactflow"
 import { SpatialNodeData } from "./node-types";
+import { BaseNode } from "./base/base-node";
+import { nodeThemes } from "./base/node-themes";
 
-export const SpatialNode = memo(({ data, isConnectable }: NodeProps<SpatialNodeData>) => {
+export const SpatialNode = memo((props: NodeProps<SpatialNodeData>) => {
+  const { data } = props;
+  
   return (
-    <div className="bg-white dark:bg-gray-800 border-2 border-lime-500 dark:border-lime-400 rounded-md w-48 shadow-md">
-      <div className="bg-lime-500 text-white px-3 py-1 flex items-center gap-2">
-        <Layers className="h-4 w-4" />
-        <div className="text-sm font-medium truncate">{data.label}</div>
-      </div>
+    <BaseNode
+      {...props}
+      isLoading={(data as any).isLoading || false}
+      error={(data as any).error || null}
+      showStatusIcon={true}
+      theme={nodeThemes.spatial}
+      extraHandles={[
+        {
+          type: 'target',
+          position: Position.Top,
+          id: 'reference',
+          style: { background: "#7c3aed", width: 8, height: 8 }
+        }
+      ]}
+    >
       <div className="p-3 text-xs">
         <div className="space-y-1">
           <div className="flex justify-between">
@@ -30,28 +43,7 @@ export const SpatialNode = memo(({ data, isConnectable }: NodeProps<SpatialNodeD
           </div>
         </div>
       </div>
-      <Handle
-        type="target"
-        position={Position.Left}
-        id="input"
-        style={{ background: "#555", width: 8, height: 8 }}
-        isConnectable={isConnectable}
-      />
-      <Handle
-        type="target"
-        position={Position.Top}
-        id="reference"
-        style={{ background: "#7c3aed", width: 8, height: 8 }}
-        isConnectable={isConnectable}
-      />
-      <Handle
-        type="source"
-        position={Position.Right}
-        id="output"
-        style={{ background: "#555", width: 8, height: 8 }}
-        isConnectable={isConnectable}
-      />
-    </div>
+    </BaseNode>
   )
 })
 

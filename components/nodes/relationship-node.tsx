@@ -1,17 +1,22 @@
 "use client"
 
 import { memo } from "react"
-import { Handle, Position, type NodeProps } from "reactflow"
-import { GitBranch } from "lucide-react"
+import { type NodeProps } from "reactflow"
 import { RelationshipNodeData } from "./node-types";
+import { BaseNode } from "./base/base-node";
+import { nodeThemes } from "./base/node-themes";
 
-export const RelationshipNode = memo(({ data, isConnectable }: NodeProps<RelationshipNodeData>) => {
+export const RelationshipNode = memo((props: NodeProps<RelationshipNodeData>) => {
+  const { data } = props;
+  
   return (
-    <div className="bg-white dark:bg-gray-800 border-2 border-violet-500 dark:border-violet-400 rounded-md w-48 shadow-md">
-      <div className="bg-violet-500 text-white px-3 py-1 flex items-center gap-2">
-        <GitBranch className="h-4 w-4" />
-        <div className="text-sm font-medium truncate">{data.label}</div>
-      </div>
+    <BaseNode
+      {...props}
+      isLoading={(data as any).isLoading || false}
+      error={(data as any).error || null}
+      showStatusIcon={true}
+      theme={nodeThemes.relationship}
+    >
       <div className="p-3 text-xs">
         <div className="space-y-1">
           <div className="flex justify-between">
@@ -24,21 +29,7 @@ export const RelationshipNode = memo(({ data, isConnectable }: NodeProps<Relatio
           </div>
         </div>
       </div>
-      <Handle
-        type="target"
-        position={Position.Left}
-        id="input"
-        style={{ background: "#555", width: 8, height: 8 }}
-        isConnectable={isConnectable}
-      />
-      <Handle
-        type="source"
-        position={Position.Right}
-        id="output"
-        style={{ background: "#555", width: 8, height: 8 }}
-        isConnectable={isConnectable}
-      />
-    </div>
+    </BaseNode>
   )
 })
 

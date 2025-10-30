@@ -1,9 +1,11 @@
 "use client"
 
 import { memo, useState } from "react"
-import { Handle, Position, type NodeProps } from "reactflow"
-import { Calculator, ChevronDown } from "lucide-react"
+import { type NodeProps } from "reactflow"
+import { ChevronDown } from "lucide-react"
 import { QuantityNodeData } from "./node-types";
+import { BaseNode } from "./base/base-node";
+import { nodeThemes } from "./base/node-themes";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
@@ -13,7 +15,8 @@ import { Switch } from "@/components/ui/switch";
 type QuantityType = NonNullable<QuantityNodeData['properties']>['quantityType'];
 type GroupByType = NonNullable<QuantityNodeData['properties']>['groupBy'];
 
-export const QuantityNode = memo(({ data, id, isConnectable, selected }: NodeProps<QuantityNodeData>) => {
+export const QuantityNode = memo((props: NodeProps<QuantityNodeData>) => {
+  const { data, id, selected } = props;
   // Local state for the properties while the popover is open
   const [localQuantityType, setLocalQuantityType] = useState<QuantityType>(data.properties?.quantityType || "area");
   const [localGroupBy, setLocalGroupBy] = useState<GroupByType>(data.properties?.groupBy || "none");
@@ -42,12 +45,13 @@ export const QuantityNode = memo(({ data, id, isConnectable, selected }: NodePro
   }[groupBy as 'none' | 'class' | 'type' | 'level' | 'material'] || "None";
 
   return (
-    <div className={`bg-white dark:bg-gray-800 border-2 border-amber-500 dark:border-amber-400 rounded-md w-48 shadow-md ${selected ? 'ring-2 ring-amber-300' : ''
-      }`}>
-      <div className="bg-amber-500 text-white px-3 py-1 flex items-center gap-2">
-        <Calculator className="h-4 w-4" />
-        <div className="text-sm font-medium truncate">{data.label || "Quantity Take-Off"}</div>
-      </div>
+    <BaseNode
+      {...props}
+      isLoading={(data as any).isLoading || false}
+      error={(data as any).error || null}
+      showStatusIcon={true}
+      theme={nodeThemes.quantity}
+    >
       <div className="p-3 text-xs">
         <div className="space-y-2">
           {/* Quantity Type Selector */}
@@ -168,21 +172,7 @@ export const QuantityNode = memo(({ data, id, isConnectable, selected }: NodePro
           </div>
         </div>
       </div>
-      <Handle
-        type="target"
-        position={Position.Left}
-        id="input"
-        style={{ background: "#555", width: 8, height: 8 }}
-        isConnectable={isConnectable}
-      />
-      <Handle
-        type="source"
-        position={Position.Right}
-        id="output"
-        style={{ background: "#555", width: 8, height: 8 }}
-        isConnectable={isConnectable}
-      />
-    </div>
+    </BaseNode>
   )
 })
 

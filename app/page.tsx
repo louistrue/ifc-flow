@@ -561,61 +561,71 @@ function FlowWithProvider() {
     });
   }, [clipboard, nodes, edges, saveToHistory, setNodes, setEdges, toast]);
 
-  // Updated node changes handler with history
+  // Store refs to functions to avoid recreating callback
+  const saveToHistoryRef = useRef(saveToHistory);
+  
+  useEffect(() => {
+    saveToHistoryRef.current = saveToHistory;
+  }, [saveToHistory]);
+
+  // React Flow REQUIRES empty dependency array [] for onNodesChange!
+  // From docs: "const onNodesChange = useCallback((changes) => setNodes((nds) => applyNodeChanges(changes, nds)), []);"
   const handleNodesChange = useCallback(
     (changes: NodeChange[]) => {
-      // Apply changes immediately for smooth interaction
+      // Apply changes - React Flow handles multi-node dragging internally
       onNodesChange(changes);
 
-      // Check if this is a position change (dragging)
+      // Handle history for non-position, non-selection changes
+      const isSelectionChange = changes.every(
+        (change) => change.type === "select"
+      );
       const isPositionChange = changes.some(
         (change) => change.type === "position"
       );
 
-      // Check if dragging has ended
-      const isDragEnd = changes.some(
-        (change) =>
-          change.type === "position" &&
-          change.dragging === false &&
-          isNodeDragging
-      );
-
-      // Track drag start
-      if (isPositionChange && !isNodeDragging) {
-        const isDragStart = changes.some(
-          (change) => change.type === "position" && change.dragging === true
-        );
-        if (isDragStart) {
-          setIsNodeDragging(true);
-        }
-      }
-
-      // Save to history only when drag ends
-      if (isDragEnd) {
-        setIsNodeDragging(false);
-        // Use a small delay to ensure final position is captured
-        setTimeout(() => {
-          saveToHistory(nodes, edges);
-        }, 50);
-      }
-
-      // For non-drag changes, save to history after a delay
-      const isSelectionChange = changes.every(
-        (change) => change.type === "select"
-      );
-
       if (!isSelectionChange && !isPositionChange) {
-        // Auto-save timer for other changes
+        // Auto-save for add/remove operations
         if (autoSaveTimerRef.current) {
           clearTimeout(autoSaveTimerRef.current);
         }
         autoSaveTimerRef.current = setTimeout(() => {
-          saveToHistory(nodes, edges);
+          // Get current nodes/edges via setNodes callback pattern
+          setNodes((currentNodes) => {
+            setEdges((currentEdges) => {
+              saveToHistoryRef.current(currentNodes, currentEdges);
+              return currentEdges;
+            });
+            return currentNodes;
+          });
         }, 1000);
       }
     },
-    [nodes, edges, onNodesChange, saveToHistory, isNodeDragging]
+    [] // EMPTY ARRAY - Critical for React Flow multi-node dragging!
   );
+
+  // Select node when drag starts (so it gets highlighted)
+  const onNodeDragStart = useCallback((_event: React.MouseEvent, node: Node) => {
+    // Select the node being dragged if not already selected
+    setNodes((nds) =>
+      nds.map((n) => ({
+        ...n,
+        selected: n.id === node.id,
+      }))
+    );
+  }, [setNodes]);
+
+  // Save history when drag ends
+  const onNodeDragStop = useCallback(() => {
+    setTimeout(() => {
+      setNodes((currentNodes) => {
+        setEdges((currentEdges) => {
+          saveToHistoryRef.current(currentNodes, currentEdges);
+          return currentEdges;
+        });
+        return currentNodes;
+      });
+    }, 50);
+  }, []); // EMPTY ARRAY
 
   const onConnect = useCallback(
     (params: Connection) => {
@@ -1268,6 +1278,8 @@ function FlowWithProvider() {
                 onDragOver={onDragOver}
                 onNodeClick={onNodeClick}
                 onNodeDoubleClick={onNodeDoubleClick}
+                onNodeDragStart={onNodeDragStart}
+                onNodeDragStop={onNodeDragStop}
                 autoPanOnConnect={false}
                 autoPanOnNodeDrag={false}
                 onPaneClick={(event) => {

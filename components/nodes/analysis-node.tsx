@@ -1,9 +1,12 @@
 "use client";
 
 import { memo, useState, useCallback, useEffect } from "react";
-import { Handle, Position, type NodeProps, useReactFlow } from "reactflow";
+import { type NodeProps, useReactFlow } from "reactflow";
 import { Home, BarChart3, Settings2, Building2, Users, Activity } from "lucide-react";
 import { AnalysisNodeData } from "./node-types";
+import { BaseNode } from "./base/base-node";
+import { nodeThemes } from "./base/node-themes";
+import { useNodeProgress } from "./base/use-node-progress";
 
 // Space analysis metric configurations
 const spaceMetrics = [
@@ -37,9 +40,11 @@ const spaceMetrics = [
   }
 ];
 
-export const AnalysisNode = memo(({ data, id, isConnectable }: NodeProps<AnalysisNodeData>) => {
+export const AnalysisNode = memo((props: NodeProps<AnalysisNodeData>) => {
+  const { data, id, isConnectable, selected } = props;
   const [progressMessages, setProgressMessages] = useState<string[]>([]);
   const { setNodes } = useReactFlow();
+  const { messages: progressMessagesHook, addMessage, clear: clearProgress } = useNodeProgress();
 
   // Get current metric or default to room_assignment
   const currentMetric = data.properties?.metric || "room_assignment";
@@ -49,6 +54,13 @@ export const AnalysisNode = memo(({ data, id, isConnectable }: NodeProps<Analysi
   const hasResults = data.result !== undefined && data.result !== null;
   const hasError = data.error !== undefined && data.error !== null;
   const isLoading = data.isLoading || false;
+  
+  // Derive progress from data or use hook messages
+  const currentProgress = data.progressMessages && data.progressMessages.length > 0
+    ? { percentage: 0, message: data.progressMessages[data.progressMessages.length - 1] }
+    : progressMessagesHook.length > 0
+    ? { percentage: 0, message: progressMessagesHook[progressMessagesHook.length - 1] }
+    : null;
 
   // Update progress messages from node data or use defaults when loading starts
   useEffect(() => {
@@ -95,33 +107,17 @@ export const AnalysisNode = memo(({ data, id, isConnectable }: NodeProps<Analysi
     );
   }, [id, setNodes]);
 
-  const getStatusIcon = () => {
-    if (isLoading) return <div className="h-4 w-4 rounded-full border-2 border-white border-t-transparent animate-spin" />;
-    if (hasError) return <div className="h-4 w-4 rounded-full bg-red-400 animate-pulse" />;
-    if (hasResults) return <div className="h-4 w-4 rounded-full bg-green-400" />;
-    return <Settings2 className="h-4 w-4 opacity-60" />;
-  };
-
-  const getStatusText = () => {
-    if (isLoading) return "Analyzing...";
-    if (hasError) return "Error";
-    if (hasResults) return "Complete";
-    return "Ready";
-  };
-
   const MetricIcon = selectedMetric.icon;
+  
   return (
-    <div className="bg-white dark:bg-gray-800 border-2 border-cyan-500 dark:border-cyan-400 rounded-md w-64 shadow-md">
-      <div className="bg-cyan-500 text-white px-3 py-1 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Building2 className="h-4 w-4" />
-          <div className="text-sm font-medium truncate">{data.label || "Space Analysis"}</div>
-        </div>
-        {getStatusIcon()}
-      </div>
-      <div className="px-3 py-1 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
-        <div className="text-xs font-medium text-gray-600 dark:text-gray-400">{getStatusText()}</div>
-      </div>
+    <BaseNode
+      {...props}
+      isLoading={isLoading}
+      error={hasError ? (data.error || "Analysis failed") : null}
+      progress={currentProgress}
+      showStatusIcon={true}
+      theme={nodeThemes.analysis}
+    >
       <div className="p-3 text-xs">
         <div className="mb-2">
           <div className="flex items-center gap-2">
@@ -202,28 +198,8 @@ export const AnalysisNode = memo(({ data, id, isConnectable }: NodeProps<Analysi
             <div className="text-[10px] text-green-600 dark:text-green-400">Analysis complete</div>
           </div>
         )}
-
-        {hasError && (
-          <div className="mt-3 p-2 bg-red-50 dark:bg-red-900/20 rounded-md border border-red-200 dark:border-red-800">
-            <div className="text-[10px] text-red-600 dark:text-red-400">{data.error || "Analysis failed"}</div>
-          </div>
-        )}
       </div>
-      <Handle
-        type="target"
-        position={Position.Left}
-        id="input"
-        style={{ background: "#555", width: 8, height: 8 }}
-        isConnectable={isConnectable}
-      />
-      <Handle
-        type="source"
-        position={Position.Right}
-        id="output"
-        style={{ background: "#555", width: 8, height: 8 }}
-        isConnectable={isConnectable}
-      />
-    </div>
+    </BaseNode>
   );
 });
 

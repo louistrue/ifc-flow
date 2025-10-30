@@ -1,16 +1,16 @@
 "use client";
 
 import { memo } from "react";
-import { Handle, Position, type NodeProps } from "reactflow";
-import { Layers, Eye, EyeOff, Palette } from "lucide-react";
-import { NodeStatusBadge } from "../node-status-badge";
-import type { NodeStatus } from "@/components/node-status-badge";
+import { type NodeProps } from "reactflow";
+import { Eye, EyeOff, Palette } from "lucide-react";
 import { BaseNodeData } from "./node-types";
+import { BaseNode } from "./base/base-node";
+import { nodeThemes } from "./base/node-themes";
 import { toggleClusterVisibility, isolateClusters, showAllClusters } from "@/lib/ifc/cluster-utils";
 import { withActiveViewer } from "@/lib/ifc/viewer-manager";
 
 interface ClusterNodeData extends BaseNodeData {
-  status?: NodeStatus;
+  status?: any;
   clusterResult?: {
     clusters: Array<{
       key: string;
@@ -37,8 +37,8 @@ interface ClusterNodeData extends BaseNodeData {
 }
 
 export const ClusterNode = memo(
-  ({ data, isConnectable }: NodeProps<ClusterNodeData>) => {
-    const status = data?.status || "working";
+  (props: NodeProps<ClusterNodeData>) => {
+    const { data } = props;
     const clusterResult = data?.clusterResult;
     const clusterSet = data?.clusterSet;
     const hasError = clusterResult?.error;
@@ -72,24 +72,14 @@ export const ClusterNode = memo(
     };
 
     return (
-      <div className="bg-white dark:bg-gray-800 border-2 border-purple-500 dark:border-purple-400 rounded-md w-64 shadow-md">
-        <div className="bg-purple-500 text-white px-3 py-1 flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 min-w-0">
-            <Layers className="h-4 w-4 flex-shrink-0" />
-            <div className="text-sm font-medium truncate" title={data.label}>
-              {data.label}
-            </div>
-          </div>
-          <NodeStatusBadge status={status} />
-        </div>
-
+      <BaseNode
+        {...props}
+        isLoading={(data as any).isLoading || false}
+        error={hasError || (data as any).error || null}
+        showStatusIcon={true}
+        theme={nodeThemes.cluster}
+      >
         <div className="p-3 text-xs">
-          {hasError && (
-            <div className="text-red-500 mb-2">
-              Error: {clusterResult?.error}
-            </div>
-          )}
-
           {clusterResult && !hasError && (
             <>
               <div className="flex justify-between mb-2">
@@ -196,22 +186,7 @@ export const ClusterNode = memo(
             </div>
           )}
         </div>
-
-        <Handle
-          type="target"
-          position={Position.Left}
-          id="input"
-          style={{ background: "#555", width: 8, height: 8 }}
-          isConnectable={isConnectable}
-        />
-        <Handle
-          type="source"
-          position={Position.Right}
-          id="output"
-          style={{ background: "#555", width: 8, height: 8 }}
-          isConnectable={isConnectable}
-        />
-      </div>
+      </BaseNode>
     );
   }
 );

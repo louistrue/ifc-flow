@@ -1,9 +1,10 @@
 "use client";
 
 import { memo } from "react";
-import { Handle, Position, type NodeProps } from "reactflow";
-import { Move } from "lucide-react";
+import { type NodeProps } from "reactflow";
 import { TransformNodeData } from "./node-types";
+import { BaseNode } from "./base/base-node";
+import { nodeThemes } from "./base/node-themes";
 
 interface Geometry {
   vertices: number[][];
@@ -100,7 +101,9 @@ function applyTransformation(geometry: Geometry, transform: Transform): Geometry
   return transformedGeometry;
 }
 
-export const TransformNode = memo(({ data, isConnectable }: NodeProps<ExtendedTransformNodeData>) => {
+export const TransformNode = memo((props: NodeProps<ExtendedTransformNodeData>) => {
+  const { data } = props;
+  
   // Apply transformation when data changes
   if (data.geometry) {
     const transform = {
@@ -120,11 +123,13 @@ export const TransformNode = memo(({ data, isConnectable }: NodeProps<ExtendedTr
   }
 
   return (
-    <div className="bg-white dark:bg-gray-800 border-2 border-orange-500 dark:border-orange-400 rounded-md w-48 shadow-md">
-      <div className="bg-orange-500 text-white px-3 py-1 flex items-center gap-2">
-        <Move className="h-4 w-4" />
-        <div className="text-sm font-medium truncate">{data.label}</div>
-      </div>
+    <BaseNode
+      {...props}
+      isLoading={(data as any).isLoading || false}
+      error={(data as any).error || null}
+      showStatusIcon={true}
+      theme={nodeThemes.transform}
+    >
       <div className="p-3 text-xs">
         <div className="grid grid-cols-3 gap-1 mb-1">
           <div className="text-center">
@@ -155,21 +160,7 @@ export const TransformNode = memo(({ data, isConnectable }: NodeProps<ExtendedTr
           </div>
         </div>
       </div>
-      <Handle
-        type="target"
-        position={Position.Left}
-        id="input"
-        style={{ background: "#555", width: 8, height: 8 }}
-        isConnectable={isConnectable}
-      />
-      <Handle
-        type="source"
-        position={Position.Right}
-        id="output"
-        style={{ background: "#555", width: 8, height: 8 }}
-        isConnectable={isConnectable}
-      />
-    </div>
+    </BaseNode>
   );
 });
 

@@ -1,17 +1,11 @@
 "use client";
 
 import { memo } from "react";
-import { Handle, Position, type NodeProps } from "reactflow";
-import { Box } from "lucide-react";
-import { NodeStatusBadge } from "../node-status-badge";
-import {
-  extractGeometry,
-  extractGeometryWithGeom,
-} from "@/lib/ifc/geometry-utils";
+import { type NodeProps } from "reactflow";
 import type { IfcModel } from "@/lib/ifc-utils";
-import type { NodeStatus } from "@/components/node-status-badge";
-import { NodeLoadingIndicator } from "./node-loading-indicator";
 import { GeometryNodeData as BaseGeometryNodeData } from "./node-types";
+import { BaseNode } from "./base/base-node";
+import { nodeThemes } from "./base/node-themes";
 import { hasActiveModel } from "@/lib/ifc/viewer-manager";
 
 interface GeometryNodeProgress {
@@ -21,7 +15,7 @@ interface GeometryNodeProgress {
 
 // Extend the base type with additional properties
 interface ExtendedGeometryNodeData extends BaseGeometryNodeData {
-  status?: NodeStatus;
+  status?: any;
   model?: IfcModel;
   elements?: any[];
   isLoading?: boolean;
@@ -32,8 +26,8 @@ interface ExtendedGeometryNodeData extends BaseGeometryNodeData {
 }
 
 export const GeometryNode = memo(
-  ({ data, isConnectable }: NodeProps<ExtendedGeometryNodeData>) => {
-    const status = data?.status || "working";
+  (props: NodeProps<ExtendedGeometryNodeData>) => {
+    const { data } = props;
     const isLoading = data?.isLoading || false;
     const progress = data?.progress;
     const error = data?.error;
@@ -41,30 +35,14 @@ export const GeometryNode = memo(
     const viewerElementCount = data?.viewerElementCount || 0;
 
     return (
-      <div className="bg-white dark:bg-gray-800 border-2 border-green-500 dark:border-green-400 rounded-md w-48 shadow-md">
-        <div className="bg-green-500 text-white px-3 py-1 flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 min-w-0">
-            <Box className="h-4 w-4 flex-shrink-0" />
-            <div className="text-sm font-medium truncate" title={data.label}>
-              {data.label}
-            </div>
-          </div>
-          <NodeStatusBadge status={status} />
-        </div>
-
-        <NodeLoadingIndicator
-          isLoading={isLoading}
-          message="Processing Geometry..."
-          percentage={progress?.percentage}
-          progressMessage={progress?.message}
-        />
-
-        {!isLoading && error && (
-          <div className="p-3 text-xs text-red-500 break-words">
-            Error: {error}
-          </div>
-        )}
-
+      <BaseNode
+        {...props}
+        isLoading={isLoading}
+        error={error || null}
+        progress={progress || null}
+        showStatusIcon={true}
+        theme={nodeThemes.geometry}
+      >
         {!isLoading && !error && (
           <div className="p-3 text-xs">
             <div className="flex justify-between mb-1">
@@ -105,22 +83,7 @@ export const GeometryNode = memo(
             )}
           </div>
         )}
-
-        <Handle
-          type="target"
-          position={Position.Left}
-          id="input"
-          style={{ background: "#555", width: 8, height: 8 }}
-          isConnectable={isConnectable}
-        />
-        <Handle
-          type="source"
-          position={Position.Right}
-          id="output"
-          style={{ background: "#555", width: 8, height: 8 }}
-          isConnectable={isConnectable}
-        />
-      </div>
+      </BaseNode>
     );
   }
 );

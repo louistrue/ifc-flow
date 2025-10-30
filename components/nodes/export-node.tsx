@@ -1,17 +1,26 @@
 "use client";
 
 import { memo } from "react";
-import { Handle, Position, type NodeProps } from "reactflow";
-import { Download, UploadCloud } from "lucide-react";
+import { type NodeProps } from "reactflow";
+import { UploadCloud } from "lucide-react";
 import { ExportNodeData } from "./node-types";
+import { BaseNode } from "./base/base-node";
+import { nodeThemes } from "./base/node-themes";
 
-export const ExportNode = memo(({ data, isConnectable }: NodeProps<ExportNodeData>) => {
+export const ExportNode = memo((props: NodeProps<ExportNodeData>) => {
+  const { data } = props;
+  // ExportNodeData doesn't have isLoading/error, so we'll check data directly
+  const isLoading = (data as any).isLoading || false;
+  const error = (data as any).error;
+  
   return (
-    <div className="bg-white dark:bg-gray-800 border-2 border-sky-500 dark:border-sky-400 rounded-md w-48 shadow-md">
-      <div className="bg-sky-500 text-white px-3 py-1 flex items-center gap-2">
-        <UploadCloud className="h-4 w-4" />
-        <div className="text-sm font-medium truncate">{data.label}</div>
-      </div>
+    <BaseNode
+      {...props}
+      isLoading={isLoading}
+      error={error || null}
+      showStatusIcon={true}
+      theme={nodeThemes.export}
+    >
       <div className="p-3 text-xs">
         <div className="space-y-1">
           <div className="flex justify-between items-center">
@@ -33,14 +42,7 @@ export const ExportNode = memo(({ data, isConnectable }: NodeProps<ExportNodeDat
           </div>
         </div>
       </div>
-      <Handle
-        type="target"
-        position={Position.Left}
-        id="input"
-        style={{ background: "#555", width: 8, height: 8 }}
-        isConnectable={isConnectable}
-      />
-    </div>
+    </BaseNode>
   );
 });
 

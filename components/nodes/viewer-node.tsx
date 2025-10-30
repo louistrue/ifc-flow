@@ -2,14 +2,13 @@
 
 import { memo, useRef, useEffect, useState, useCallback } from "react";
 import {
-  Handle,
-  Position,
+  type NodeProps,
   useReactFlow,
-  NodeProps,
 } from "reactflow";
-import { CuboidIcon as Cube, Loader2, AlertCircle, CheckCircle, Focus, Eye, Layers, Scissors } from "lucide-react";
+import { CuboidIcon as Cube, Focus, Eye, Layers, Scissors } from "lucide-react";
 import { IfcViewer } from "@/lib/ifc/viewer-utils";
 import { ViewerNodeData as BaseViewerNodeData } from "./node-types";
+import { BaseNode } from "./base/base-node";
 import { useViewerFocus } from "@/components/contexts/viewer-focus-context";
 import { viewerManager } from "@/lib/ifc/viewer-manager";
 
@@ -21,7 +20,8 @@ interface ExtendedViewerNodeData extends BaseViewerNodeData {
 }
 
 export const ViewerNode = memo(
-  ({ data, id, selected, isConnectable }: NodeProps<ExtendedViewerNodeData>) => {
+  (props: NodeProps<ExtendedViewerNodeData>) => {
+    const { data, id, selected } = props;
     const viewerRef = useRef<HTMLDivElement>(null);
     const [viewer, setViewer] = useState<IfcViewer | null>(null);
     const [elementCount, setElementCount] = useState(0);
@@ -290,219 +290,205 @@ export const ViewerNode = memo(
     const nodeDraggable = !isResizing;
 
     return (
-      <div
-        className={`bg-gradient-to-br from-white to-gray-50 dark:from-gray-800 dark:to-gray-900 border-2 ${isInFocusMode
-          ? "border-cyan-400 dark:border-cyan-300 shadow-2xl shadow-cyan-400/60 ring-4 ring-cyan-300/30"
-          : selected
-            ? "border-cyan-600 dark:border-cyan-400 shadow-lg shadow-cyan-500/20"
-            : "border-cyan-500 dark:border-cyan-400 shadow-md hover:shadow-lg hover:shadow-cyan-500/10"
-          } rounded-xl shadow-md relative transition-all duration-300 overflow-hidden`}
-        style={{
-          width: `${width}px`,
-          zIndex: isInFocusMode ? 1000 : 'auto',
-          ...(isInFocusMode && {
-            filter: 'drop-shadow(0 0 16px rgba(34, 211, 238, 0.6)) drop-shadow(0 0 24px rgba(34, 211, 238, 0.3))', // Enhanced neon glow
-            transform: 'scale(1.02)', // Slight scale up for focus
-          })
-        }}
-        data-id={id}
-        onMouseEnter={(e) => {
-          if (isInFocusMode) {
-            e.stopPropagation();
-          }
-        }}
-        onMouseLeave={(e) => {
-          if (isInFocusMode) {
-            e.stopPropagation();
-          }
-        }}
+      <BaseNode
+        {...props}
+        isLoading={isLoading}
+        error={errorMessage || null}
+        showStatusIcon={false}
+        hideDefaultWrapper={true}
       >
-        <div className={`${isInFocusMode ? "bg-cyan-500 shadow-lg shadow-cyan-400/60 border-b border-cyan-300/30" : "bg-cyan-500"} text-white px-3 py-1 flex items-center justify-between gap-2 nodrag-handle transition-all duration-300`}>
-          <div className="flex items-center gap-2 min-w-0">
-            <Cube className="h-4 w-4 flex-shrink-0" />
-            <div className="text-sm font-medium truncate">{data.label}</div>
-            {isInFocusMode && <Focus className="h-3 w-3 flex-shrink-0 text-cyan-200 animate-pulse" />}
-          </div>
-          <div className="flex items-center gap-1 flex-shrink-0">
-            {isLoading && <Loader2 className="h-4 w-4 animate-spin" />}
-            {!isLoading && errorMessage && <AlertCircle className="h-4 w-4 text-red-300" />}
-            {!isLoading && !errorMessage && elementCount > 0 && <CheckCircle className="h-4 w-4 text-green-300" />}
-          </div>
-        </div>
-
-
-        <div className="p-3">
-          <div
-            ref={viewerRef}
-            className={`bg-gray-100 rounded-md flex items-center justify-center overflow-hidden ${isInFocusMode ? "ring-2 ring-cyan-400/30 shadow-inner" : "nodrag"
-              } relative cursor-pointer transition-all duration-300`}
-            style={{
-              height: `${viewerHeight}px`,
-              zIndex: isInFocusMode ? 50 : 'auto' // Ensure viewer is on top when in focus mode
-            }}
-            onDoubleClick={handleViewerDoubleClick}
-            // Enhanced event handling for focus mode
-            onMouseDown={(e) => {
-              if (isInFocusMode) {
-                e.stopPropagation(); // Prevent ReactFlow drag when in focus mode
-              }
-            }}
-            onMouseMove={(e) => {
-              if (isInFocusMode) {
-                e.stopPropagation(); // Prevent ReactFlow interactions when in focus mode
-              }
-            }}
-            onMouseUp={(e) => {
-              if (isInFocusMode) {
-                e.stopPropagation(); // Prevent ReactFlow interactions when in focus mode
-              }
-            }}
-            onWheel={(e) => {
-              if (isInFocusMode) {
-                e.stopPropagation(); // Prevent ReactFlow zoom when in focus mode
-              }
-            }}
-            onContextMenu={(e) => {
-              if (isInFocusMode) {
-                e.stopPropagation(); // Prevent ReactFlow context menu
-              }
-            }}
-          >
-            {isLoading && (
-              <div className="absolute inset-0 bg-gray-400 bg-opacity-50 flex items-center justify-center z-10">
-                <div className="text-white text-sm font-medium">Loading...</div>
-              </div>
-            )}
-            {errorMessage && !isLoading && (
-              <div className="absolute inset-0 bg-red-100 bg-opacity-90 flex items-center justify-center z-10 p-2 text-center">
-                <div className="text-red-700 text-xs font-medium">{errorMessage}</div>
-              </div>
-            )}
-            {!elementCount && !isLoading && !errorMessage && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-4">
-                {/* Animated 3D Cube Icon */}
-                <div className="relative mb-4">
-                  <div className="w-16 h-16 relative animate-pulse">
-                    <Cube className="w-16 h-16 text-cyan-400 opacity-60" />
-                    <div className="absolute inset-0 w-16 h-16 border-2 border-cyan-300 rounded-lg animate-ping opacity-30"></div>
-                  </div>
-                </div>
-
-                {/* Beautiful gradient text */}
-                <div className="space-y-2">
-                  <h3 className="text-lg font-semibold bg-gradient-to-r from-cyan-600 to-blue-600 bg-clip-text text-transparent">
-                    3D Viewer Ready
-                  </h3>
-                  <p className="text-sm text-gray-500 dark:text-gray-400 max-w-xs">
-                    Connect an IFC file or geometry data to start visualizing your building model in 3D
-                  </p>
-                </div>
-
-                {/* Connection indicator */}
-                <div className="mt-6 flex items-center gap-2 text-xs text-gray-400">
-                  <div className="w-2 h-2 rounded-full bg-gray-300 animate-pulse"></div>
-                  <span>Waiting for connection...</span>
-                </div>
-
-                {/* Feature highlights */}
-                <div className="mt-4 grid grid-cols-2 gap-2 text-xs text-gray-400">
-                  <div className="flex items-center gap-1">
-                    <Eye className="w-3 h-3" />
-                    <span>Multiple Views</span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <Layers className="w-3 h-3" />
-                    <span>Clustering</span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <Scissors className="w-3 h-3" />
-                    <span>Sectioning</span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <Focus className="w-3 h-3" />
-                    <span>3D Focus</span>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Focus mode overlay when viewer is ready */}
-            {!isInFocusMode && elementCount > 0 && !isLoading && !errorMessage && (
-              <div className="absolute inset-0 bg-black bg-opacity-0 hover:bg-opacity-10 transition-all duration-200 flex items-center justify-center pointer-events-none">
-                <div className="bg-white dark:bg-gray-800 rounded-lg px-3 py-2 shadow-lg opacity-0 hover:opacity-100 transition-opacity duration-200">
-                  <div className="text-xs font-medium text-center flex items-center gap-2">
-                    <Focus className="h-4 w-4" />
-                    Double-click for 3D controls
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Focus mode active indicator */}
-            {isInFocusMode && (
-              <div className="absolute top-2 right-2 bg-blue-500 text-white rounded-full px-2 py-1 text-xs font-medium flex items-center gap-1 shadow-lg z-20">
-                <Focus className="h-3 w-3" />
-                3D Focus
-              </div>
-            )}
-          </div>
-          <div className="mt-2 text-xs">
-            {/* Instructions for focus mode */}
-            {isInFocusMode && (
-              <div className="mt-1 text-[10px] text-blue-600 dark:text-blue-400 text-center">
-                Press ESC or click outside to exit 3D focus mode
-              </div>
-            )}
-            {errorMessage && !isLoading && (
-              <div className="flex justify-between mt-1 text-red-700">
-                <span>Status:</span>
-                <span className="font-medium">Load Error</span>
-              </div>
-            )}
-          </div>
-        </div>
-
         <div
-          className={`absolute bottom-0 right-0 w-6 h-6 cursor-nwse-resize nodrag ${selected ? "text-cyan-600" : "text-gray-400"
-            } hover:text-cyan-500 ${isInFocusMode ? "opacity-30 pointer-events-none" : ""}`}
-          onMouseDown={!isInFocusMode ? startResize : undefined}
+          className={`bg-gradient-to-br from-white to-gray-50 dark:from-gray-800 dark:to-gray-900 border-2 ${isInFocusMode
+            ? "border-cyan-400 dark:border-cyan-300 shadow-2xl shadow-cyan-400/60 ring-4 ring-cyan-300/30"
+            : selected
+              ? "border-cyan-600 dark:border-cyan-400 shadow-lg shadow-cyan-500/20"
+              : "border-cyan-500 dark:border-cyan-400 shadow-md hover:shadow-lg hover:shadow-cyan-500/10"
+            } rounded-xl shadow-md relative transition-all duration-300 overflow-hidden`}
+          style={{
+            width: `${width}px`,
+            zIndex: isInFocusMode ? 1000 : 'auto',
+            ...(isInFocusMode && {
+              filter: 'drop-shadow(0 0 16px rgba(34, 211, 238, 0.6)) drop-shadow(0 0 24px rgba(34, 211, 238, 0.3))',
+              transform: 'scale(1.02)',
+            })
+          }}
+          data-id={id}
+          onMouseEnter={(e) => {
+            if (isInFocusMode) {
+              e.stopPropagation();
+            }
+          }}
+          onMouseLeave={(e) => {
+            if (isInFocusMode) {
+              e.stopPropagation();
+            }
+          }}
         >
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            xmlns="http://www.w3.org/2000/svg"
-          >
-            <path
-              d="M22 2L2 22"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-            />
-            <path
-              d="M22 10L10 22"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-            />
-            <path
-              d="M22 18L18 22"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-            />
-          </svg>
-        </div>
+          <div className={`${isInFocusMode ? "bg-cyan-500 shadow-lg shadow-cyan-400/60 border-b border-cyan-300/30" : "bg-cyan-500"} text-white px-3 py-1 flex items-center justify-between gap-2 nodrag-handle transition-all duration-300`}>
+            <div className="flex items-center gap-2 min-w-0">
+              <Cube className="h-4 w-4 flex-shrink-0" />
+              <div className="text-sm font-medium truncate">{data.label}</div>
+              {isInFocusMode && <Focus className="h-3 w-3 flex-shrink-0 text-cyan-200 animate-pulse" />}
+            </div>
+            <div className="flex items-center gap-1 flex-shrink-0">
+              {isLoading && <div className="h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+              {!isLoading && errorMessage && <div className="h-4 w-4 rounded-full bg-red-300" />}
+              {!isLoading && !errorMessage && elementCount > 0 && <div className="h-4 w-4 rounded-full bg-green-300" />}
+            </div>
+          </div>
 
-        <Handle
-          type="target"
-          position={Position.Left}
-          id="input"
-          style={{ background: "#555", width: 8, height: 8 }}
-          isConnectable={isConnectable}
-        />
-      </div>
+          <div className="p-3">
+            <div
+              ref={viewerRef}
+              className={`bg-gray-100 rounded-md flex items-center justify-center overflow-hidden ${isInFocusMode ? "ring-2 ring-cyan-400/30 shadow-inner" : "nodrag"
+                } relative cursor-pointer transition-all duration-300`}
+              style={{
+                height: `${viewerHeight}px`,
+                zIndex: isInFocusMode ? 50 : 'auto'
+              }}
+              onDoubleClick={handleViewerDoubleClick}
+              onMouseDown={(e) => {
+                if (isInFocusMode) {
+                  e.stopPropagation();
+                }
+              }}
+              onMouseMove={(e) => {
+                if (isInFocusMode) {
+                  e.stopPropagation();
+                }
+              }}
+              onMouseUp={(e) => {
+                if (isInFocusMode) {
+                  e.stopPropagation();
+                }
+              }}
+              onWheel={(e) => {
+                if (isInFocusMode) {
+                  e.stopPropagation();
+                }
+              }}
+              onContextMenu={(e) => {
+                if (isInFocusMode) {
+                  e.stopPropagation();
+                }
+              }}
+            >
+              {isLoading && (
+                <div className="absolute inset-0 bg-gray-400 bg-opacity-50 flex items-center justify-center z-10">
+                  <div className="text-white text-sm font-medium">Loading...</div>
+                </div>
+              )}
+              {errorMessage && !isLoading && (
+                <div className="absolute inset-0 bg-red-100 bg-opacity-90 flex items-center justify-center z-10 p-2 text-center">
+                  <div className="text-red-700 text-xs font-medium">{errorMessage}</div>
+                </div>
+              )}
+              {!elementCount && !isLoading && !errorMessage && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-4">
+                  <div className="relative mb-4">
+                    <div className="w-16 h-16 relative animate-pulse">
+                      <Cube className="w-16 h-16 text-cyan-400 opacity-60" />
+                      <div className="absolute inset-0 w-16 h-16 border-2 border-cyan-300 rounded-lg animate-ping opacity-30"></div>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <h3 className="text-lg font-semibold bg-gradient-to-r from-cyan-600 to-blue-600 bg-clip-text text-transparent">
+                      3D Viewer Ready
+                    </h3>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 max-w-xs">
+                      Connect an IFC file or geometry data to start visualizing your building model in 3D
+                    </p>
+                  </div>
+                  <div className="mt-6 flex items-center gap-2 text-xs text-gray-400">
+                    <div className="w-2 h-2 rounded-full bg-gray-300 animate-pulse"></div>
+                    <span>Waiting for connection...</span>
+                  </div>
+                  <div className="mt-4 grid grid-cols-2 gap-2 text-xs text-gray-400">
+                    <div className="flex items-center gap-1">
+                      <Eye className="w-3 h-3" />
+                      <span>Multiple Views</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <Layers className="w-3 h-3" />
+                      <span>Clustering</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <Scissors className="w-3 h-3" />
+                      <span>Sectioning</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <Focus className="w-3 h-3" />
+                      <span>3D Focus</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+              {!isInFocusMode && elementCount > 0 && !isLoading && !errorMessage && (
+                <div className="absolute inset-0 bg-black bg-opacity-0 hover:bg-opacity-10 transition-all duration-200 flex items-center justify-center pointer-events-none">
+                  <div className="bg-white dark:bg-gray-800 rounded-lg px-3 py-2 shadow-lg opacity-0 hover:opacity-100 transition-opacity duration-200">
+                    <div className="text-xs font-medium text-center flex items-center gap-2">
+                      <Focus className="h-4 w-4" />
+                      Double-click for 3D controls
+                    </div>
+                  </div>
+                </div>
+              )}
+              {isInFocusMode && (
+                <div className="absolute top-2 right-2 bg-blue-500 text-white rounded-full px-2 py-1 text-xs font-medium flex items-center gap-1 shadow-lg z-20">
+                  <Focus className="h-3 w-3" />
+                  3D Focus
+                </div>
+              )}
+            </div>
+            <div className="mt-2 text-xs">
+              {isInFocusMode && (
+                <div className="mt-1 text-[10px] text-blue-600 dark:text-blue-400 text-center">
+                  Press ESC or click outside to exit 3D focus mode
+                </div>
+              )}
+              {errorMessage && !isLoading && (
+                <div className="flex justify-between mt-1 text-red-700">
+                  <span>Status:</span>
+                  <span className="font-medium">Load Error</span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div
+            className={`absolute bottom-0 right-0 w-6 h-6 cursor-nwse-resize nodrag ${selected ? "text-cyan-600" : "text-gray-400"
+              } hover:text-cyan-500 ${isInFocusMode ? "opacity-30 pointer-events-none" : ""}`}
+            onMouseDown={!isInFocusMode ? startResize : undefined}
+          >
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <path
+                d="M22 2L2 22"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+              />
+              <path
+                d="M22 10L10 22"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+              />
+              <path
+                d="M22 18L18 22"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+              />
+            </svg>
+          </div>
+        </div>
+      </BaseNode>
     );
   }
 );

@@ -262,102 +262,131 @@ body {
   }
 
   /* React Flow selected node styling (neon glow, theme-aware, per node color) */
-  /* Base: keep transitions */
+  /* Base: keep transitions but disable when dragging */
   .react-flow__node {
-    transition: box-shadow 0.2s ease-in-out, transform 0.2s ease-in-out;
+    transition: box-shadow 0.2s ease-in-out;
   }
 
   /* Reset any default selection shadow; we style inner node container below */
+  /* IMPORTANT: Don't use transform! React Flow uses it for positioning! */
   .react-flow__node.selected {
     box-shadow: none !important;
-    transform: scale(1.015);
     z-index: 10 !important;
+  }
+  
+  /* Disable transitions when dragging for smooth movement */
+  .react-flow__node.dragging {
+    transition: none !important;
+  }
+  
+  .react-flow__node.dragging.selected {
+    transition: none !important;
+  }
+  
+  /* Scale the inner content instead, not the wrapper */
+  .react-flow__node.selected > div {
+    transform: scale(1.015);
+    transition: transform 0.15s ease-out;
+  }
+  
+  .react-flow__node.dragging.selected > div {
+    transform: scale(1);
+    transition: none;
   }
 
   /*
     We target the inner node surface by its Tailwind border color class.
     This lets each node glow in its own color without touching component code.
+    The box-shadow is applied directly to the element with the border class.
+    Using > div selector for direct child and fallback for nested cases.
     Light theme colors
   */
-  .react-flow__node.selected .border-blue-500,
-  .react-flow__node.selected.border-blue-500 {
+  .react-flow__node.selected>div.border-blue-500,
+  .react-flow__node.selected .border-blue-500 {
     box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.55), 0 0 16px rgba(59, 130, 246, 0.6), 0 0 36px rgba(59, 130, 246, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.25) !important;
   }
 
-  .react-flow__node.selected .border-green-500,
-  .react-flow__node.selected.border-green-500 {
+  .react-flow__node.selected>div.border-green-500,
+  .react-flow__node.selected .border-green-500 {
     box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.55), 0 0 16px rgba(34, 197, 94, 0.6), 0 0 36px rgba(34, 197, 94, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.25) !important;
   }
 
-  .react-flow__node.selected .border-purple-500,
-  .react-flow__node.selected.border-purple-500 {
+  .react-flow__node.selected>div.border-purple-500,
+  .react-flow__node.selected .border-purple-500 {
     box-shadow: 0 0 0 2px rgba(168, 85, 247, 0.55), 0 0 16px rgba(168, 85, 247, 0.6), 0 0 36px rgba(168, 85, 247, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.25) !important;
   }
 
-  .react-flow__node.selected .border-orange-500,
-  .react-flow__node.selected.border-orange-500 {
+  .react-flow__node.selected>div.border-rose-500,
+  .react-flow__node.selected .border-rose-500 {
+    box-shadow: 0 0 0 2px rgba(244, 63, 94, 0.55), 0 0 16px rgba(244, 63, 94, 0.6), 0 0 36px rgba(244, 63, 94, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.25) !important;
+  }
+
+  .react-flow__node.selected>div.border-fuchsia-500,
+  .react-flow__node.selected .border-fuchsia-500 {
+    box-shadow: 0 0 0 2px rgba(217, 70, 239, 0.55), 0 0 16px rgba(217, 70, 239, 0.6), 0 0 36px rgba(217, 70, 239, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.25) !important;
+  }
+
+  .react-flow__node.selected>div.border-orange-500,
+  .react-flow__node.selected .border-orange-500 {
     box-shadow: 0 0 0 2px rgba(249, 115, 22, 0.55), 0 0 16px rgba(249, 115, 22, 0.6), 0 0 36px rgba(249, 115, 22, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.25) !important;
   }
 
+  .react-flow__node.selected>div.border-cyan-500,
+  .react-flow__node.selected>div.border-cyan-600,
   .react-flow__node.selected .border-cyan-500,
-  .react-flow__node.selected.border-cyan-500,
-  .react-flow__node.selected .border-cyan-600,
-  .react-flow__node.selected.border-cyan-600 {
+  .react-flow__node.selected .border-cyan-600 {
     box-shadow: 0 0 0 2px rgba(6, 182, 212, 0.55), 0 0 16px rgba(6, 182, 212, 0.6), 0 0 36px rgba(6, 182, 212, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.25) !important;
   }
 
-  .react-flow__node.selected .border-amber-500,
-  .react-flow__node.selected.border-amber-500 {
+  .react-flow__node.selected>div.border-amber-500,
+  .react-flow__node.selected .border-amber-500 {
     box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.55), 0 0 16px rgba(245, 158, 11, 0.6), 0 0 36px rgba(245, 158, 11, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.25) !important;
   }
 
-  .react-flow__node.selected .border-pink-500,
-  .react-flow__node.selected.border-pink-500 {
+  .react-flow__node.selected>div.border-pink-500,
+  .react-flow__node.selected .border-pink-500 {
     box-shadow: 0 0 0 2px rgba(236, 72, 153, 0.55), 0 0 16px rgba(236, 72, 153, 0.6), 0 0 36px rgba(236, 72, 153, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.25) !important;
   }
 
-  .react-flow__node.selected .border-lime-500,
-  .react-flow__node.selected.border-lime-500 {
+  .react-flow__node.selected>div.border-lime-500,
+  .react-flow__node.selected .border-lime-500 {
     box-shadow: 0 0 0 2px rgba(132, 204, 22, 0.55), 0 0 16px rgba(132, 204, 22, 0.6), 0 0 36px rgba(132, 204, 22, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.25) !important;
   }
 
-  .react-flow__node.selected .border-sky-500,
-  .react-flow__node.selected.border-sky-500 {
+  .react-flow__node.selected>div.border-sky-500,
+  .react-flow__node.selected .border-sky-500 {
     box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.55), 0 0 16px rgba(14, 165, 233, 0.6), 0 0 36px rgba(14, 165, 233, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.25) !important;
   }
 
+  .react-flow__node.selected>div.border-teal-500,
+  .react-flow__node.selected>div.border-teal-600,
   .react-flow__node.selected .border-teal-500,
-  .react-flow__node.selected.border-teal-500 {
+  .react-flow__node.selected .border-teal-600 {
     box-shadow: 0 0 0 2px rgba(20, 184, 166, 0.55), 0 0 16px rgba(20, 184, 166, 0.6), 0 0 36px rgba(20, 184, 166, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.25) !important;
   }
 
-  .react-flow__node.selected .border-indigo-500,
-  .react-flow__node.selected.border-indigo-500 {
+  .react-flow__node.selected>div.border-indigo-500,
+  .react-flow__node.selected .border-indigo-500 {
     box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.55), 0 0 16px rgba(99, 102, 241, 0.6), 0 0 36px rgba(99, 102, 241, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.25) !important;
   }
 
-  .react-flow__node.selected .border-violet-500,
-  .react-flow__node.selected.border-violet-500 {
+  .react-flow__node.selected>div.border-violet-500,
+  .react-flow__node.selected .border-violet-500 {
     box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.55), 0 0 16px rgba(139, 92, 246, 0.6), 0 0 36px rgba(139, 92, 246, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.25) !important;
   }
 
-  .react-flow__node.selected .border-yellow-500,
-  .react-flow__node.selected.border-yellow-500 {
+  .react-flow__node.selected>div.border-yellow-500,
+  .react-flow__node.selected .border-yellow-500 {
     box-shadow: 0 0 0 2px rgba(234, 179, 8, 0.55), 0 0 16px rgba(234, 179, 8, 0.6), 0 0 36px rgba(234, 179, 8, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.25) !important;
   }
 
-  .react-flow__node.selected .border-teal-600,
-  .react-flow__node.selected.border-teal-600 {
-    box-shadow: 0 0 0 2px rgba(13, 148, 136, 0.55), 0 0 16px rgba(13, 148, 136, 0.6), 0 0 36px rgba(13, 148, 136, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.25) !important;
-  }
-
-  .react-flow__node.selected .border-cyan-400,
-  .react-flow__node.selected.border-cyan-400 {
+  .react-flow__node.selected>div.border-cyan-400,
+  .react-flow__node.selected .border-cyan-400 {
     box-shadow: 0 0 0 2px rgba(34, 211, 238, 0.55), 0 0 16px rgba(34, 211, 238, 0.6), 0 0 36px rgba(34, 211, 238, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.25) !important;
   }
 
-  .react-flow__node.selected .border-gray-200,
-  .react-flow__node.selected.border-gray-200 {
+  .react-flow__node.selected>div.border-gray-200,
+  .react-flow__node.selected .border-gray-200 {
     box-shadow: 0 0 0 2px rgba(229, 231, 235, 0.55), 0 0 16px rgba(229, 231, 235, 0.6), 0 0 36px rgba(229, 231, 235, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.25) !important;
   }
 
@@ -454,6 +483,20 @@ body {
     box-shadow: 0 0 0 2px rgba(167, 139, 250, 0.65), 0 0 18px rgba(167, 139, 250, 0.7), 0 0 40px rgba(167, 139, 250, 0.4), inset 0 0 0 1px rgba(255, 255, 255, 0.18) !important;
   }
 
+  .dark .react-flow__node.selected .dark\\:border-rose-400,
+  .dark .react-flow__node.selected.dark\\:border-rose-400,
+  .dark .react-flow__node.selected .border-rose-500,
+  .dark .react-flow__node.selected.border-rose-500 {
+    box-shadow: 0 0 0 2px rgba(251, 113, 133, 0.65), 0 0 18px rgba(251, 113, 133, 0.7), 0 0 40px rgba(251, 113, 133, 0.4), inset 0 0 0 1px rgba(255, 255, 255, 0.18) !important;
+  }
+
+  .dark .react-flow__node.selected .dark\\:border-fuchsia-400,
+  .dark .react-flow__node.selected.dark\\:border-fuchsia-400,
+  .dark .react-flow__node.selected .border-fuchsia-500,
+  .dark .react-flow__node.selected.border-fuchsia-500 {
+    box-shadow: 0 0 0 2px rgba(240, 171, 252, 0.65), 0 0 18px rgba(240, 171, 252, 0.7), 0 0 40px rgba(240, 171, 252, 0.4), inset 0 0 0 1px rgba(255, 255, 255, 0.18) !important;
+  }
+
   .dark .react-flow__node.selected .dark\\:border-yellow-400,
   .dark .react-flow__node.selected.dark\\:border-yellow-400,
   .dark .react-flow__node.selected .border-yellow-500,
@@ -468,19 +511,7 @@ body {
     box-shadow: 0 0 0 2px rgba(156, 163, 175, 0.65), 0 0 18px rgba(156, 163, 175, 0.7), 0 0 40px rgba(156, 163, 175, 0.4), inset 0 0 0 1px rgba(255, 255, 255, 0.18) !important;
   }
 
-  /* Ensure smooth transitions for non-selected nodes */
-  .react-flow__node {
-    transition: box-shadow 0.2s ease-in-out, transform 0.2s ease-in-out;
-  }
-
-  /* Disable transitions while dragging for smooth movement */
-  .react-flow__node.dragging {
-    transition: none !important;
-  }
-
-  .react-flow__node.dragging.selected {
-    transition: none !important;
-  }
+  /* Dragging rules are already defined above - no duplicates needed */
 
   /* React Flow selected edge styling */
   .react-flow__edge-path {
@@ -488,16 +519,16 @@ body {
   }
 
   .react-flow__edge.selected .react-flow__edge-path {
-    stroke: #3b82f6 !important; /* blue-500 */
+    stroke: #3b82f6 !important;
+    /* blue-500 */
     stroke-width: 3px;
-    filter: drop-shadow(0 0 4px rgba(59, 130, 246, 0.7))
-      drop-shadow(0 0 10px rgba(59, 130, 246, 0.5));
+    filter: drop-shadow(0 0 4px rgba(59, 130, 246, 0.7)) drop-shadow(0 0 10px rgba(59, 130, 246, 0.5));
   }
 
   .dark .react-flow__edge.selected .react-flow__edge-path {
-    stroke: #93c5fd !important; /* blue-300 */
-    filter: drop-shadow(0 0 4px rgba(147, 197, 253, 0.7))
-      drop-shadow(0 0 10px rgba(147, 197, 253, 0.5));
+    stroke: #93c5fd !important;
+    /* blue-300 */
+    filter: drop-shadow(0 0 4px rgba(147, 197, 253, 0.7)) drop-shadow(0 0 10px rgba(147, 197, 253, 0.5));
   }
 
   /* Remove focus outline from React Flow canvas */

@@ -8,8 +8,9 @@ import { DefaultChatTransport } from "ai";
 import { Bot, Calculator, ChevronDown, Copy, Database, List, Shield } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Handle, Position, useReactFlow, type NodeProps } from "reactflow";
+import { useReactFlow, type NodeProps } from "reactflow";
 import type { AiNodeData } from "./node-types";
+import { BaseNode } from "./base/base-node";
 
 
 
@@ -418,7 +419,8 @@ const loadModelListFromEnv = (): UiModelOption[] => {
 
 const AI_MODELS: UiModelOption[] = loadModelListFromEnv();
 
-export const AiNode = memo(({ data, id, selected, isConnectable }: NodeProps<AiNodeData>) => {
+export const AiNode = memo((props: NodeProps<AiNodeData>) => {
+  const { data, id, selected, isConnectable } = props;
 
   const [messages, setMessages] = useState<Message[]>((data.messages as Message[]) || []);
   // Local assistant messages created on the client (e.g., client-side tool results)
@@ -2085,460 +2087,465 @@ export const AiNode = memo(({ data, id, selected, isConnectable }: NodeProps<AiN
 
 
   return (
-    <div
-      className={`bg-white dark:bg-gray-800 border-2 border-emerald-500 dark:border-emerald-400 rounded-md shadow-md relative overflow-visible ${isResizing ? "nodrag" : ""} ai-node-container`}
-      style={{
-        width: `${width}px`,
-        height: `${height}px`,
-      }}
-      data-nodrag={isResizing ? "true" : undefined}
+    <BaseNode
+      {...props}
+      isLoading={isLoading}
+      error={null}
+      showStatusIcon={false}
+      hideDefaultWrapper={true}
     >
-      {/* Header matching other nodes design system */}
-      <div className="bg-emerald-500 text-white px-3 py-2 flex items-center gap-2">
-        <Bot className="h-4 w-4 flex-shrink-0" />
-        <span className="text-sm font-medium truncate">{data.label}</span>
+      <div
+        className={`bg-white dark:bg-gray-800 border-2 border-emerald-500 dark:border-emerald-400 rounded-md shadow-md relative overflow-visible ${isResizing ? "nodrag" : ""} ai-node-container`}
+        style={{
+          width: `${width}px`,
+          height: `${height}px`,
+        }}
+        data-nodrag={isResizing ? "true" : undefined}
+      >
+        {/* Header matching other nodes design system */}
+        <div className="bg-emerald-500 text-white px-3 py-2 flex items-center gap-2">
+          <Bot className="h-4 w-4 flex-shrink-0" />
+          <span className="text-sm font-medium truncate">{data.label}</span>
 
-        {/* Action buttons in header */}
-        <div className="ml-auto flex items-center gap-1">
-          {/* Send Data button */}
-          {getConnectedModelData() && (
-            <button
-              onClick={sendModelDataDownstream}
-              className="text-xs bg-white/20 hover:bg-white/30 px-2 py-0.5 rounded transition-colors"
-              title="Send all model data to downstream nodes"
-            >
-              Send Data ↓
-            </button>
-          )}
+          {/* Action buttons in header */}
+          <div className="ml-auto flex items-center gap-1">
+            {/* Send Data button */}
+            {getConnectedModelData() && (
+              <button
+                onClick={sendModelDataDownstream}
+                className="text-xs bg-white/20 hover:bg-white/30 px-2 py-0.5 rounded transition-colors"
+                title="Send all model data to downstream nodes"
+              >
+                Send Data ↓
+              </button>
+            )}
 
-          {/* Turnstile verification status */}
-          {sitekey && isNodeVerified && (
-            <div className="flex items-center gap-1 text-xs bg-green-500/20 hover:bg-green-500/30 px-2 py-0.5 rounded transition-colors">
-              <Shield className="h-3 w-3 text-green-600 dark:text-green-400" />
-              <span className="text-green-700 dark:text-green-300">Verified</span>
-            </div>
-          )}
+            {/* Turnstile verification status */}
+            {sitekey && isNodeVerified && (
+              <div className="flex items-center gap-1 text-xs bg-green-500/20 hover:bg-green-500/30 px-2 py-0.5 rounded transition-colors">
+                <Shield className="h-3 w-3 text-green-600 dark:text-green-400" />
+                <span className="text-green-700 dark:text-green-300">Verified</span>
+              </div>
+            )}
 
-          {/* DB warm-up status overlay moved to chat area below */}
+            {/* DB warm-up status overlay moved to chat area below */}
 
-          {/* Save SQLite button */}
-          {getConnectedModelData() && (
-            <button
-              onClick={async () => {
-                const currentModel = getConnectedModelData();
-                if (!currentModel) return;
-                try {
-                  const { exportSqliteDatabase } = await import('@/lib/ifc-utils');
-                  const bytes = await exportSqliteDatabase(currentModel);
-                  const blob = new Blob([new Uint8Array(bytes)], { type: 'application/x-sqlite3' });
-                  const url = URL.createObjectURL(blob);
-                  const a = document.createElement('a');
-                  const base = (currentModel.name || 'model').replace(/\.[^.]+$/, '');
-                  a.href = url;
-                  a.download = `${base}.sqlite`;
-                  document.body.appendChild(a);
-                  a.click();
-                  document.body.removeChild(a);
-                  URL.revokeObjectURL(url);
+            {/* Save SQLite button */}
+            {getConnectedModelData() && (
+              <button
+                onClick={async () => {
+                  const currentModel = getConnectedModelData();
+                  if (!currentModel) return;
+                  try {
+                    const { exportSqliteDatabase } = await import('@/lib/ifc-utils');
+                    const bytes = await exportSqliteDatabase(currentModel);
+                    const blob = new Blob([new Uint8Array(bytes)], { type: 'application/x-sqlite3' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    const base = (currentModel.name || 'model').replace(/\.[^.]+$/, '');
+                    a.href = url;
+                    a.download = `${base}.sqlite`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
 
-                  const msg: Message = {
-                    role: 'assistant',
-                    content: `SQLite database exported as ${base}.sqlite`,
-                    toolResults: [{ type: 'analysis', description: 'SQLite DB saved to disk' }],
-                    id: `local_export_success_${Date.now()}_${++seqRef.current}`,
-                    seq: getOrAssignSeq(`local_export_success_${seqRef.current}`),
-                    createdAt: Date.now()
-                  };
-                  setMessages(prev => [...prev, msg]);
+                    const msg: Message = {
+                      role: 'assistant',
+                      content: `SQLite database exported as ${base}.sqlite`,
+                      toolResults: [{ type: 'analysis', description: 'SQLite DB saved to disk' }],
+                      id: `local_export_success_${Date.now()}_${++seqRef.current}`,
+                      seq: getOrAssignSeq(`local_export_success_${seqRef.current}`),
+                      createdAt: Date.now()
+                    };
+                    setMessages(prev => [...prev, msg]);
 
-                  // Scroll to bottom after export success message
-                  setTimeout(() => {
-                    if (messagesEndRef.current) {
-                      messagesEndRef.current.scrollIntoView({
-                        behavior: 'auto',
-                        block: 'end'
-                      });
-                    }
-                  }, 0);
-                } catch (error) {
+                    // Scroll to bottom after export success message
+                    setTimeout(() => {
+                      if (messagesEndRef.current) {
+                        messagesEndRef.current.scrollIntoView({
+                          behavior: 'auto',
+                          block: 'end'
+                        });
+                      }
+                    }, 0);
+                  } catch (error) {
 
-                  const errorMessage: Message = {
-                    role: 'assistant',
-                    content: `SQLite export failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
-                    toolResults: [{ type: 'analysis', description: `SQLite export error: ${error instanceof Error ? error.message : 'Unknown error'}` }],
-                    id: `local_export_error_${Date.now()}_${++seqRef.current}`,
-                    seq: getOrAssignSeq(`local_export_error_${seqRef.current}`),
-                    createdAt: Date.now()
-                  };
-                  setMessages(prev => [...prev, errorMessage]);
+                    const errorMessage: Message = {
+                      role: 'assistant',
+                      content: `SQLite export failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                      toolResults: [{ type: 'analysis', description: `SQLite export error: ${error instanceof Error ? error.message : 'Unknown error'}` }],
+                      id: `local_export_error_${Date.now()}_${++seqRef.current}`,
+                      seq: getOrAssignSeq(`local_export_error_${seqRef.current}`),
+                      createdAt: Date.now()
+                    };
+                    setMessages(prev => [...prev, errorMessage]);
 
-                  // Scroll to bottom after export error message
-                  setTimeout(() => {
-                    if (messagesEndRef.current) {
-                      messagesEndRef.current.scrollIntoView({
-                        behavior: 'auto',
-                        block: 'end'
-                      });
-                    }
-                  }, 0);
-                }
-              }}
-              className="text-xs bg-green-500/20 hover:bg-green-500/30 px-2 py-0.5 rounded transition-colors"
-              title="Save SQLite database to file"
-            >
-              Save SQLite
-            </button>
-          )}
+                    // Scroll to bottom after export error message
+                    setTimeout(() => {
+                      if (messagesEndRef.current) {
+                        messagesEndRef.current.scrollIntoView({
+                          behavior: 'auto',
+                          block: 'end'
+                        });
+                      }
+                    }, 0);
+                  }
+                }}
+                className="text-xs bg-green-500/20 hover:bg-green-500/30 px-2 py-0.5 rounded transition-colors"
+                title="Save SQLite database to file"
+              >
+                Save SQLite
+              </button>
+            )}
+          </div>
         </div>
-      </div>
-      <div key={selectedModel} className="p-3 text-xs flex flex-col h-[calc(100%-3rem)]">
-        <div className="relative flex-1 overflow-hidden border border-gray-200 dark:border-gray-700 rounded-md bg-gray-50 dark:bg-gray-900 flex flex-col" style={{ minHeight: '96px' }}>
-          {/* Chat messages area */}
-          <div
-            ref={chatContainerRef}
-            className="flex-1 overflow-y-auto p-2 custom-scrollbar nowheel"
-            style={{ paddingBottom: '0.5rem' }}
-          >
-            {/* DB status overlay removed */}
-            {[...messages, ...localMessages]
-              .sort((a: Message, b: Message) => {
-                // Use the monotonic sequence as the primary ordering so tool calls
-                // and assistant continuations never jump to the top.
-                const aSeq = typeof a.seq === 'number' ? a.seq : getOrAssignSeq(String(a.id || ''));
-                const bSeq = typeof b.seq === 'number' ? b.seq : getOrAssignSeq(String(b.id || ''));
-                if (aSeq !== bSeq) return aSeq - bSeq;
-                const aTime = a.createdAt || 0;
-                const bTime = b.createdAt || 0;
-                if (aTime !== bTime) return aTime - bTime;
-                if (a.role !== b.role) return a.role === 'user' ? -1 : 1;
-                return 0;
-              })
-              .map((m, i) => {
-                // Skip completely empty messages
-                if (!m.content && (!m.toolResults || m.toolResults.length === 0)) {
-                  return null;
-                }
+        <div key={selectedModel} className="p-3 text-xs flex flex-col h-[calc(100%-3rem)]">
+          <div className="relative flex-1 overflow-hidden border border-gray-200 dark:border-gray-700 rounded-md bg-gray-50 dark:bg-gray-900 flex flex-col" style={{ minHeight: '96px' }}>
+            {/* Chat messages area */}
+            <div
+              ref={chatContainerRef}
+              className="flex-1 overflow-y-auto p-2 custom-scrollbar nowheel"
+              style={{ paddingBottom: '0.5rem' }}
+            >
+              {/* DB status overlay removed */}
+              {[...messages, ...localMessages]
+                .sort((a: Message, b: Message) => {
+                  // Use the monotonic sequence as the primary ordering so tool calls
+                  // and assistant continuations never jump to the top.
+                  const aSeq = typeof a.seq === 'number' ? a.seq : getOrAssignSeq(String(a.id || ''));
+                  const bSeq = typeof b.seq === 'number' ? b.seq : getOrAssignSeq(String(b.id || ''));
+                  if (aSeq !== bSeq) return aSeq - bSeq;
+                  const aTime = a.createdAt || 0;
+                  const bTime = b.createdAt || 0;
+                  if (aTime !== bTime) return aTime - bTime;
+                  if (a.role !== b.role) return a.role === 'user' ? -1 : 1;
+                  return 0;
+                })
+                .map((m, i) => {
+                  // Skip completely empty messages
+                  if (!m.content && (!m.toolResults || m.toolResults.length === 0)) {
+                    return null;
+                  }
 
-                // For assistant messages with tool results but no content, show just the tool results
-                if (m.role === "assistant" && (!m.content || m.content.trim() === '') && m.toolResults && m.toolResults.length > 0) {
-                  return (
-                    <div
-                      key={i}
-                      data-message-index={i}
-                      className="mb-1 flex justify-start relative"
-                      onMouseEnter={() => setHoveredMessageIndex(i)}
-                      onMouseLeave={() => setHoveredMessageIndex(null)}
-                    >
-                      <div className="max-w-[85%] space-y-1">
-                        {m.toolResults.map((result, resultIndex) => (
-                          <ToolResultDisplay key={resultIndex} result={result} />
-                        ))}
-                      </div>
-                      {/* Copy button for tool-only messages */}
-                      {hoveredMessageIndex === i && (
-                        <button
-                          onClick={() => copyMessageToClipboard(m)}
-                          className={`absolute p-1 bg-white/90 dark:bg-gray-700/90 hover:bg-white dark:hover:bg-gray-700 rounded-full shadow-sm border border-gray-200 dark:border-gray-600 transition-all duration-200 ${getCopyButtonPosition(i, true) === 'top' ? 'top-1 right-1' : 'bottom-1 right-1'}`}
-                          title="Copy message"
-                        >
-                          <Copy className="h-3 w-3 text-gray-600 dark:text-gray-300" />
-                        </button>
-                      )}
-                    </div>
-                  );
-                }
-
-                // Regular message display
-                return (
-                  <div
-                    key={i}
-                    data-message-index={i}
-                    className={`mb-1 flex ${m.role === "user" ? "justify-end" : "justify-start"} relative`}
-                    onMouseEnter={() => setHoveredMessageIndex(i)}
-                    onMouseLeave={() => setHoveredMessageIndex(null)}
-                  >
-                    <div
-                      className={`max-w-[85%] whitespace-pre-wrap break-words px-2 py-1.5 rounded-2xl shadow-sm relative ${m.role === "user" ? "bg-sky-500 text-white dark:bg-sky-600" : "bg-white text-gray-800 dark:bg-gray-800 dark:text-gray-100 border border-gray-200 dark:border-gray-700"}`}
-                    >
-                      {m.content}
-                      {m.toolResults && m.toolResults.length > 0 && (
-                        <div className="mt-2 space-y-1">
+                  // For assistant messages with tool results but no content, show just the tool results
+                  if (m.role === "assistant" && (!m.content || m.content.trim() === '') && m.toolResults && m.toolResults.length > 0) {
+                    return (
+                      <div
+                        key={i}
+                        data-message-index={i}
+                        className="mb-1 flex justify-start relative"
+                        onMouseEnter={() => setHoveredMessageIndex(i)}
+                        onMouseLeave={() => setHoveredMessageIndex(null)}
+                      >
+                        <div className="max-w-[85%] space-y-1">
                           {m.toolResults.map((result, resultIndex) => (
                             <ToolResultDisplay key={resultIndex} result={result} />
                           ))}
                         </div>
-                      )}
-                      {/* Copy button - only for assistant messages */}
-                      {m.role === "assistant" && hoveredMessageIndex === i && (
-                        <button
-                          onClick={() => copyMessageToClipboard(m)}
-                          className={`absolute p-1 bg-white/90 dark:bg-gray-700/90 hover:bg-white dark:hover:bg-gray-700 rounded-full shadow-sm border border-gray-200 dark:border-gray-600 transition-all duration-200 ${getCopyButtonPosition(i, !!m.toolResults) === 'top' ? 'top-1 right-1' : 'bottom-1 right-1'}`}
-                          title="Copy message"
-                        >
-                          <Copy className="h-3 w-3 text-gray-600 dark:text-gray-300" />
-                        </button>
-                      )}
+                        {/* Copy button for tool-only messages */}
+                        {hoveredMessageIndex === i && (
+                          <button
+                            onClick={() => copyMessageToClipboard(m)}
+                            className={`absolute p-1 bg-white/90 dark:bg-gray-700/90 hover:bg-white dark:hover:bg-gray-700 rounded-full shadow-sm border border-gray-200 dark:border-gray-600 transition-all duration-200 ${getCopyButtonPosition(i, true) === 'top' ? 'top-1 right-1' : 'bottom-1 right-1'}`}
+                            title="Copy message"
+                          >
+                            <Copy className="h-3 w-3 text-gray-600 dark:text-gray-300" />
+                          </button>
+                        )}
+                      </div>
+                    );
+                  }
+
+                  // Regular message display
+                  return (
+                    <div
+                      key={i}
+                      data-message-index={i}
+                      className={`mb-1 flex ${m.role === "user" ? "justify-end" : "justify-start"} relative`}
+                      onMouseEnter={() => setHoveredMessageIndex(i)}
+                      onMouseLeave={() => setHoveredMessageIndex(null)}
+                    >
+                      <div
+                        className={`max-w-[85%] whitespace-pre-wrap break-words px-2 py-1.5 rounded-2xl shadow-sm relative ${m.role === "user" ? "bg-sky-500 text-white dark:bg-sky-600" : "bg-white text-gray-800 dark:bg-gray-800 dark:text-gray-100 border border-gray-200 dark:border-gray-700"}`}
+                      >
+                        {m.content}
+                        {m.toolResults && m.toolResults.length > 0 && (
+                          <div className="mt-2 space-y-1">
+                            {m.toolResults.map((result, resultIndex) => (
+                              <ToolResultDisplay key={resultIndex} result={result} />
+                            ))}
+                          </div>
+                        )}
+                        {/* Copy button - only for assistant messages */}
+                        {m.role === "assistant" && hoveredMessageIndex === i && (
+                          <button
+                            onClick={() => copyMessageToClipboard(m)}
+                            className={`absolute p-1 bg-white/90 dark:bg-gray-700/90 hover:bg-white dark:hover:bg-gray-700 rounded-full shadow-sm border border-gray-200 dark:border-gray-600 transition-all duration-200 ${getCopyButtonPosition(i, !!m.toolResults) === 'top' ? 'top-1 right-1' : 'bottom-1 right-1'}`}
+                            title="Copy message"
+                          >
+                            <Copy className="h-3 w-3 text-gray-600 dark:text-gray-300" />
+                          </button>
+                        )}
+                      </div>
                     </div>
+                  );
+                })}
+              {isLoading && (
+                <div className="mb-1 flex justify-start">
+                  <div className="max-w-[85%] px-2 py-1.5 rounded-2xl border border-dashed border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-300">
+                    <span className="animate-pulse">Thinking...</span>
                   </div>
-                );
-              })}
-            {isLoading && (
-              <div className="mb-1 flex justify-start">
-                <div className="max-w-[85%] px-2 py-1.5 rounded-2xl border border-dashed border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-300">
-                  <span className="animate-pulse">Thinking...</span>
                 </div>
-              </div>
-            )}
-            {/* Invisible element to scroll to */}
-            <div ref={messagesEndRef} />
-          </div>
+              )}
+              {/* Invisible element to scroll to */}
+              <div ref={messagesEndRef} />
+            </div>
 
-          {/* Input area - separate from scrollable chat */}
-          <div className="relative border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900">
-            {/* Invisible Turnstile verification */}
-            {showTurnstile && sitekey && (
-              <div className="absolute -top-12 left-2 right-2 z-20">
-                <TurnstileComponent
-                  theme={document.documentElement.classList.contains('dark') ? 'dark' : 'light'}
-                  size="normal"
-                />
-              </div>
-            )}
+            {/* Input area - separate from scrollable chat */}
+            <div className="relative border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900">
+              {/* Invisible Turnstile verification */}
+              {showTurnstile && sitekey && (
+                <div className="absolute -top-12 left-2 right-2 z-20">
+                  <TurnstileComponent
+                    theme={document.documentElement.classList.contains('dark') ? 'dark' : 'light'}
+                    size="normal"
+                  />
+                </div>
+              )}
 
-            <form onSubmit={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
+              <form onSubmit={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
 
-              // Block submission if Turnstile is required but not verified
-              if (isChatBlocked) {
-                let errorContent = "🔒 Please wait for security verification to complete before chatting. This usually takes a few seconds.";
-                let errorDescription = 'Verification in progress';
-
-                if (turnstileError) {
-                  if (turnstileError === '110200') {
-                    errorContent = "🔒 Security verification failed due to domain configuration. The site administrator needs to add this domain to the security settings. Please contact support if this persists.";
-                    errorDescription = 'Domain configuration error';
-                  } else {
-                    errorContent = "🔒 Security verification failed. Please check the verification widget below and try again. If issues persist, try disabling browser extensions or using incognito mode.";
-                    errorDescription = 'Verification failed';
-                  }
-                }
-
-                const errorMessage: Message = {
-                  role: "assistant",
-                  content: errorContent,
-                  toolResults: [{
-                    type: 'analysis',
-                    description: errorDescription
-                  }],
-                  id: `local_input_error_${Date.now()}_${++seqRef.current}`,
-                  seq: seqRef.current,
-                  createdAt: Date.now() + seqRef.current
-                };
-                setMessages(prev => [...prev, errorMessage]);
-
-                // Scroll to bottom after input error message
-                setTimeout(() => {
-                  if (messagesEndRef.current) {
-                    messagesEndRef.current.scrollIntoView({
-                      behavior: 'auto',
-                      block: 'end'
-                    });
-                  }
-                }, 0);
-                return;
-              }
-
-              if (!chatIsLoading && input.trim()) {
-                // Double-check Turnstile verification before sending
+                // Block submission if Turnstile is required but not verified
                 if (isChatBlocked) {
-                  // Blocking message - Turnstile not verified
+                  let errorContent = "🔒 Please wait for security verification to complete before chatting. This usually takes a few seconds.";
+                  let errorDescription = 'Verification in progress';
+
+                  if (turnstileError) {
+                    if (turnstileError === '110200') {
+                      errorContent = "🔒 Security verification failed due to domain configuration. The site administrator needs to add this domain to the security settings. Please contact support if this persists.";
+                      errorDescription = 'Domain configuration error';
+                    } else {
+                      errorContent = "🔒 Security verification failed. Please check the verification widget below and try again. If issues persist, try disabling browser extensions or using incognito mode.";
+                      errorDescription = 'Verification failed';
+                    }
+                  }
+
+                  const errorMessage: Message = {
+                    role: "assistant",
+                    content: errorContent,
+                    toolResults: [{
+                      type: 'analysis',
+                      description: errorDescription
+                    }],
+                    id: `local_input_error_${Date.now()}_${++seqRef.current}`,
+                    seq: seqRef.current,
+                    createdAt: Date.now() + seqRef.current
+                  };
+                  setMessages(prev => [...prev, errorMessage]);
+
+                  // Scroll to bottom after input error message
+                  setTimeout(() => {
+                    if (messagesEndRef.current) {
+                      messagesEndRef.current.scrollIntoView({
+                        behavior: 'auto',
+                        block: 'end'
+                      });
+                    }
+                  }, 0);
                   return;
                 }
 
-                // Close model picker if it's open
-                if (showModelPicker) {
-                  setShowModelPicker(false);
+                if (!chatIsLoading && input.trim()) {
+                  // Double-check Turnstile verification before sending
+                  if (isChatBlocked) {
+                    // Blocking message - Turnstile not verified
+                    return;
+                  }
+
+                  // Close model picker if it's open
+                  if (showModelPicker) {
+                    setShowModelPicker(false);
+                  }
+                  sendMessage({ text: input });
+                  setInput("");
                 }
-                sendMessage({ text: input });
-                setInput("");
-              }
-            }} className="p-3 pointer-events-auto">
-              {/* OpenAI-style input with model picker */}
-              <div className="flex items-center gap-1 bg-white dark:bg-gray-800 rounded-full border border-gray-300 dark:border-gray-600 shadow-sm overflow-hidden">
-                {/* Model Picker - positioned on the left like OpenAI */}
-                <div className="relative pl-1" ref={modelPickerRef}>
+              }} className="p-3 pointer-events-auto">
+                {/* OpenAI-style input with model picker */}
+                <div className="flex items-center gap-1 bg-white dark:bg-gray-800 rounded-full border border-gray-300 dark:border-gray-600 shadow-sm overflow-hidden">
+                  {/* Model Picker - positioned on the left like OpenAI */}
+                  <div className="relative pl-1" ref={modelPickerRef}>
+                    <button
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        if (!chatIsLoading) {
+                          handleModelPickerToggle();
+                        }
+                      }}
+                      className="flex items-center gap-1 text-[10px] text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200 px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-all duration-200 min-w-[90px] justify-between"
+                      disabled={chatIsLoading}
+                      type="button"
+                      title={`Current model: ${AI_MODELS.find(m => (m.slug || m.id) === selectedModel)?.name || selectedModel}`}
+                    >
+                      <span className="truncate max-w-[70px] text-left">
+                        {AI_MODELS.find(m => (m.slug || m.id) === selectedModel)?.name || selectedModel.split('/').pop() || 'Model'}
+                      </span>
+                      <ChevronDown className={`h-3 w-3 flex-shrink-0 transition-transform duration-200 ${showModelPicker ? 'rotate-180' : ''}`} />
+                    </button>
+                  </div>
+
+                  {/* Separator */}
+                  <div className="w-px h-5 bg-gray-300 dark:bg-gray-600" />
+
+                  {/* Text Input */}
+                  <input
+                    className={`min-w-0 flex-1 h-8 bg-transparent px-2 text-[0.8rem] sm:text-[0.75rem] focus:outline-none focus:ring-1 focus:ring-emerald-500/50 rounded-sm placeholder:text-gray-400 transition-all duration-200 ${isChatBlocked ? 'opacity-50 cursor-not-allowed' : 'disabled:opacity-50'}`}
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    placeholder={isChatBlocked ? (turnstileError ? "Verification error - check console" : "Verifying security... please wait") : "Ask a question"}
+                    disabled={chatIsLoading || isChatBlocked}
+                  />
+
+                  {/* Send Button */}
                   <button
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      if (!chatIsLoading) {
-                        handleModelPickerToggle();
-                      }
-                    }}
-                    className="flex items-center gap-1 text-[10px] text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200 px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-all duration-200 min-w-[90px] justify-between"
-                    disabled={chatIsLoading}
-                    type="button"
-                    title={`Current model: ${AI_MODELS.find(m => (m.slug || m.id) === selectedModel)?.name || selectedModel}`}
+                    type="submit"
+                    disabled={chatIsLoading || !input.trim() || isChatBlocked}
+                    aria-label="Send message"
+                    className={`h-8 w-9 rounded-l-none rounded-r-full bg-emerald-500 hover:bg-emerald-600 text-white shadow-sm disabled:opacity-50 disabled:hover:bg-emerald-500 flex items-center justify-center transition-colors border-l border-gray-200 dark:border-gray-700 ${isChatBlocked ? 'cursor-not-allowed' : ''}`}
                   >
-                    <span className="truncate max-w-[70px] text-left">
-                      {AI_MODELS.find(m => (m.slug || m.id) === selectedModel)?.name || selectedModel.split('/').pop() || 'Model'}
-                    </span>
-                    <ChevronDown className={`h-3 w-3 flex-shrink-0 transition-transform duration-200 ${showModelPicker ? 'rotate-180' : ''}`} />
+                    {isChatBlocked ? "🔒" : (chatIsLoading ? "..." : (
+                      <>
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-4 w-4"><path d="M3.4 2.3l18 9a1 1 0 010 1.8l-18 9a1 1 0 01-1.4-1.2l2.7-7.1a1 1 0 01.7-.6l9.7-1.9-9.7-1.9a1 1 0 01-.7-.6L2 3.5A1 1 0 013.4 2.3z" /></svg>
+                        <span className="sr-only">Send</span>
+                      </>
+                    ))}
                   </button>
                 </div>
+              </form>
 
-                {/* Separator */}
-                <div className="w-px h-5 bg-gray-300 dark:bg-gray-600" />
-
-                {/* Text Input */}
-                <input
-                  className={`min-w-0 flex-1 h-8 bg-transparent px-2 text-[0.8rem] sm:text-[0.75rem] focus:outline-none focus:ring-1 focus:ring-emerald-500/50 rounded-sm placeholder:text-gray-400 transition-all duration-200 ${isChatBlocked ? 'opacity-50 cursor-not-allowed' : 'disabled:opacity-50'}`}
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  placeholder={isChatBlocked ? (turnstileError ? "Verification error - check console" : "Verifying security... please wait") : "Ask a question"}
-                  disabled={chatIsLoading || isChatBlocked}
-                />
-
-                {/* Send Button */}
-                <button
-                  type="submit"
-                  disabled={chatIsLoading || !input.trim() || isChatBlocked}
-                  aria-label="Send message"
-                  className={`h-8 w-9 rounded-l-none rounded-r-full bg-emerald-500 hover:bg-emerald-600 text-white shadow-sm disabled:opacity-50 disabled:hover:bg-emerald-500 flex items-center justify-center transition-colors border-l border-gray-200 dark:border-gray-700 ${isChatBlocked ? 'cursor-not-allowed' : ''}`}
-                >
-                  {isChatBlocked ? "🔒" : (chatIsLoading ? "..." : (
-                    <>
-                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-4 w-4"><path d="M3.4 2.3l18 9a1 1 0 010 1.8l-18 9a1 1 0 01-1.4-1.2l2.7-7.1a1 1 0 01.7-.6l9.7-1.9-9.7-1.9a1 1 0 01-.7-.6L2 3.5A1 1 0 013.4 2.3z" /></svg>
-                      <span className="sr-only">Send</span>
-                    </>
-                  ))}
-                </button>
+              {/* Disclaimer */}
+              <div className="px-3 pb-1 text-[8px] leading-tight text-gray-400 dark:text-gray-500 text-center pointer-events-none max-w-full overflow-hidden">
+                <span className="truncate block" title="We log queries and responses during AI node usage to improve system performance">
+                  We log queries and responses during AI node usage to improve system performance
+                </span>
               </div>
-            </form>
-
-            {/* Disclaimer */}
-            <div className="px-3 pb-1 text-[8px] leading-tight text-gray-400 dark:text-gray-500 text-center pointer-events-none max-w-full overflow-hidden">
-              <span className="truncate block" title="We log queries and responses during AI node usage to improve system performance">
-                We log queries and responses during AI node usage to improve system performance
-              </span>
             </div>
           </div>
         </div>
-      </div>
 
-      <div
-        className={`absolute bottom-0 right-0 w-6 h-6 cursor-nwse-resize nodrag z-30 ${selected ? "text-sky-600" : "text-gray-400"
-          } hover:text-sky-500 transition-colors duration-200`}
-        onMouseDown={startResize}
-      >
-        <svg
-          width="16"
-          height="16"
-          viewBox="0 0 24 24"
-          fill="none"
-          xmlns="http://www.w3.org/2000/svg"
-        >
-          <path
-            d="M22 2L2 22"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-          />
-          <path
-            d="M22 10L10 22"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-          />
-          <path
-            d="M22 18L18 22"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-          />
-        </svg>
-      </div>
-
-      <Handle type="target" position={Position.Left} id="input" isConnectable={isConnectable} />
-      <Handle type="source" position={Position.Right} id="output" isConnectable={isConnectable} />
-
-      {/* Portal-based Model Picker Dropdown */}
-      {showModelPicker && createPortal(
         <div
-          className="fixed animate-in fade-in-0 zoom-in-95 duration-200 z-[10000]"
-          style={{
-            top: `${dropdownPosition.top}px`,
-            left: `${dropdownPosition.left}px`,
-            transform: dropdownPosition.top < 100 ? 'translateY(0)' : 'translateY(-100%)'
-          }}
+          className={`absolute bottom-0 right-0 w-6 h-6 cursor-nwse-resize nodrag z-30 ${selected ? "text-sky-600" : "text-gray-400"
+            } hover:text-sky-500 transition-colors duration-200`}
+          onMouseDown={startResize}
         >
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-2xl border border-gray-200 dark:border-gray-700 min-w-[180px] max-w-[280px] max-h-64 overflow-hidden p-1" data-dropdown>
-            {/* Search input */}
-            {AI_MODELS.length > 5 && (
-              <div className="p-2 border-b border-gray-200 dark:border-gray-700">
-                <input
-                  type="text"
-                  placeholder="Search models..."
-                  value={modelSearchQuery}
-                  onChange={(e) => setModelSearchQuery(e.target.value)}
-                  className="w-full px-2 py-1 text-xs bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500"
-                  autoFocus
-                />
-              </div>
-            )}
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <path
+              d="M22 2L2 22"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+            />
+            <path
+              d="M22 10L10 22"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+            />
+            <path
+              d="M22 18L18 22"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+            />
+          </svg>
+        </div>
 
-            {/* Model list */}
-            <div className="max-h-40 overflow-y-auto">
-              {filteredModels.length === 0 ? (
-                <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400 text-center">
-                  No models found
+        {/* Portal-based Model Picker Dropdown */}
+        {showModelPicker && createPortal(
+          <div
+            className="fixed animate-in fade-in-0 zoom-in-95 duration-200 z-[10000]"
+            style={{
+              top: `${dropdownPosition.top}px`,
+              left: `${dropdownPosition.left}px`,
+              transform: dropdownPosition.top < 100 ? 'translateY(0)' : 'translateY(-100%)'
+            }}
+          >
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-2xl border border-gray-200 dark:border-gray-700 min-w-[180px] max-w-[280px] max-h-64 overflow-hidden p-1" data-dropdown>
+              {/* Search input */}
+              {AI_MODELS.length > 5 && (
+                <div className="p-2 border-b border-gray-200 dark:border-gray-700">
+                  <input
+                    type="text"
+                    placeholder="Search models..."
+                    value={modelSearchQuery}
+                    onChange={(e) => setModelSearchQuery(e.target.value)}
+                    className="w-full px-2 py-1 text-xs bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500"
+                    autoFocus
+                  />
                 </div>
-              ) : (
-                filteredModels.map(model => {
-                  const isSelected = selectedModel === (model.slug || model.id);
-                  return (
-                    <button
-                      key={model.id}
-                      onClick={(e) => {
-                        e.stopPropagation(); // Prevent event bubbling
+              )}
 
-                        const newModel = model.slug || model.id;
+              {/* Model list */}
+              <div className="max-h-40 overflow-y-auto">
+                {filteredModels.length === 0 ? (
+                  <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400 text-center">
+                    No models found
+                  </div>
+                ) : (
+                  filteredModels.map(model => {
+                    const isSelected = selectedModel === (model.slug || model.id);
+                    return (
+                      <button
+                        key={model.id}
+                        onClick={(e) => {
+                          e.stopPropagation(); // Prevent event bubbling
 
-                        // Clear messages when switching models to indicate fresh conversation
-                        setMessages([]);
+                          const newModel = model.slug || model.id;
 
-                        setSelectedModel(newModel);
-                        setShowModelPicker(false);
-                        // Update node data with selected AI model id
-                        setNodes(nodes => nodes.map(n =>
-                          n.id === id ? { ...n, data: { ...n.data, aiModelId: newModel } } : n
-                        ));
-                      }}
-                      className={`w-full text-left px-3 py-2 text-xs rounded-md hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors duration-150 flex flex-col gap-0.5 ${isSelected
-                        ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-700'
-                        : 'text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100'
-                        }`}
-                      title={`${model.name} by ${model.provider}${model.slug ? ` (${model.slug})` : ''}`}
-                    >
-                      <div className="font-medium truncate flex items-center justify-between">
-                        <span>{model.name}</span>
-                        {isSelected && (
-                          <svg className="h-3 w-3 text-emerald-600 dark:text-emerald-400 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                            <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                          </svg>
-                        )}
-                      </div>
-                      <div className="text-[10px] opacity-60 truncate">{model.provider}</div>
-                    </button>
-                  );
-                }))}
+                          // Clear messages when switching models to indicate fresh conversation
+                          setMessages([]);
+
+                          setSelectedModel(newModel);
+                          setShowModelPicker(false);
+                          // Update node data with selected AI model id
+                          setNodes(nodes => nodes.map(n =>
+                            n.id === id ? { ...n, data: { ...n.data, aiModelId: newModel } } : n
+                          ));
+                        }}
+                        className={`w-full text-left px-3 py-2 text-xs rounded-md hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors duration-150 flex flex-col gap-0.5 ${isSelected
+                          ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-700'
+                          : 'text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100'
+                          }`}
+                        title={`${model.name} by ${model.provider}${model.slug ? ` (${model.slug})` : ''}`}
+                      >
+                        <div className="font-medium truncate flex items-center justify-between">
+                          <span>{model.name}</span>
+                          {isSelected && (
+                            <svg className="h-3 w-3 text-emerald-600 dark:text-emerald-400 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                              <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                            </svg>
+                          )}
+                        </div>
+                        <div className="text-[10px] opacity-60 truncate">{model.provider}</div>
+                      </button>
+                    );
+                  }))}
+              </div>
             </div>
-          </div>
-        </div>,
-        document.body
-      )}
-    </div>
+          </div>,
+          document.body
+        )}
+      </div>
+    </BaseNode>
   );
 });
 
