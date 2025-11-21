@@ -2981,7 +2981,8 @@ try:
               'expressId': element.id(),
               'type': element_type,
               'properties': {},
-              'psets': {}
+              'psets': {},
+              'relationships': {}
             }
 
             # Extract only essential properties (fast)
@@ -2989,6 +2990,169 @@ try:
               element_dict['properties']['GlobalId'] = element.GlobalId
             if hasattr(element, 'Name') and element.Name:
               element_dict['properties']['Name'] = element.Name
+
+            # Extract Material Associations (Directly on element)
+            if hasattr(element, "HasAssociations") and element.HasAssociations:
+                associations = []
+                for assoc in element.HasAssociations:
+                    if assoc.is_a("IfcRelAssociatesMaterial"):
+                        rel_data = {"type": "IfcRelAssociatesMaterial"}
+                        if hasattr(assoc, "RelatingMaterial"):
+                            mat = assoc.RelatingMaterial
+                            rel_data["RelatingMaterial"] = {
+                                "Name": getattr(mat, "Name", None),
+                                "type": mat.is_a()
+                            }
+                            # Handle LayerSets/Constituents/Profiles
+                            if mat.is_a("IfcMaterialLayerSetUsage"):
+                                if hasattr(mat, "ForLayerSet"):
+                                    ls = mat.ForLayerSet
+                                    rel_data["RelatingMaterial"]["ForLayerSet"] = {
+                                        "LayerSetName": getattr(ls, "LayerSetName", None),
+                                        "MaterialLayers": []
+                                    }
+                                    if hasattr(ls, "MaterialLayers"):
+                                        for layer in ls.MaterialLayers:
+                                            layer_mat_name = getattr(layer.Material, "Name", None) if hasattr(layer, "Material") and layer.Material else "Unnamed"
+                                            rel_data["RelatingMaterial"]["ForLayerSet"]["MaterialLayers"].append({
+                                                "Material": {"Name": layer_mat_name},
+                                                "LayerThickness": getattr(layer, "LayerThickness", 0)
+                                            })
+                            elif mat.is_a("IfcMaterialLayerSet"):
+                                rel_data["RelatingMaterial"]["MaterialLayers"] = []
+                                if hasattr(mat, "MaterialLayers"):
+                                    for layer in mat.MaterialLayers:
+                                        layer_mat_name = getattr(layer.Material, "Name", None) if hasattr(layer, "Material") and layer.Material else "Unnamed"
+                                        rel_data["RelatingMaterial"]["MaterialLayers"].append({
+                                            "Material": {"Name": layer_mat_name},
+                                            "LayerThickness": getattr(layer, "LayerThickness", 0)
+                                        })
+                            elif mat.is_a("IfcMaterialConstituentSet"):
+                                rel_data["RelatingMaterial"]["MaterialConstituents"] = []
+                                if hasattr(mat, "MaterialConstituents"):
+                                    for const in mat.MaterialConstituents:
+                                        const_mat_name = getattr(const.Material, "Name", None) if hasattr(const, "Material") and const.Material else "Unnamed"
+                                        rel_data["RelatingMaterial"]["MaterialConstituents"].append({
+                                            "Material": {"Name": const_mat_name},
+                                            "Name": getattr(const, "Name", None),
+                                            "Fraction": getattr(const, "Fraction", None)
+                                        })
+                            elif mat.is_a("IfcMaterialProfileSet"):
+                                rel_data["RelatingMaterial"]["MaterialProfiles"] = []
+                                if hasattr(mat, "MaterialProfiles"):
+                                    for prof in mat.MaterialProfiles:
+                                        prof_mat_name = getattr(prof.Material, "Name", None) if hasattr(prof, "Material") and prof.Material else "Unnamed"
+                                        rel_data["RelatingMaterial"]["MaterialProfiles"].append({
+                                            "Material": {"Name": prof_mat_name},
+                                            "Name": getattr(prof, "Name", None)
+                                        })
+                            elif mat.is_a("IfcMaterialProfileSetUsage"):
+                                if hasattr(mat, "ForProfileSet"):
+                                    ps = mat.ForProfileSet
+                                    rel_data["RelatingMaterial"]["ForProfileSet"] = {
+                                        "Name": getattr(ps, "Name", None),
+                                        "MaterialProfiles": []
+                                    }
+                                    if hasattr(ps, "MaterialProfiles"):
+                                        for prof in ps.MaterialProfiles:
+                                            prof_mat_name = getattr(prof.Material, "Name", None) if hasattr(prof, "Material") and prof.Material else "Unnamed"
+                                            rel_data["RelatingMaterial"]["ForProfileSet"]["MaterialProfiles"].append({
+                                                "Material": {"Name": prof_mat_name},
+                                                "Name": getattr(prof, "Name", None)
+                                            })
+                        associations.append(rel_data)
+                if associations:
+                    element_dict['relationships']['HasAssociations'] = associations
+
+            # Extract Type Definition and Type-level Materials
+            if hasattr(element, "IsTypedBy") and element.IsTypedBy:
+                # IsTypedBy is a list/set of IfcRelDefinesByType
+                for rel in element.IsTypedBy:
+                    if rel.is_a("IfcRelDefinesByType"):
+                        relating_type = rel.RelatingType
+                        type_data = {
+                            "RelatingType": {
+                                "Name": getattr(relating_type, "Name", None),
+                                "type": relating_type.is_a(),
+                                "relationships": {}
+                            }
+                        }
+                        
+                        # Check for materials on the TYPE
+                        if hasattr(relating_type, "HasAssociations") and relating_type.HasAssociations:
+                            type_assocs = []
+                            for assoc in relating_type.HasAssociations:
+                                if assoc.is_a("IfcRelAssociatesMaterial"):
+                                    rel_data = {"type": "IfcRelAssociatesMaterial"}
+                                    if hasattr(assoc, "RelatingMaterial"):
+                                        mat = assoc.RelatingMaterial
+                                        rel_data["RelatingMaterial"] = {
+                                            "Name": getattr(mat, "Name", None),
+                                            "type": mat.is_a()
+                                        }
+                                        # Handle LayerSets/Constituents/Profiles on Type
+                                        if mat.is_a("IfcMaterialLayerSetUsage"):
+                                            if hasattr(mat, "ForLayerSet"):
+                                                ls = mat.ForLayerSet
+                                                rel_data["RelatingMaterial"]["ForLayerSet"] = {
+                                                    "LayerSetName": getattr(ls, "LayerSetName", None),
+                                                    "MaterialLayers": []
+                                                }
+                                                if hasattr(ls, "MaterialLayers"):
+                                                    for layer in ls.MaterialLayers:
+                                                        layer_mat_name = getattr(layer.Material, "Name", None) if hasattr(layer, "Material") and layer.Material else "Unnamed"
+                                                        rel_data["RelatingMaterial"]["ForLayerSet"]["MaterialLayers"].append({
+                                                            "Material": {"Name": layer_mat_name},
+                                                            "LayerThickness": getattr(layer, "LayerThickness", 0)
+                                                        })
+                                        elif mat.is_a("IfcMaterialLayerSet"):
+                                            rel_data["RelatingMaterial"]["MaterialLayers"] = []
+                                            if hasattr(mat, "MaterialLayers"):
+                                                for layer in mat.MaterialLayers:
+                                                    layer_mat_name = getattr(layer.Material, "Name", None) if hasattr(layer, "Material") and layer.Material else "Unnamed"
+                                                    rel_data["RelatingMaterial"]["MaterialLayers"].append({
+                                                        "Material": {"Name": layer_mat_name},
+                                                        "LayerThickness": getattr(layer, "LayerThickness", 0)
+                                                    })
+                                        elif mat.is_a("IfcMaterialConstituentSet"):
+                                            rel_data["RelatingMaterial"]["MaterialConstituents"] = []
+                                            if hasattr(mat, "MaterialConstituents"):
+                                                for const in mat.MaterialConstituents:
+                                                    const_mat_name = getattr(const.Material, "Name", None) if hasattr(const, "Material") and const.Material else "Unnamed"
+                                                    rel_data["RelatingMaterial"]["MaterialConstituents"].append({
+                                                        "Material": {"Name": const_mat_name},
+                                                        "Name": getattr(const, "Name", None),
+                                                        "Fraction": getattr(const, "Fraction", None)
+                                                    })
+                                        elif mat.is_a("IfcMaterialProfileSet"):
+                                            rel_data["RelatingMaterial"]["MaterialProfiles"] = []
+                                            if hasattr(mat, "MaterialProfiles"):
+                                                for prof in mat.MaterialProfiles:
+                                                    prof_mat_name = getattr(prof.Material, "Name", None) if hasattr(prof, "Material") and prof.Material else "Unnamed"
+                                                    rel_data["RelatingMaterial"]["MaterialProfiles"].append({
+                                                        "Material": {"Name": prof_mat_name},
+                                                        "Name": getattr(prof, "Name", None)
+                                                    })
+                                        elif mat.is_a("IfcMaterialProfileSetUsage"):
+                                            if hasattr(mat, "ForProfileSet"):
+                                                ps = mat.ForProfileSet
+                                                rel_data["RelatingMaterial"]["ForProfileSet"] = {
+                                                    "Name": getattr(ps, "Name", None),
+                                                    "MaterialProfiles": []
+                                                }
+                                                if hasattr(ps, "MaterialProfiles"):
+                                                    for prof in ps.MaterialProfiles:
+                                                        prof_mat_name = getattr(prof.Material, "Name", None) if hasattr(prof, "Material") and prof.Material else "Unnamed"
+                                                        rel_data["RelatingMaterial"]["ForProfileSet"]["MaterialProfiles"].append({
+                                                            "Material": {"Name": prof_mat_name},
+                                                            "Name": getattr(prof, "Name", None)
+                                                        })
+                                    type_assocs.append(rel_data)
+                            if type_assocs:
+                                type_data["RelatingType"]["relationships"]["HasAssociations"] = type_assocs
+                        
+                        element_dict['relationships']['IsTypedBy'] = type_data
+                        break # Usually only one type definition
 
             # Add type-specific essential properties for common types
             if element_type == 'IFCBUILDINGSTOREY' and hasattr(element, 'Elevation'):

@@ -200,4 +200,19 @@ export interface WatchNodeData extends BaseNodeData {
         watchType?: string;
         [key: string]: any;
     };
+}
+
+// Material node data
+export interface MaterialNodeData extends BaseNodeData {
+    properties?: {
+        action?: 'get' | 'create' | 'assign';
+        materialName?: string;
+        materialCategory?: string;
+        materialDescription?: string;
+        useValueInput?: boolean;
+        [key: string]: any;
+    };
+    results?: any[];
+    isLoading?: boolean;
+    error?: string | null;
 } 

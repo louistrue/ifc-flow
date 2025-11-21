@@ -1169,6 +1169,10 @@ export function NodePropertyRenderer({
         </div>
       );
 
+    case "materialNode":
+      const { MaterialEditor } = require("./property-editors/material-editor");
+      return <MaterialEditor properties={properties} setProperties={setProperties} />;
+
     default:
       return (
         <div className="text-center text-sm text-muted-foreground py-4">

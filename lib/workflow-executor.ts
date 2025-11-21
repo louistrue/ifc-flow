@@ -346,7 +346,7 @@ export class WorkflowExecutor {
             : inputValues.input.elements;
 
           const filterType = node.data.properties?.filterType || "property";
-          const property = filterType === "ifcClass" 
+          const property = filterType === "ifcClass"
             ? node.data.properties?.ifcClass || ""
             : node.data.properties?.property || "";
 
@@ -628,7 +628,7 @@ export class WorkflowExecutor {
         }
 
         console.log("Final value used for property:", typeof valueToUse, valueToUse);
-        
+
         // Check if it has the mappings structure
         if (valueToUse && typeof valueToUse === 'object') {
           console.log("Value keys:", Object.keys(valueToUse));
@@ -648,13 +648,289 @@ export class WorkflowExecutor {
         // Return the result with the updated elements
         result = { elements: updatedElements };
 
+
         // Also store the results in the node data for UI access
         node.data.results = updatedElements;
+        break;
+
+      case "materialNode":
+        console.log("Processing materialNode", { node, inputValues });
+
+        // Extract elements from input
+        let materialElements = [];
+        if (Array.isArray(inputValues.input)) {
+          materialElements = inputValues.input;
+        } else if (inputValues.input && inputValues.input.elements) {
+          materialElements = inputValues.input.elements;
+        } else {
+          console.warn("No input provided to material node");
+          result = { elements: [] };
+          break;
+        }
+
+        // Extract material configuration
+        const materialAction = node.data.properties?.action || "get";
+        let materialName = node.data.properties?.materialName || "";
+        const materialCategory = node.data.properties?.materialCategory || "";
+        const materialDescription = node.data.properties?.materialDescription || "";
+        const useMaterialValueInput = node.data.properties?.useValueInput || false;
+
+        // Handle value input for material names (similar to property node)
+        if (useMaterialValueInput && inputValues.valueInput) {
+          console.log("Using material name from value input");
+
+          // Extract material name from input
+          if (typeof inputValues.valueInput === "object" && inputValues.valueInput !== null) {
+            // Check if it's a property node result with mappings
+            if (inputValues.valueInput.mappings) {
+              console.log("Material names from mappings:", inputValues.valueInput.mappings);
+              // For now, we'll use the mappings directly
+              // The Python backend will handle element-specific material assignment
+              materialName = inputValues.valueInput;
+            } else if (inputValues.valueInput.elements && Array.isArray(inputValues.valueInput.elements)) {
+              // Extract unique values from property results
+              const uniqueValues = inputValues.valueInput.uniqueValues || [];
+              if (uniqueValues.length === 1) {
+                materialName = uniqueValues[0];
+              } else {
+                // Multiple values - use mappings if available
+                materialName = inputValues.valueInput;
+              }
+            } else {
+              materialName = inputValues.valueInput;
+            }
+          } else {
+            materialName = inputValues.valueInput;
+          }
+        }
+
+        console.log("Material operation:", {
+          action: materialAction,
+          materialName: typeof materialName === "object" ? "mappings" : materialName,
+          category: materialCategory,
+          elementCount: materialElements.length
+        });
+
+        // Process material operations
+        if (materialAction === "get") {
+          // Extract materials from elements
+          const materialsMap = new Map();
+          const elementsWithMaterials: any[] = [];
+
+          const extractMaterialData = (relatingMaterial: any) => {
+            if (!relatingMaterial) return null;
+            const type = relatingMaterial.type;
+            let name = "Unnamed Material";
+            let setType = type;
+            let components: any[] = [];
+
+            if (type === "IfcMaterial") {
+              name = relatingMaterial.Name || "Unnamed Material";
+              return { name, type, components: [] };
+            }
+
+            if (type === "IfcMaterialLayerSetUsage" || type === "IfcMaterialLayerSet") {
+              const layerSet = relatingMaterial.ForLayerSet || relatingMaterial;
+              if (layerSet && layerSet.MaterialLayers) {
+                components = layerSet.MaterialLayers.map((layer: any) => ({
+                  name: layer.Material?.Name || "Unnamed",
+                  thickness: layer.LayerThickness,
+                  isVentilated: layer.IsVentilated
+                }));
+                setType = "IfcMaterialLayerSet";
+              }
+            } else if (type === "IfcMaterialConstituentSet") {
+              if (relatingMaterial.MaterialConstituents) {
+                components = relatingMaterial.MaterialConstituents.map((c: any) => ({
+                  name: c.Material?.Name || "Unnamed",
+                  fraction: c.Fraction
+                }));
+                setType = "IfcMaterialConstituentSet";
+              }
+            } else if (type === "IfcMaterialProfileSet" || type === "IfcMaterialProfileSetUsage") {
+              const profileSet = relatingMaterial.ForProfileSet || relatingMaterial;
+              if (profileSet && profileSet.MaterialProfiles) {
+                components = profileSet.MaterialProfiles.map((p: any) => ({
+                  name: p.Material?.Name || "Unnamed",
+                  profileName: p.Profile?.ProfileName
+                }));
+                setType = "IfcMaterialProfileSet";
+              }
+            }
+
+            if (components.length > 0) {
+              const names = components
+                .map((c: any) => c.name)
+                .filter((n: string) => n !== "Unnamed");
+
+              // Create a more readable composite name
+              if (names.length > 3) {
+                name = `${names[0]} + ${names.length - 1} others`;
+              } else {
+                name = names.join(" + ");
+              }
+
+              return { name, type: setType, components, fullComposition: names.join(" + ") };
+            }
+
+            return { name: relatingMaterial.Name || "Unknown Material Type", type, components: [] };
+          };
+
+
+          materialElements.forEach((element: any) => {
+            let materialInfo = null;
+
+            // Check for material in properties
+            if (element.properties) {
+              // Check for Material property
+              if (element.properties.Material) {
+                materialInfo = {
+                  name: element.properties.Material,
+                  source: "property"
+                };
+              }
+
+              // Check in psets for material-related properties
+              if (!materialInfo && element.psets) {
+                for (const [psetName, props] of Object.entries(element.psets)) {
+                  const psetProps = props as any;
+                  if (psetProps.Material) {
+                    materialInfo = {
+                      name: psetProps.Material,
+                      source: `pset:${psetName}`
+                    };
+                    break;
+                  }
+                }
+              }
+            }
+
+            // Check for material in relationships
+            if (!materialInfo && element.relationships && element.relationships.HasAssociations) {
+              const materialAssoc = element.relationships.HasAssociations.find(
+                (assoc: any) => assoc.type === "IfcRelAssociatesMaterial"
+              );
+              if (materialAssoc && materialAssoc.RelatingMaterial) {
+                const info = extractMaterialData(materialAssoc.RelatingMaterial);
+                if (info) {
+                  materialInfo = {
+                    ...info,
+                    source: "relationship"
+                  };
+                }
+              }
+            }
+
+            // If no material found on instance, check the element's type (e.g., IfcWallType)
+            if (!materialInfo && element.relationships && element.relationships.IsTypedBy) {
+              const typeRel = element.relationships.IsTypedBy;
+              if (typeRel && typeRel.RelatingType) {
+                const elementType = typeRel.RelatingType;
+
+                // Check type's relationships for materials
+                if (elementType.relationships && elementType.relationships.HasAssociations) {
+                  const materialAssoc = elementType.relationships.HasAssociations.find(
+                    (assoc: any) => assoc.type === "IfcRelAssociatesMaterial"
+                  );
+                  if (materialAssoc && materialAssoc.RelatingMaterial) {
+                    const info = extractMaterialData(materialAssoc.RelatingMaterial);
+                    if (info) {
+                      materialInfo = {
+                        ...info,
+                        source: `type:${elementType.type}`
+                      };
+                    }
+                  }
+                }
+              }
+            }
+
+            if (materialInfo) {
+              // Add to materials map
+              // Add to materials map
+              const key = materialInfo.fullComposition || materialInfo.name;
+
+              if (!materialsMap.has(key)) {
+                materialsMap.set(key, {
+                  name: materialInfo.name,
+                  type: materialInfo.type || "IfcMaterial",
+                  source: materialInfo.source,
+                  components: materialInfo.components,
+                  fullComposition: materialInfo.fullComposition,
+                  elementCount: 0,
+                  elements: []
+                });
+              }
+
+              const material = materialsMap.get(key);
+              material.elementCount++;
+              material.elements.push({
+                id: element.properties?.GlobalId || element.expressId,
+                type: element.type
+              });
+
+              // Add material info to element
+              elementsWithMaterials.push({
+                ...element,
+                materialInfo: {
+                  name: materialInfo.name,
+                  source: materialInfo.source
+                }
+              });
+            } else {
+              // Element has no material
+              elementsWithMaterials.push({
+                ...element,
+                materialInfo: null
+              });
+            }
+          });
+
+          const materials = Array.from(materialsMap.values());
+
+          // Store full result in node data for UI display
+          node.data.results = {
+            materials: materials,
+            summary: {
+              totalElements: materialElements.length,
+              elementsWithMaterial: elementsWithMaterials.filter(e => e.materialInfo).length,
+              uniqueMaterials: materials.length
+            }
+          };
+
+          // Pass materials array to downstream nodes
+          result = materials;
+
+          console.log(`Found ${materials.length} unique materials in ${materialElements.length} elements`);
+        } else if (materialAction === "create") {
+          // Create a new material
+          result = {
+            elements: materialElements,
+            material: {
+              name: typeof materialName === "string" ? materialName : "New Material",
+              category: materialCategory,
+              description: materialDescription
+            }
+          };
+          node.data.results = [result.material];
+        } else if (materialAction === "assign") {
+          // Assign material to elements
+          result = {
+            elements: materialElements,
+            assignedCount: materialElements.length
+          };
+          node.data.results = { assignedCount: materialElements.length };
+        }
+
+        console.log("Material node result:", result);
+        console.log("Material node result type:", typeof result, "isArray:", Array.isArray(result));
         break;
 
       case "watchNode":
         // Process data for watch node
         console.log("Processing watchNode", { node, inputValues });
+        console.log("Watch node input type:", typeof inputValues.input, "isArray:", Array.isArray(inputValues.input));
+        console.log("Watch node input value:", inputValues.input);
 
         if (!inputValues || !inputValues.input) {
           console.log("No input provided to watch node");
