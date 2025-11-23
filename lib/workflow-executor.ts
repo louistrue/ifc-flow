@@ -14,6 +14,7 @@ import {
   getLastLoadedModel,
   extractGeometryWithGeom,
   runPythonScript,
+  assignMaterial,
 } from "@/lib/ifc-utils";
 import { performAnalysis } from "@/lib/ifc/analysis-utils";
 import { withActiveViewer, hasActiveModel } from "@/lib/ifc/viewer-manager";
@@ -693,14 +694,48 @@ export class WorkflowExecutor {
               if (uniqueValues.length === 1) {
                 materialName = uniqueValues[0];
               } else {
-                // Multiple values - use mappings if available
-                materialName = inputValues.valueInput;
+                // Multiple values - use mappings if available, or build them
+                if (inputValues.valueInput.mappings) {
+                  materialName = inputValues.valueInput;
+                } else {
+                  // Build mappings from elements
+                  const mappings: Record<string, any> = {};
+                  inputValues.valueInput.elements.forEach((el: any) => {
+                    if (el.propertyInfo && el.propertyInfo.value !== undefined) {
+                      mappings[String(el.id)] = el.propertyInfo.value;
+                      if (el.expressId) mappings[String(el.expressId)] = el.propertyInfo.value;
+                    }
+                  });
+
+                  if (Object.keys(mappings).length > 0) {
+                    materialName = { mappings };
+                    console.log("Built material mappings from elements:", Object.keys(mappings).length);
+                  } else {
+                    materialName = inputValues.valueInput;
+                  }
+                }
               }
+            } else if (Array.isArray(inputValues.valueInput) && inputValues.valueInput.length > 0) {
+              materialName = inputValues.valueInput[0];
             } else {
               materialName = inputValues.valueInput;
             }
           } else {
             materialName = inputValues.valueInput;
+          }
+        } else if (useMaterialValueInput && materialElements.length > 0) {
+          // Try to extract from input elements if valueInput is not provided
+          const mappings: Record<string, any> = {};
+          materialElements.forEach((el: any) => {
+            if (el.propertyInfo && el.propertyInfo.value !== undefined) {
+              mappings[String(el.id)] = el.propertyInfo.value;
+              if (el.expressId) mappings[String(el.expressId)] = el.propertyInfo.value;
+            }
+          });
+
+          if (Object.keys(mappings).length > 0) {
+            materialName = { mappings };
+            console.log("Built material mappings from input elements:", Object.keys(mappings).length);
           }
         }
 
@@ -915,11 +950,28 @@ export class WorkflowExecutor {
           node.data.results = [result.material];
         } else if (materialAction === "assign") {
           // Assign material to elements
-          result = {
-            elements: materialElements,
-            assignedCount: materialElements.length
-          };
-          node.data.results = { assignedCount: materialElements.length };
+          console.log("Assigning material to elements:", materialElements.length);
+
+          try {
+            const assignResult = await assignMaterial(
+              materialElements,
+              materialName,
+              materialCategory,
+              materialDescription
+            );
+
+            result = {
+              elements: materialElements,
+              assignedCount: assignResult.assignedCount
+            };
+            node.data.results = { assignedCount: assignResult.assignedCount };
+            console.log("Material assignment complete:", assignResult);
+          } catch (error) {
+            console.error("Material assignment failed:", error);
+            // Fallback to mock result but with error indication?
+            // For now just rethrow or return empty
+            throw error;
+          }
         }
 
         console.log("Material node result:", result);

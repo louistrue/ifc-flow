@@ -250,6 +250,11 @@ export async function initializeWorker(): Promise<void> {
           workerPromiseResolvers.get(messageId)!.resolve({ key: data.key, tableCount: data.tableCount });
           workerPromiseResolvers.delete(messageId);
         }
+      } else if (type === "materialAssigned") {
+        if (messageId && workerPromiseResolvers.has(messageId)) {
+          workerPromiseResolvers.get(messageId)!.resolve(data.result);
+          workerPromiseResolvers.delete(messageId);
+        }
       } else if (type === "sqliteStatus") {
         // Background status from worker: building/ready/error
         const model = getLastLoadedModel();
@@ -743,7 +748,7 @@ export function filterElements(
       // Filter by IFC class
       const ifcClass = property; // In ifcClass mode, property parameter contains the class pattern
       const elementType = element.type || '';
-      
+
       // Case-insensitive matching
       const lowerElementType = elementType.toLowerCase();
       const lowerIfcClass = ifcClass.toLowerCase();
@@ -1284,7 +1289,7 @@ export function manageProperties(
   // Create a new array to return
   const result = elements.map((element) => {
     // Clone the element to avoid modifying the original
-    const updatedElement = { 
+    const updatedElement = {
       ...element,
       properties: element.properties ? { ...element.properties } : {},
       psets: element.psets ? JSON.parse(JSON.stringify(element.psets)) : {},
@@ -2578,4 +2583,39 @@ export async function runPythonScript(
   });
 
   return resultPromise;
+}
+
+// Assign material to elements via worker
+export async function assignMaterial(
+  elements: IfcElement[],
+  materialName: string | any,
+  category?: string,
+  description?: string
+): Promise<{ assignedCount: number }> {
+  await initializeWorker();
+  if (!ifcWorker) throw new Error("IFC worker initialization failed");
+
+  const messageId = `assign_mat_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+  return new Promise((resolve, reject) => {
+    workerPromiseResolvers.set(messageId, { resolve, reject });
+
+    ifcWorker!.postMessage({
+      action: "assignMaterial",
+      messageId,
+      data: {
+        elements,
+        materialName,
+        category,
+        description
+      }
+    });
+
+    setTimeout(() => {
+      if (workerPromiseResolvers.has(messageId)) {
+        reject(new Error("Assign material timed out"));
+        workerPromiseResolvers.delete(messageId);
+      }
+    }, 60000);
+  }) as Promise<{ assignedCount: number }>;
 }

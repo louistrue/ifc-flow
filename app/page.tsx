@@ -56,6 +56,7 @@ import { useAppSettings } from "@/lib/settings-manager";
 import { useTheme } from "next-themes";
 import { ViewerFocusProvider } from "@/components/contexts/viewer-focus-context";
 import { nodeCategories } from "@/components/sidebar";
+import { SelectionOverlay } from "@/components/selection-overlay";
 
 // Import the centralized nodeTypes to prevent React Flow warning
 import { nodeTypes } from "@/components/nodes";
@@ -708,16 +709,28 @@ function FlowWithProvider() {
   );
 
   const onNodeClick = useCallback(
-    (event: React.MouseEvent, node: Node) => {
-      // Do not open modal on single click. Reserve for selection/drag only.
+    (event: React.MouseEvent, clickedNode: Node) => {
       const isMac = navigator.platform.toUpperCase().includes('MAC');
-      const cmdOrCtrl = isMac ? (event as any).metaKey : (event as any).ctrlKey;
-      if (cmdOrCtrl) {
+      const isMultiSelect = isMac ? (event as any).metaKey : (event as any).ctrlKey;
+
+      // If not holding multi-select key, ensure we deselect other nodes
+      // React Flow usually handles this, but we're enforcing it to be sure
+      if (!isMultiSelect) {
+        setNodes((nds) =>
+          nds.map((n) => ({
+            ...n,
+            selected: n.id === clickedNode.id,
+          }))
+        );
+      }
+
+      // Do not open modal on single click. Reserve for selection/drag only.
+      if (isMultiSelect) {
         return;
       }
-      setSelectedNode(node);
+      setSelectedNode(clickedNode);
     },
-    []
+    [setNodes]
   );
 
   const onNodeDoubleClick = useCallback((event: React.MouseEvent, node: Node) => {
@@ -1318,6 +1331,7 @@ function FlowWithProvider() {
                 <Panel position="bottom-right">
                   <FooterPill />
                 </Panel>
+                <SelectionOverlay />
               </ReactFlow>
             </div>
           </ViewerFocusProvider>

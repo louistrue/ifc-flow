@@ -166,7 +166,7 @@ export function MaterialEditor({ properties, setProperties }: MaterialEditorProp
                         <div className="p-3 bg-purple-50 dark:bg-purple-950 border border-purple-200 dark:border-purple-800 rounded-md">
                             <p className="text-xs text-purple-900 dark:text-purple-100">
                                 <strong>Using value from input:</strong> Connect a Property Node
-                                or other node to the top handle to provide material names for
+                                to the top handle OR the main input to provide material names for
                                 each element.
                             </p>
                         </div>

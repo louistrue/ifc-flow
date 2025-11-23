@@ -467,6 +467,10 @@ self.onmessage = async (event) => {
         await handleExtractData({ ...data, messageId });
         break;
 
+      case "assignMaterial":
+        await handleAssignMaterial({ ...data, messageId });
+        break;
+
       case "exportIfc":
         // Handle the export data properly
         const exportData = {
@@ -494,6 +498,10 @@ self.onmessage = async (event) => {
       case "querySqlite":
 
         await handleSqliteQuery({ ...data, messageId });
+        break;
+
+      case "exportIfc":
+        await handleExportIfc({ ...data, messageId });
         break;
 
       case "exportSqlite":
@@ -1232,9 +1240,9 @@ async function handleExportIfc(data) {
     if (!model) {
       throw new Error("No model data provided for export");
     }
-    if (!arrayBuffer) {
-      throw new Error("No IFC file buffer provided for export");
-    }
+    // if (!arrayBuffer) {
+    //   throw new Error("No IFC file buffer provided for export");
+    // }
     self.postMessage({
       type: "progress",
       message: "Preparing to export modified IFC file...",
@@ -1269,21 +1277,27 @@ async function handleExportIfc(data) {
       messageId,
     });
 
-    // Ensure the original IFC file buffer was passed from the main thread
-    if (!arrayBuffer || !(arrayBuffer instanceof ArrayBuffer)) {
+    // Check if we have an in-memory file from previous operations
+    const hasInMemoryFile = pyodide.globals.get('ifc_file');
+
+    // Ensure we have a source file
+    if (!hasInMemoryFile && (!arrayBuffer || !(arrayBuffer instanceof ArrayBuffer))) {
       throw new Error(
-        "Original IFC file buffer was not provided or is invalid. Cannot export."
+        "Original IFC file buffer was not provided and no in-memory model exists. Cannot export."
       );
     }
 
-    try {
-      // Write the provided buffer to the filesystem
-      pyodide.FS.writeFile("model.ifc", new Uint8Array(arrayBuffer));
-
-    } catch (fsError) {
-      throw new Error(
-        `Failed to prepare IFC file in virtual filesystem: ${fsError.message}`
-      );
+    if (!hasInMemoryFile && arrayBuffer && arrayBuffer instanceof ArrayBuffer) {
+      try {
+        // Write the provided buffer to the filesystem
+        pyodide.FS.writeFile("model.ifc", new Uint8Array(arrayBuffer));
+      } catch (fsError) {
+        throw new Error(
+          `Failed to prepare IFC file in virtual filesystem: ${fsError.message}`
+        );
+      }
+    } else {
+      console.log("Using existing in-memory IFC file for export");
     }
 
     try {
@@ -2478,6 +2492,114 @@ except Exception as e:
     self.postMessage({
       type: "error",
       message: `Error extracting quantities: ${error.message}`,
+      messageId,
+    });
+  }
+}
+
+// Assign material to elements
+async function handleAssignMaterial({ elements, materialName, category, description, messageId }) {
+  try {
+    await initPyodide();
+
+    self.postMessage({
+      type: "progress",
+      message: "Assigning materials...",
+      percentage: 10,
+      messageId,
+    });
+
+    const namespace = pyodide.globals.get("dict")();
+
+    // Pass data via namespace to avoid string literal limits
+    namespace.set("elements_json", JSON.stringify(elements));
+    namespace.set("material_name_input_json", JSON.stringify(materialName));
+    namespace.set("category_input", category || "");
+    namespace.set("description_input", description || "");
+
+    await pyodide.runPythonAsync(`
+import json
+import ifcopenshell
+import ifcopenshell.api
+
+elements_data = json.loads(elements_json)
+material_name_input = json.loads(material_name_input_json)
+category = category_input
+description = description_input
+
+# Helper to get or create material
+def get_or_create_material(file, name):
+    # Check if material exists
+    materials = file.by_type("IfcMaterial")
+    for mat in materials:
+        if mat.Name == name:
+            return mat
+    
+    # Create new material
+    material = ifcopenshell.api.run("material.add_material", file, name=name)
+    if description:
+        material.Description = description
+    if category:
+        material.Category = category
+    return material
+
+# Process elements
+assigned_count = 0
+if hasattr(globals(), 'ifc_file'):
+    file = globals()['ifc_file']
+    
+    for elem_data in elements_data:
+        # Get element by GlobalId or expressId
+        element = None
+        if 'GlobalId' in elem_data:
+            element = file.by_guid(elem_data['GlobalId'])
+        elif 'expressId' in elem_data:
+            element = file.by_id(elem_data['expressId'])
+        elif 'id' in elem_data: # Handle 'id' from some nodes
+             element = file.by_guid(elem_data['id']) if isinstance(elem_data['id'], str) and len(elem_data['id']) == 22 else file.by_id(int(elem_data['id'])) if str(elem_data['id']).isdigit() else None
+            
+        if element:
+            # Determine material name for this element
+            mat_name = None
+            if isinstance(material_name_input, dict) and 'mappings' in material_name_input:
+                # Use mapping
+                elem_id = str(element.id())
+                if elem_id in material_name_input['mappings']:
+                    mat_name = material_name_input['mappings'][elem_id]
+            elif isinstance(material_name_input, dict) and 'name' in material_name_input:
+                mat_name = material_name_input['name']
+            elif isinstance(material_name_input, str):
+                mat_name = material_name_input
+                
+            if mat_name:
+                material = get_or_create_material(file, mat_name)
+                # Assign material (replaces existing if any)
+                ifcopenshell.api.run("material.assign_material", file, product=element, material=material)
+                assigned_count += 1
+
+    success = True
+else:
+    success = False
+    error_msg = "No IFC file loaded"
+    `, { globals: namespace });
+
+    const success = namespace.get("success");
+    if (!success) {
+      throw new Error(namespace.get("error_msg") || "Failed to assign material");
+    }
+
+    const assignedCount = namespace.get("assigned_count");
+
+    self.postMessage({
+      type: "materialAssigned",
+      messageId,
+      result: { assignedCount }
+    });
+
+  } catch (error) {
+    self.postMessage({
+      type: "error",
+      message: `Error assigning material: ${error.message}`,
       messageId,
     });
   }
