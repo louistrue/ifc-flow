@@ -30,9 +30,44 @@ export function PropertiesPanel({
 }: PropertiesPanelProps) {
   const [properties, setProperties] = useState<Record<string, any>>({});
 
+  // Normalize properties with defaults based on node type
+  const normalizeProperties = (node: Node | null, props: Record<string, any>) => {
+    if (!node) return props;
+
+    // Apply defaults for propertyNode
+    if (node.type === "propertyNode") {
+      const normalized = { ...props };
+
+      // Set default source if not present
+      if (!normalized.source) {
+        normalized.source = "property";
+      }
+
+      // Set default action if not present
+      if (!normalized.action) {
+        normalized.action = "get";
+      }
+
+      // Set default propertyName for attributes if source is attribute and propertyName is not set
+      if (normalized.source === "attribute" && !normalized.propertyName) {
+        normalized.propertyName = "Name";
+      }
+
+      // Set default targetPset if not present and source is property
+      if (normalized.source === "property" && !normalized.targetPset) {
+        normalized.targetPset = "";
+      }
+
+      return normalized;
+    }
+
+    return props;
+  };
+
   useEffect(() => {
     if (node && node.data) {
-      setProperties(node.data.properties || {});
+      const normalizedProps = normalizeProperties(node, node.data.properties || {});
+      setProperties(normalizedProps);
     }
   }, [node]);
 

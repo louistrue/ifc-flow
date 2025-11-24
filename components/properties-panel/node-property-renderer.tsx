@@ -495,6 +495,30 @@ export function NodePropertyRenderer({
       return (
         <div className="space-y-4">
           <div className="space-y-2">
+            <Label htmlFor="source">Source</Label>
+            <Select
+              value={properties.source || "property"}
+              onValueChange={(value) =>
+                setProperties({
+                  ...properties,
+                  source: value,
+                  action: "get",
+                  // Set default attribute name when switching to attribute source
+                  propertyName: value === "attribute" ? (properties.propertyName || "Name") : properties.propertyName
+                })
+              }
+            >
+              <SelectTrigger id="source">
+                <SelectValue placeholder="Select source" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="property">Property</SelectItem>
+                <SelectItem value="attribute">Attribute</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-2">
             <Label htmlFor="action">Action</Label>
             <Select
               value={properties.action || "get"}
@@ -506,74 +530,103 @@ export function NodePropertyRenderer({
                 <SelectValue placeholder="Select action" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="get">Get Property</SelectItem>
-                <SelectItem value="set">Set Property</SelectItem>
-                <SelectItem value="add">Add Property</SelectItem>
-                <SelectItem value="remove">Remove Property</SelectItem>
+                <SelectItem value="get">Get {properties.source === "attribute" ? "Attribute" : "Property"}</SelectItem>
+                <SelectItem value="set">Set {properties.source === "attribute" ? "Attribute" : "Property"}</SelectItem>
+                {properties.source !== "attribute" && (
+                  <>
+                    <SelectItem value="add">Add Property</SelectItem>
+                    <SelectItem value="remove">Remove Property</SelectItem>
+                  </>
+                )}
               </SelectContent>
             </Select>
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="targetPset">Property Set</Label>
-            <Select
-              value={properties.targetPset || ""}
-              onValueChange={(value) =>
-                setProperties({ ...properties, targetPset: value })
-              }
-            >
-              <SelectTrigger id="targetPset">
-                <SelectValue placeholder="Select property set" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="any">Any Property Set</SelectItem>
-                <SelectItem value="Pset_WallCommon">Pset_WallCommon</SelectItem>
-                <SelectItem value="Pset_BeamCommon">Pset_BeamCommon</SelectItem>
-                <SelectItem value="Pset_SlabCommon">Pset_SlabCommon</SelectItem>
-                <SelectItem value="Pset_ColumnCommon">
-                  Pset_ColumnCommon
-                </SelectItem>
-                <SelectItem value="Pset_WindowCommon">
-                  Pset_WindowCommon
-                </SelectItem>
-                <SelectItem value="Pset_DoorCommon">Pset_DoorCommon</SelectItem>
-                <SelectItem value="Pset_BuildingCommon">
-                  Pset_BuildingCommon
-                </SelectItem>
-                <SelectItem value="Pset_SpaceCommon">
-                  Pset_SpaceCommon
-                </SelectItem>
-                <SelectItem value="CustomProperties">
-                  CustomProperties
-                </SelectItem>
-              </SelectContent>
-            </Select>
-            <div className="text-xs text-muted-foreground">
-              For "get" action: Where to look for the property (optional). For
-              "set/add" actions: Where to add the property.
+          {properties.source !== "attribute" && (
+            <div className="space-y-2">
+              <Label htmlFor="targetPset">Property Set</Label>
+              <Select
+                value={properties.targetPset || ""}
+                onValueChange={(value) =>
+                  setProperties({ ...properties, targetPset: value })
+                }
+              >
+                <SelectTrigger id="targetPset">
+                  <SelectValue placeholder="Select property set" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="any">Any Property Set</SelectItem>
+                  <SelectItem value="Pset_WallCommon">Pset_WallCommon</SelectItem>
+                  <SelectItem value="Pset_BeamCommon">Pset_BeamCommon</SelectItem>
+                  <SelectItem value="Pset_SlabCommon">Pset_SlabCommon</SelectItem>
+                  <SelectItem value="Pset_ColumnCommon">
+                    Pset_ColumnCommon
+                  </SelectItem>
+                  <SelectItem value="Pset_WindowCommon">
+                    Pset_WindowCommon
+                  </SelectItem>
+                  <SelectItem value="Pset_DoorCommon">Pset_DoorCommon</SelectItem>
+                  <SelectItem value="Pset_BuildingCommon">
+                    Pset_BuildingCommon
+                  </SelectItem>
+                  <SelectItem value="Pset_SpaceCommon">
+                    Pset_SpaceCommon
+                  </SelectItem>
+                  <SelectItem value="CustomProperties">
+                    CustomProperties
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+              <div className="text-xs text-muted-foreground">
+                For "get" action: Where to look for the property (optional). For
+                "set/add" actions: Where to add the property.
+              </div>
             </div>
-          </div>
+          )}
 
           <div className="space-y-2">
-            <Label htmlFor="propertyName">Property Name</Label>
-            <Input
-              id="propertyName"
-              value={properties.propertyName || ""}
-              onChange={(e) =>
-                setProperties({
-                  ...properties,
-                  propertyName: e.target.value,
-                })
-              }
-              placeholder="e.g. IsExternal, FireRating"
-            />
-            <div className="text-xs text-muted-foreground">
-              Common properties: IsExternal, FireRating, LoadBearing,
-              ThermalTransmittance
-            </div>
-            <div className="text-xs text-muted-foreground">
-              Use dot notation to override Property Set: MyCustomPset.MyProperty
-            </div>
+            <Label htmlFor="propertyName">{properties.source === "attribute" ? "Attribute Name" : "Property Name"}</Label>
+            {properties.source === "attribute" ? (
+              <Select
+                value={properties.propertyName || "Name"}
+                onValueChange={(value) =>
+                  setProperties({ ...properties, propertyName: value })
+                }
+              >
+                <SelectTrigger id="attributeName">
+                  <SelectValue placeholder="Select attribute" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Name">Name</SelectItem>
+                  <SelectItem value="Description">Description</SelectItem>
+                  <SelectItem value="GlobalId">GlobalId</SelectItem>
+                  <SelectItem value="Tag">Tag</SelectItem>
+                  <SelectItem value="ObjectType">ObjectType</SelectItem>
+                  <SelectItem value="PredefinedType">PredefinedType</SelectItem>
+                </SelectContent>
+              </Select>
+            ) : (
+              <>
+                <Input
+                  id="propertyName"
+                  value={properties.propertyName || ""}
+                  onChange={(e) =>
+                    setProperties({
+                      ...properties,
+                      propertyName: e.target.value,
+                    })
+                  }
+                  placeholder="e.g. IsExternal, FireRating"
+                />
+                <div className="text-xs text-muted-foreground">
+                  Common properties: IsExternal, FireRating, LoadBearing,
+                  ThermalTransmittance
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  Use dot notation to override Property Set: MyCustomPset.MyProperty
+                </div>
+              </>
+            )}
           </div>
 
           {(properties.action === "set" || properties.action === "add") && (

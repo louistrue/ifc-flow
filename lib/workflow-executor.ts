@@ -15,6 +15,7 @@ import {
   extractGeometryWithGeom,
   runPythonScript,
   assignMaterial,
+  createMaterial,
 } from "@/lib/ifc-utils";
 import { performAnalysis } from "@/lib/ifc/analysis-utils";
 import { withActiveViewer, hasActiveModel } from "@/lib/ifc/viewer-manager";
@@ -567,6 +568,7 @@ export class WorkflowExecutor {
         }
 
         // Determine where property values should come from
+        const source = node.data.properties?.source || "property";
         let valueToUse = propertyValue;
         if (
           node.data.properties?.useValueInput &&
@@ -644,6 +646,7 @@ export class WorkflowExecutor {
           propertyName,
           propertyValue: valueToUse,
           targetPset: effectiveTargetPset,
+          source,
         });
 
         // Return the result with the updated elements
@@ -672,8 +675,8 @@ export class WorkflowExecutor {
         // Extract material configuration
         const materialAction = node.data.properties?.action || "get";
         let materialName = node.data.properties?.materialName || "";
-        const materialCategory = node.data.properties?.materialCategory || "";
-        const materialDescription = node.data.properties?.materialDescription || "";
+        let materialCategory = node.data.properties?.materialCategory || "";
+        let materialDescription = node.data.properties?.materialDescription || "";
         const useMaterialValueInput = node.data.properties?.useValueInput || false;
 
         // Handle value input for material names (similar to property node)
@@ -682,8 +685,24 @@ export class WorkflowExecutor {
 
           // Extract material name from input
           if (typeof inputValues.valueInput === "object" && inputValues.valueInput !== null) {
+            // Check if it's a material creation result
+            if (inputValues.valueInput.material) {
+              console.log("Using material from upstream create node");
+              if (inputValues.valueInput.material.mappings) {
+                materialName = { mappings: inputValues.valueInput.material.mappings };
+              } else {
+                materialName = inputValues.valueInput.material.name;
+              }
+
+              if (inputValues.valueInput.material.category) {
+                materialCategory = inputValues.valueInput.material.category;
+              }
+              if (inputValues.valueInput.material.description) {
+                materialDescription = inputValues.valueInput.material.description;
+              }
+            }
             // Check if it's a property node result with mappings
-            if (inputValues.valueInput.mappings) {
+            else if (inputValues.valueInput.mappings) {
               console.log("Material names from mappings:", inputValues.valueInput.mappings);
               // For now, we'll use the mappings directly
               // The Python backend will handle element-specific material assignment
@@ -723,13 +742,20 @@ export class WorkflowExecutor {
           } else {
             materialName = inputValues.valueInput;
           }
-        } else if (useMaterialValueInput && materialElements.length > 0) {
-          // Try to extract from input elements if valueInput is not provided
+        } else if (useMaterialValueInput) {
+          // Try to extract from value input elements or main input elements
+          const elementsToCheck = (inputValues.valueInput && inputValues.valueInput.elements)
+            ? inputValues.valueInput.elements
+            : materialElements;
+
           const mappings: Record<string, any> = {};
-          materialElements.forEach((el: any) => {
+          elementsToCheck.forEach((el: any) => {
             if (el.propertyInfo && el.propertyInfo.value !== undefined) {
-              mappings[String(el.id)] = el.propertyInfo.value;
+              // Use both id and expressId as keys for maximum compatibility
+              if (el.id) mappings[String(el.id)] = el.propertyInfo.value;
               if (el.expressId) mappings[String(el.expressId)] = el.propertyInfo.value;
+              // Also use GlobalId if available
+              if (el.properties?.GlobalId) mappings[el.properties.GlobalId] = el.propertyInfo.value;
             }
           });
 
@@ -946,16 +972,38 @@ export class WorkflowExecutor {
 
           console.log(`Found ${materials.length} unique materials in ${materialElements.length} elements`);
         } else if (materialAction === "create") {
-          // Create a new material
-          result = {
-            elements: materialElements,
-            material: {
-              name: typeof materialName === "string" ? materialName : "New Material",
-              category: materialCategory,
-              description: materialDescription
-            }
-          };
-          node.data.results = [result.material];
+          // Create new material(s)
+          console.log("Creating material(s):", materialName);
+
+          try {
+            const createResult = await createMaterial(
+              materialName,
+              materialCategory,
+              materialDescription
+            );
+
+            result = {
+              elements: materialElements,
+              material: createResult.materials.length === 1 ? createResult.materials[0] : {
+                materials: createResult.materials,
+                count: createResult.createdCount,
+                mappings: (materialName && typeof materialName === 'object' && materialName.mappings) ? materialName.mappings : undefined
+              },
+              createdCount: createResult.createdCount
+            };
+            node.data.results = createResult.materials;
+          } catch (error) {
+            console.error("Material creation failed:", error);
+            // Fallback to mock
+            result = {
+              elements: materialElements,
+              material: {
+                name: typeof materialName === "string" ? materialName : "New Material",
+                category: materialCategory,
+                description: materialDescription
+              }
+            };
+          }
         } else if (materialAction === "assign") {
           // Assign material to elements
           console.log("Assigning material to elements:", materialElements.length);
@@ -978,6 +1026,28 @@ export class WorkflowExecutor {
             console.error("Material assignment failed:", error);
             // Fallback to mock result but with error indication?
             // For now just rethrow or return empty
+            throw error;
+          }
+        } else if (materialAction === "createAssign") {
+          // Create and assign materials in one step
+          console.log("Creating and assigning material(s):", materialName);
+
+          try {
+            const assignResult = await assignMaterial(
+              materialElements,
+              materialName,
+              materialCategory,
+              materialDescription
+            );
+
+            result = {
+              elements: materialElements,
+              assignedCount: assignResult.assignedCount
+            };
+            node.data.results = { assignedCount: assignResult.assignedCount };
+            console.log("Material create & assign complete:", assignResult);
+          } catch (error) {
+            console.error("Material create & assign failed:", error);
             throw error;
           }
         }

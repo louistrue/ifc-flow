@@ -90,12 +90,23 @@ export function FlowCanvas({
           y: cursorPosition.y,
         };
 
+        // Set default properties based on node type
+        let defaultProperties = {};
+        if (nodeType === "propertyNode") {
+          defaultProperties = {
+            source: "property",
+            action: "get",
+            propertyName: "",
+            targetPset: "",
+          };
+        }
+
         // Create a new node
         const newNode = {
           id: `${nodeType}-${Date.now()}`,
           type: nodeType,
           position,
-          data: { label: `${nodeType.replace("Node", "")}`, properties: {} },
+          data: { label: `${nodeType.replace("Node", "")}`, properties: defaultProperties },
         };
 
         // Add the new node

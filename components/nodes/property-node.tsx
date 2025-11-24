@@ -28,6 +28,7 @@ interface PropertyNodeProps {
       propertyValue?: string;
       targetPset?: string;
       useValueInput?: boolean;
+      source?: string;
     };
     results?: PropertyNodeElement[];
   };
@@ -63,6 +64,7 @@ export const PropertyNode = memo(
     const propertyValue = properties?.propertyValue || "";
     const targetPset =
       properties?.targetPset || explicitPset || "CustomProperties";
+    const source = properties?.source || "property";
 
     // Helper to format the property value for display
     const formatPropertyValue = (value: any): string => {
@@ -259,19 +261,21 @@ export const PropertyNode = memo(
                 <span className="font-medium">{action}</span>
               </div>
               <div className="flex justify-between">
-                <span>Property:</span>
+                <span>{source === "attribute" ? "Attribute:" : "Property:"}</span>
                 <span className="font-medium truncate max-w-24">
                   {getDisplayPropertyName()}
                 </span>
               </div>
 
               {/* Show target pset for all operations */}
-              <div className="flex justify-between">
-                <span>Pset:</span>
-                <span className="font-medium truncate max-w-24">
-                  {targetPset === "any" ? "Any" : targetPset}
-                </span>
-              </div>
+              {source !== "attribute" && (
+                <div className="flex justify-between">
+                  <span>Pset:</span>
+                  <span className="font-medium truncate max-w-24">
+                    {targetPset === "any" ? "Any" : targetPset}
+                  </span>
+                </div>
+              )}
 
               {/* Show value for set/add operations */}
               {(action.toLowerCase() === "set" ||

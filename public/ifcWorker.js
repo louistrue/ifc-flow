@@ -471,6 +471,10 @@ self.onmessage = async (event) => {
         await handleAssignMaterial({ ...data, messageId });
         break;
 
+      case "createMaterial":
+        await handleCreateMaterial({ ...data, messageId });
+        break;
+
       case "exportIfc":
         // Handle the export data properly
         const exportData = {
@@ -498,10 +502,6 @@ self.onmessage = async (event) => {
       case "querySqlite":
 
         await handleSqliteQuery({ ...data, messageId });
-        break;
-
-      case "exportIfc":
-        await handleExportIfc({ ...data, messageId });
         break;
 
       case "exportSqlite":
@@ -1277,27 +1277,38 @@ async function handleExportIfc(data) {
       messageId,
     });
 
-    // Check if we have an in-memory file from previous operations
-    const hasInMemoryFile = pyodide.globals.get('ifc_file');
+    // Check if model.ifc already exists in the Pyodide virtual filesystem
+    // This is more reliable than checking Python globals since handlers use isolated namespaces
+    let fileExistsInFS = false;
+    try {
+      const pathInfo = pyodide.FS.analyzePath('model.ifc');
+      fileExistsInFS = pathInfo.exists;
+    } catch (e) {
+      // If analyzePath fails, file doesn't exist
+      fileExistsInFS = false;
+    }
 
     // Ensure we have a source file
-    if (!hasInMemoryFile && (!arrayBuffer || !(arrayBuffer instanceof ArrayBuffer))) {
+    if (!fileExistsInFS && (!arrayBuffer || !(arrayBuffer instanceof ArrayBuffer))) {
       throw new Error(
-        "Original IFC file buffer was not provided and no in-memory model exists. Cannot export."
+        "Original IFC file buffer was not provided and no model.ifc exists in virtual filesystem. Cannot export."
       );
     }
 
-    if (!hasInMemoryFile && arrayBuffer && arrayBuffer instanceof ArrayBuffer) {
+    // Only write the original file if model.ifc doesn't exist
+    // If it exists, it may have been modified (e.g., material assignments) so we should preserve it
+    if (!fileExistsInFS && arrayBuffer && arrayBuffer instanceof ArrayBuffer) {
       try {
         // Write the provided buffer to the filesystem
+        console.log("Writing original IFC file to virtual filesystem for first-time export");
         pyodide.FS.writeFile("model.ifc", new Uint8Array(arrayBuffer));
       } catch (fsError) {
         throw new Error(
           `Failed to prepare IFC file in virtual filesystem: ${fsError.message}`
         );
       }
-    } else {
-      console.log("Using existing in-memory IFC file for export");
+    } else if (fileExistsInFS) {
+      console.log("Using existing model.ifc from virtual filesystem (may contain modifications like material assignments)");
     }
 
     try {
@@ -1644,15 +1655,26 @@ async function handleExportIfc(data) {
             
             # Save the IFC file
             print(f"Writing modified IFC file to {temp_path}")
-            ifc_file.write(temp_path)
+            try:
+                ifc_file.write(temp_path)
+                print(f"✓ IFC file written successfully")
+            except Exception as write_error:
+                print(f"❌ Error writing IFC file: {write_error}")
+                import traceback
+                print(traceback.format_exc())
+                raise
             
             # Read the file back as bytes
+            print(f"Reading IFC file back as bytes...")
             with open(temp_path, 'rb') as f:
                 ifc_bytes = f.read()
+            print(f"✓ Read {len(ifc_bytes)} bytes from IFC file")
             
             # Convert bytes to JS-friendly format
             import base64
+            print(f"Converting to base64...")
             ifc_base64 = base64.b64encode(ifc_bytes).decode('utf-8')
+            print(f"✓ Base64 encoding complete ({len(ifc_base64)} characters)")
             
             # Clean temporary file (though it may not actually delete in WASM environment)
             try:
@@ -2579,9 +2601,13 @@ try:
             if mat_name:
                 material = get_or_create_material(file, mat_name)
                 # Assign material (replaces existing if any)
-                ifcopenshell.api.run("material.assign_material", file, product=element, material=material)
+                ifcopenshell.api.run("material.assign_material", file, products=[element], material=material)
                 assigned_count += 1
 
+    # Write the modified file back to the filesystem so export can use it
+    file.write('model.ifc')
+    print(f"Wrote modified IFC file with {assigned_count} material assignments")
+    
     success = True
     error_msg = None
 except Exception as e:
@@ -2606,6 +2632,115 @@ except Exception as e:
     self.postMessage({
       type: "error",
       message: `Error assigning material: ${error.message}`,
+      messageId,
+    });
+  }
+}
+
+
+
+// Create materials
+async function handleCreateMaterial({ materialName, category, description, messageId }) {
+  try {
+    await initPyodide();
+
+    self.postMessage({
+      type: "progress",
+      message: "Creating materials...",
+      percentage: 10,
+      messageId,
+    });
+
+    const namespace = pyodide.globals.get("dict")();
+
+    // Pass data via namespace
+    namespace.set("material_name_input_json", JSON.stringify(materialName));
+    namespace.set("category_input", category || "");
+    namespace.set("description_input", description || "");
+
+    await pyodide.runPythonAsync(`
+import json
+import ifcopenshell
+import ifcopenshell.api
+
+material_name_input = json.loads(material_name_input_json)
+category = category_input
+description = description_input
+
+# Helper to get or create material
+def get_or_create_material(file, name):
+    # Check if material exists
+    materials = file.by_type("IfcMaterial")
+    for mat in materials:
+        if mat.Name == name:
+            return mat
+    
+    # Create new material
+    material = ifcopenshell.api.run("material.add_material", file, name=name)
+    if description:
+        material.Description = description
+    if category:
+        material.Category = category
+    return material
+
+created_materials = []
+import os
+
+try:
+    if not os.path.exists('model.ifc'):
+        raise FileNotFoundError("The 'model.ifc' file does not exist in the virtual filesystem.")
+
+    file = ifcopenshell.open('model.ifc')
+    
+    # Determine names to create
+    names_to_create = []
+    if isinstance(material_name_input, dict) and 'mappings' in material_name_input:
+        # Extract unique names from mappings
+        names_to_create = list(set(material_name_input['mappings'].values()))
+    elif isinstance(material_name_input, dict) and 'name' in material_name_input:
+        names_to_create = [material_name_input['name']]
+    elif isinstance(material_name_input, list):
+        names_to_create = material_name_input
+    elif isinstance(material_name_input, str):
+        names_to_create = [material_name_input]
+        
+    for name in names_to_create:
+        if name:
+            mat = get_or_create_material(file, name)
+            created_materials.append({
+                "name": mat.Name,
+                "category": mat.Category if hasattr(mat, "Category") else "",
+                "description": mat.Description if hasattr(mat, "Description") else "",
+                "id": mat.id()
+            })
+
+    success = True
+    error_msg = None
+except Exception as e:
+    success = False
+    error_msg = str(e)
+    `, { globals: namespace });
+
+    const success = namespace.get("success");
+    if (!success) {
+      throw new Error(namespace.get("error_msg") || "Failed to create materials");
+    }
+
+    const createdMaterials = namespace.get("created_materials").toJs();
+
+    self.postMessage({
+      type: "materialCreated",
+      messageId,
+      result: {
+        createdCount: createdMaterials.length,
+        materials: createdMaterials
+      }
+    });
+
+  } catch (error) {
+    self.postMessage({
+      type: "error",
+      message: `Error creating materials: ${error.message}`,
       messageId,
     });
   }

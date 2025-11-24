@@ -1229,6 +1229,7 @@ export interface PropertyActions {
   propertyName: string;
   propertyValue?: any;
   targetPset?: string;
+  source?: string;
 }
 
 // More flexible properties management function that accepts an options object
@@ -1236,7 +1237,7 @@ export function manageProperties(
   elements: IfcElement[],
   options: PropertyActions
 ): IfcElement[] {
-  const { action, propertyName, propertyValue, targetPset = "any" } = options;
+  const { action, propertyName, propertyValue, targetPset = "any", source = "property" } = options;
 
 
   // Check if propertyValue is a mapping object (element-specific values)
@@ -1295,6 +1296,43 @@ export function manageProperties(
       psets: element.psets ? JSON.parse(JSON.stringify(element.psets)) : {},
       qtos: element.qtos ? JSON.parse(JSON.stringify(element.qtos)) : {}
     };
+
+    // Handle attribute access directly
+    if (source === "attribute") {
+      // Try to get attribute from top-level element or properties
+      let value = (element as any)[propertyName];
+
+      // Fallback to properties if not found on root
+      if (value === undefined && element.properties) {
+        value = element.properties[propertyName];
+      }
+
+      if (action === "get") {
+        updatedElement.propertyInfo = {
+          name: propertyName,
+          exists: value !== undefined,
+          value: value,
+          psetName: "Attributes"
+        };
+      } else if (action === "set") {
+        // Set attribute on the object
+        (updatedElement as any)[propertyName] = propertyValue;
+
+        // Also update properties for consistency if it was there
+        if (updatedElement.properties) {
+          updatedElement.properties[propertyName] = propertyValue;
+        }
+
+        updatedElement.propertyInfo = {
+          name: propertyName,
+          exists: true,
+          value: propertyValue,
+          psetName: "Attributes"
+        };
+      }
+
+      return updatedElement;
+    }
 
     // Function to check if property exists and get its location and value
     const findProperty = (
@@ -2618,4 +2656,76 @@ export async function assignMaterial(
       }
     }, 60000);
   }) as Promise<{ assignedCount: number }>;
+}
+
+// Export IFC using the shared worker (preserves material assignments and other modifications)
+export async function exportIfcWithWorker(
+  model: IfcModel,
+  fileName: string,
+  arrayBuffer?: ArrayBuffer
+): Promise<{ data: ArrayBuffer; fileName: string }> {
+  await initializeWorker();
+  if (!ifcWorker) throw new Error("IFC worker initialization failed");
+
+  const messageId = `export_ifc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+  return new Promise((resolve, reject) => {
+    workerPromiseResolvers.set(messageId, { resolve, reject });
+
+    const message: any = {
+      action: "exportIfc",
+      messageId,
+      model,
+      fileName
+    };
+
+    // Only include arrayBuffer if provided
+    if (arrayBuffer) {
+      message.arrayBuffer = arrayBuffer;
+      ifcWorker!.postMessage(message, [arrayBuffer]);
+    } else {
+      ifcWorker!.postMessage(message);
+    }
+
+    setTimeout(() => {
+      if (workerPromiseResolvers.has(messageId)) {
+        reject(new Error("IFC export timed out"));
+        workerPromiseResolvers.delete(messageId);
+      }
+    }, 120000); // 2 minute timeout for export
+  }) as Promise<{ data: ArrayBuffer; fileName: string }>;
+}
+
+
+// Create materials via worker
+export async function createMaterial(
+  materialName: string | any,
+  category?: string,
+  description?: string
+): Promise<{ createdCount: number; materials: any[] }> {
+  await initializeWorker();
+  if (!ifcWorker) throw new Error("IFC worker initialization failed");
+
+  const messageId = `create_mat_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+  return new Promise((resolve, reject) => {
+    workerPromiseResolvers.set(messageId, { resolve, reject });
+
+    ifcWorker!.postMessage({
+      action: "createMaterial",
+      messageId,
+      data: {
+        materialName,
+        category,
+        description
+      }
+    });
+
+    setTimeout(() => {
+      if (workerPromiseResolvers.has(messageId)) {
+        reject(new Error("Create material timed out"));
+        workerPromiseResolvers.delete(messageId);
+      }
+    }, 60000);
+  }) as Promise<{ createdCount: number; materials: any[] }>;
 }

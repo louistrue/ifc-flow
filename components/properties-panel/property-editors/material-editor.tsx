@@ -18,7 +18,7 @@ interface MaterialEditorProps {
 }
 
 const MATERIAL_CATEGORIES = [
-    { value: "", label: "None" },
+    { value: "none", label: "None" },
     { value: "concrete", label: "Concrete" },
     { value: "steel", label: "Steel" },
     { value: "aluminium", label: "Aluminium" },
@@ -55,39 +55,39 @@ export function MaterialEditor({ properties, setProperties }: MaterialEditorProp
                         <SelectItem value="get">Get Materials</SelectItem>
                         <SelectItem value="create">Create Material</SelectItem>
                         <SelectItem value="assign">Assign Material</SelectItem>
+                        <SelectItem value="createAssign">Create & Assign</SelectItem>
                     </SelectContent>
                 </Select>
                 <p className="text-xs text-muted-foreground">
                     {action === "get" && "Extract material information from elements"}
                     {action === "create" && "Create a new IFC material"}
-                    {action === "assign" && "Assign material to elements"}
+                    {action === "assign" && "Assign material to elements (creates if missing)"}
+                    {action === "createAssign" && "Create and assign material to elements (creates if missing)"}
                 </p>
             </div>
 
-            {/* Material Configuration - Show for Create and Assign */}
-            {(action === "create" || action === "assign") && (
+            {/* Material Configuration - Show for Create, Assign, and CreateAssign */}
+            {(action === "create" || action === "assign" || action === "createAssign") && (
                 <>
-                    {/* Use Value Input Checkbox - Only for Assign */}
-                    {action === "assign" && (
-                        <div className="flex items-center space-x-2">
-                            <Checkbox
-                                id="useValueInput"
-                                checked={useValueInput}
-                                onCheckedChange={(checked) =>
-                                    setProperties({
-                                        ...properties,
-                                        useValueInput: checked === true,
-                                    })
-                                }
-                            />
-                            <Label
-                                htmlFor="useValueInput"
-                                className="text-sm font-normal cursor-pointer"
-                            >
-                                Use material names from input
-                            </Label>
-                        </div>
-                    )}
+                    {/* Use Value Input Checkbox */}
+                    <div className="flex items-center space-x-2">
+                        <Checkbox
+                            id="useValueInput"
+                            checked={useValueInput}
+                            onCheckedChange={(checked) =>
+                                setProperties({
+                                    ...properties,
+                                    useValueInput: checked === true,
+                                })
+                            }
+                        />
+                        <Label
+                            htmlFor="useValueInput"
+                            className="text-sm font-normal cursor-pointer"
+                        >
+                            Use material names from input
+                        </Label>
+                    </div>
 
                     {/* Material Name - Hide if using value input */}
                     {!useValueInput && (

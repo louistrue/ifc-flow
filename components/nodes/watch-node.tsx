@@ -389,16 +389,17 @@ export const WatchNode = memo(
 
     // Use local state data which persists through re-renders
     const inputData = localInputData || { type: "unknown", value: undefined };
-    if (inputData && inputData.type) {
-      console.log('👀 WatchNode input received:', {
-        type: inputData.type,
-        hasValue: !!inputData.value,
-        valueType: typeof inputData.value,
-        keys: inputData.value && typeof inputData.value === 'object' ? Object.keys(inputData.value) : undefined,
-        rows: Array.isArray(inputData.value) ? inputData.value.length : (inputData.value?.rowCount || 0),
-        sample: Array.isArray(inputData.value) ? inputData.value.slice(0, 2) : inputData.value
-      });
-    }
+    // Commented out to prevent console spam on every render
+    // if (inputData && inputData.type) {
+    //   console.log('👀 WatchNode input received:', {
+    //     type: inputData.type,
+    //     hasValue: !!inputData.value,
+    //     valueType: typeof inputData.value,
+    //     keys: inputData.value && typeof inputData.value === 'object' ? Object.keys(inputData.value) : undefined,
+    //     rows: Array.isArray(inputData.value) ? inputData.value.length : (inputData.value?.rowCount || 0),
+    //     sample: Array.isArray(inputData.value) ? inputData.value.slice(0, 2) : inputData.value
+    //   });
+    // }
     // Use the local display mode for rendering
     const displayMode = localDisplayMode || data.properties?.displayMode || "table";
 
@@ -434,9 +435,9 @@ export const WatchNode = memo(
 
     // Debug output - comment out in production
     const dataSource = inputData === localInputData ? '(from local)' : '(from props)';
-    console.log(`Rendering WatchNode ${id}, key: ${keyRef.current}, counter: ${updateCounter}, mode: ${displayMode}, data:`,
-      inputData.type, inputData.value ? (typeof inputData.value === 'object' ? Object.keys(inputData.value).length : inputData.value) : 'undefined',
-      dataSource);
+    // console.log(`Rendering WatchNode ${id}, key: ${keyRef.current}, counter: ${updateCounter}, mode: ${displayMode}, data:`,
+    //   inputData.type, inputData.value ? (typeof inputData.value === 'object' ? Object.keys(inputData.value).length : inputData.value) : 'undefined',
+    //   dataSource);
 
     // Handle window mouse events for resizing
     const startResize = useCallback(
