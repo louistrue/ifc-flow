@@ -2545,8 +2545,13 @@ def get_or_create_material(file, name):
 
 # Process elements
 assigned_count = 0
-if hasattr(globals(), 'ifc_file'):
-    file = globals()['ifc_file']
+import os
+
+try:
+    if not os.path.exists('model.ifc'):
+        raise FileNotFoundError("The 'model.ifc' file does not exist in the virtual filesystem.")
+
+    file = ifcopenshell.open('model.ifc')
     
     for elem_data in elements_data:
         # Get element by GlobalId or expressId
@@ -2578,9 +2583,10 @@ if hasattr(globals(), 'ifc_file'):
                 assigned_count += 1
 
     success = True
-else:
+    error_msg = None
+except Exception as e:
     success = False
-    error_msg = "No IFC file loaded"
+    error_msg = str(e)
     `, { globals: namespace });
 
     const success = namespace.get("success");

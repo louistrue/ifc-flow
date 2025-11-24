@@ -1169,9 +1169,10 @@ export function NodePropertyRenderer({
         </div>
       );
 
-    case "materialNode":
+    case "materialNode": {
       const { MaterialEditor } = require("./property-editors/material-editor");
       return <MaterialEditor properties={properties} setProperties={setProperties} />;
+    }
 
     default:
       return (

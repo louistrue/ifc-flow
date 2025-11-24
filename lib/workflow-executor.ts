@@ -654,7 +654,7 @@ export class WorkflowExecutor {
         node.data.results = updatedElements;
         break;
 
-      case "materialNode":
+      case "materialNode": {
         console.log("Processing materialNode", { node, inputValues });
 
         // Extract elements from input
@@ -933,8 +933,16 @@ export class WorkflowExecutor {
             }
           };
 
-          // Pass materials array to downstream nodes
-          result = materials;
+          // Pass structured result to downstream nodes
+          result = {
+            type: "materialResults",
+            materials: materials,
+            summary: {
+              totalElements: materialElements.length,
+              elementsWithMaterial: elementsWithMaterials.filter(e => e.materialInfo).length,
+              uniqueMaterials: materials.length
+            }
+          };
 
           console.log(`Found ${materials.length} unique materials in ${materialElements.length} elements`);
         } else if (materialAction === "create") {
@@ -977,6 +985,7 @@ export class WorkflowExecutor {
         console.log("Material node result:", result);
         console.log("Material node result type:", typeof result, "isArray:", Array.isArray(result));
         break;
+      }
 
       case "watchNode":
         // Process data for watch node
@@ -1099,6 +1108,11 @@ export class WorkflowExecutor {
           else if (processedData.groups && typeof processedData.unit === 'string' && typeof processedData.total === 'number') {
             inputType = "quantityResults";
             itemCount = Object.keys(processedData.groups).length; // Count the number of groups
+          }
+          // CHECK: Material results
+          else if (processedData.type === "materialResults" && processedData.materials) {
+            inputType = "materialResults";
+            itemCount = processedData.materials.length;
           }
           // CHECK: Room assignment results
           else if (processedData.elementSpaceMap && processedData.spaceElementsMap && processedData.summary) {

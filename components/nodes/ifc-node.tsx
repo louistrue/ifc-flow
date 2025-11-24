@@ -286,7 +286,7 @@ export const IfcNode = memo(({ id, data, isConnectable, selected }: NodeProps<Ex
           {sortedElements.length > 0 && (
             <div className="space-y-2">
               <div className="text-sm font-semibold text-gray-700 dark:text-gray-300 pb-2 border-b border-gray-200 dark:border-gray-600">
-                Element Breakdown ({sortedElements.length} types)
+                Element breakdown ({sortedElements.length} classes)
               </div>
               <div className="space-y-0.5 max-h-80 overflow-y-auto pr-1">
                 {sortedElements.slice(0, 20).map(([type, count]) => {

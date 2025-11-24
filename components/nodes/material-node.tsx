@@ -2,7 +2,7 @@
 
 import { memo } from "react";
 import { Handle, Position, type NodeProps } from "reactflow";
-import { Palette, Layers, AlertTriangle, CheckCircle2 } from "lucide-react";
+import { Layers, AlertTriangle, CheckCircle2 } from "lucide-react";
 import { MaterialNodeData } from "./node-types";
 
 interface MaterialNodeProps {

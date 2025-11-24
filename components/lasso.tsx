@@ -17,24 +17,29 @@ export function Lasso({ partial }: { partial: boolean }) {
     const pointRef = useRef<[number, number][]>([]);
 
     function handlePointerDown(e: PointerEvent) {
-        (e.target as HTMLCanvasElement).setPointerCapture(e.pointerId);
-        const points = pointRef.current;
+        const canvasEl = e.target as HTMLCanvasElement;
+        canvasEl.setPointerCapture(e.pointerId);
+        const rect = canvasEl.getBoundingClientRect();
 
-        const nextPoints = [...points, [e.pageX, e.pageY]] satisfies [number, number][];
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+
+        const points = pointRef.current;
+        const nextPoints = [...points, [x, y]] satisfies [number, number][];
         pointRef.current = nextPoints;
 
         nodePoints.current = {};
         const nodes = getNodes();
         for (const node of nodes) {
-            const x = node.position.x;
-            const y = node.position.y;
+            const nx = node.position.x;
+            const ny = node.position.y;
             const width = node.width || 150;
             const height = node.height || 40;
             const points = [
-                [x, y],
-                [x + width, y],
-                [x + width, y + height],
-                [x, y + height],
+                [nx, ny],
+                [nx + width, ny],
+                [nx + width, ny + height],
+                [nx, ny + height],
             ] satisfies NodePoints;
             nodePoints.current[node.id] = points;
         }
@@ -68,8 +73,14 @@ export function Lasso({ partial }: { partial: boolean }) {
 
     function handlePointerMove(e: PointerEvent) {
         if (e.buttons !== 1) return;
+
+        const canvasEl = e.target as HTMLCanvasElement;
+        const rect = canvasEl.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+
         const points = pointRef.current;
-        const nextPoints = [...points, [e.pageX, e.pageY]] satisfies [number, number][];
+        const nextPoints = [...points, [x, y]] satisfies [number, number][];
         pointRef.current = nextPoints;
 
         if (!ctx.current || nextPoints.length < 2) return;
@@ -102,12 +113,21 @@ export function Lasso({ partial }: { partial: boolean }) {
 
         const nodesToSelect = new Set<string>();
 
+        // We need the canvas rect for hit testing conversion too
+        // Since we are in the event handler, we can use the rect we just calculated
+        // But for robustness, let's use the canvas ref if available or fallback to the event target
+        const canvasRect = canvas.current?.getBoundingClientRect() || rect;
+
         for (const [nodeId, points] of Object.entries(nodePoints.current)) {
             if (partial) {
                 // Partial selection: select node if any point is in the path
                 for (const point of points) {
-                    const { x, y } = flowToScreenPosition({ x: point[0], y: point[1] });
-                    if (ctx.current.isPointInPath(path, x, y)) {
+                    const screenPos = flowToScreenPosition({ x: point[0], y: point[1] });
+                    // Convert screen position to canvas-relative position
+                    const canvasX = screenPos.x - canvasRect.left;
+                    const canvasY = screenPos.y - canvasRect.top;
+
+                    if (ctx.current.isPointInPath(path, canvasX, canvasY)) {
                         nodesToSelect.add(nodeId);
                         break;
                     }
@@ -116,8 +136,12 @@ export function Lasso({ partial }: { partial: boolean }) {
                 // Full selection: select node only if all points are in the path
                 let allPointsInPath = true;
                 for (const point of points) {
-                    const { x, y } = flowToScreenPosition({ x: point[0], y: point[1] });
-                    if (!ctx.current.isPointInPath(path, x, y)) {
+                    const screenPos = flowToScreenPosition({ x: point[0], y: point[1] });
+                    // Convert screen position to canvas-relative position
+                    const canvasX = screenPos.x - canvasRect.left;
+                    const canvasY = screenPos.y - canvasRect.top;
+
+                    if (!ctx.current.isPointInPath(path, canvasX, canvasY)) {
                         allPointsInPath = false;
                         break;
                     }
