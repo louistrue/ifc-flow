@@ -3059,7 +3059,7 @@ except Exception as e:
 }
 
 // Get full material details for an element
-async function handleGetMaterialDetails({ elementId, expressId, messageId }) {
+async function handleGetMaterialDetails({ expressId, messageId }) {
   try {
     await initPyodide();
 
@@ -3067,16 +3067,28 @@ async function handleGetMaterialDetails({ elementId, expressId, messageId }) {
       throw new Error('Model file not found');
     }
 
+    if (!expressId || !Number.isInteger(expressId) || expressId <= 0) {
+      throw new Error(`Invalid expressId: ${expressId}`);
+    }
+
     const ns = pyodide.globals.get("dict")();
+    ns.set("expressId", expressId);
     await pyodide.runPythonAsync(
       `
 import ifcopenshell, json
 try:
   f = ifcopenshell.open('model.ifc')
-  
+
   # Find element by expressId
-  element = f.by_id(${expressId})
-  
+  try:
+    element = f.by_id(expressId)
+  except RuntimeError:
+    # Element not found
+    result_json = json.dumps(None)
+    success = False
+    error_msg = f"Element with expressId {expressId} not found"
+    raise Exception(error_msg)
+
   material_details = None
   
   # Extract full material associations
