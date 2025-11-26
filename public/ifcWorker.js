@@ -3068,14 +3068,15 @@ async function handleGetMaterialDetails({ elementId, expressId, messageId }) {
     }
 
     const ns = pyodide.globals.get("dict")();
+    ns.set("expressId", expressId);
     await pyodide.runPythonAsync(
       `
 import ifcopenshell, json
 try:
   f = ifcopenshell.open('model.ifc')
-  
+
   # Find element by expressId
-  element = f.by_id(${expressId})
+  element = f.by_id(expressId)
   
   material_details = None
   
