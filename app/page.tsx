@@ -42,7 +42,7 @@ import { ParameterNode } from "@/components/nodes/parameter-node";
 import { PythonNode } from "@/components/nodes/python-node";
 import { Toaster } from "@/components/toaster";
 import { WorkflowExecutor } from "@/lib/workflow-executor";
-import { loadIfcFile, getIfcFile, downloadExportedFile } from "@/lib/ifc-utils";
+import { loadIfcFile, getIfcFile, downloadExportedFile, preloadWorker } from "@/lib/ifc-utils";
 import { useToast } from "@/hooks/use-toast";
 import { FileUp } from "lucide-react";
 import type { Workflow } from "@/lib/workflow-storage";
@@ -56,6 +56,7 @@ import { useAppSettings } from "@/lib/settings-manager";
 import { useTheme } from "next-themes";
 import { ViewerFocusProvider } from "@/components/contexts/viewer-focus-context";
 import { nodeCategories } from "@/components/sidebar";
+import { SelectionOverlay } from "@/components/selection-overlay";
 
 // Import the centralized nodeTypes to prevent React Flow warning
 import { nodeTypes } from "@/components/nodes";
@@ -146,6 +147,9 @@ function FlowWithProvider() {
     setShowGridState(gridSetting);
     setShowMinimapState(minimapSetting);
     setIsSettingsLoaded(true);
+    
+    // Pre-warm Pyodide worker in background for faster first file load
+    preloadWorker();
   }, []); // Only run once on mount
 
 
@@ -708,16 +712,28 @@ function FlowWithProvider() {
   );
 
   const onNodeClick = useCallback(
-    (event: React.MouseEvent, node: Node) => {
-      // Do not open modal on single click. Reserve for selection/drag only.
+    (event: React.MouseEvent, clickedNode: Node) => {
       const isMac = navigator.platform.toUpperCase().includes('MAC');
-      const cmdOrCtrl = isMac ? (event as any).metaKey : (event as any).ctrlKey;
-      if (cmdOrCtrl) {
+      const isMultiSelect = isMac ? (event as any).metaKey : (event as any).ctrlKey;
+
+      // If not holding multi-select key, ensure we deselect other nodes
+      // React Flow usually handles this, but we're enforcing it to be sure
+      if (!isMultiSelect) {
+        setNodes((nds) =>
+          nds.map((n) => ({
+            ...n,
+            selected: n.id === clickedNode.id,
+          }))
+        );
+      }
+
+      // Do not open modal on single click. Reserve for selection/drag only.
+      if (isMultiSelect) {
         return;
       }
-      setSelectedNode(node);
+      setSelectedNode(clickedNode);
     },
-    []
+    [setNodes]
   );
 
   const onNodeDoubleClick = useCallback((event: React.MouseEvent, node: Node) => {
@@ -930,60 +946,29 @@ function FlowWithProvider() {
       try {
         // Get the original IFC file buffer
         const originalFile = getIfcFile(originalFileName);
-        if (!originalFile) {
-          toast({
-            title: "Export Error",
-            description: "Original IFC file not found. Please reload the file and try again.",
-            variant: "destructive",
-          });
-          return;
-        }
 
-        // Convert file to ArrayBuffer if needed
-        const arrayBuffer = await originalFile.arrayBuffer();
+        // Convert file to ArrayBuffer if available
+        const arrayBuffer = originalFile ? await originalFile.arrayBuffer() : undefined;
 
-        // Create a new worker for the export
-        const worker = new Worker('/ifcWorker.js');
+        // Use the shared worker to export (preserves material assignments)
+        const { exportIfcWithWorker } = await import('@/lib/ifc-utils');
+        const result = await exportIfcWithWorker(model, exportFileName, arrayBuffer);
 
-        // Set up message handler for export result
-        worker.onmessage = (e) => {
-          if (e.data.type === 'ifcExported') {
-            // Download the exported IFC file
-            // The worker sends an ArrayBuffer, convert to Blob
-            const blob = new Blob([e.data.data], { type: 'application/x-step' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = e.data.fileName || exportFileName;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
+        // Download the exported IFC file
+        const blob = new Blob([result.data], { type: 'application/x-step' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = result.fileName || exportFileName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
 
-            toast({
-              title: "Export Successful",
-              description: `IFC file exported as ${e.data.fileName || exportFileName}`,
-            });
-
-            worker.terminate();
-          } else if (e.data.type === 'error') {
-            toast({
-              title: "Export Error",
-              description: e.data.message || "Failed to export IFC file",
-              variant: "destructive",
-            });
-            worker.terminate();
-          }
-        };
-
-        // Send export request to worker
-        worker.postMessage({
-          action: 'exportIfc',
-          model: model,
-          fileName: exportFileName,
-          arrayBuffer: arrayBuffer,
-          messageId: Date.now().toString()
-        }, [arrayBuffer]);
+        toast({
+          title: "Export Successful",
+          description: `IFC file exported as ${result.fileName || exportFileName}`,
+        });
 
       } catch (error) {
         console.error("Error exporting IFC:", error);
@@ -1318,6 +1303,7 @@ function FlowWithProvider() {
                 <Panel position="bottom-right">
                   <FooterPill />
                 </Panel>
+                <SelectionOverlay />
               </ReactFlow>
             </div>
           </ViewerFocusProvider>

@@ -129,6 +129,15 @@ function dispatchWarmStatus(modelId: string, status: WarmStatus, extra?: any) {
   } catch { }
 }
 
+// Preload worker in background (fire-and-forget)
+export function preloadWorker(): void {
+  if (typeof window !== 'undefined') {
+    initializeWorker().catch(() => {
+      // Silently fail - worker will initialize on first use anyway
+    });
+  }
+}
+
 // Initialize the worker
 export async function initializeWorker(): Promise<void> {
   if (isWorkerInitialized) {
@@ -250,6 +259,11 @@ export async function initializeWorker(): Promise<void> {
           workerPromiseResolvers.get(messageId)!.resolve({ key: data.key, tableCount: data.tableCount });
           workerPromiseResolvers.delete(messageId);
         }
+      } else if (type === "materialAssigned") {
+        if (messageId && workerPromiseResolvers.has(messageId)) {
+          workerPromiseResolvers.get(messageId)!.resolve(data.result);
+          workerPromiseResolvers.delete(messageId);
+        }
       } else if (type === "sqliteStatus") {
         // Background status from worker: building/ready/error
         const model = getLastLoadedModel();
@@ -352,7 +366,7 @@ export async function loadIfcFile(
       // Send the message to the worker
       ifcWorker!.postMessage(
         {
-          action: "loadIfcFast",
+          action: "loadIfc",
           messageId,
           data: {
             arrayBuffer,
@@ -743,7 +757,7 @@ export function filterElements(
       // Filter by IFC class
       const ifcClass = property; // In ifcClass mode, property parameter contains the class pattern
       const elementType = element.type || '';
-      
+
       // Case-insensitive matching
       const lowerElementType = elementType.toLowerCase();
       const lowerIfcClass = ifcClass.toLowerCase();
@@ -1224,6 +1238,7 @@ export interface PropertyActions {
   propertyName: string;
   propertyValue?: any;
   targetPset?: string;
+  source?: string;
 }
 
 // More flexible properties management function that accepts an options object
@@ -1231,7 +1246,7 @@ export function manageProperties(
   elements: IfcElement[],
   options: PropertyActions
 ): IfcElement[] {
-  const { action, propertyName, propertyValue, targetPset = "any" } = options;
+  const { action, propertyName, propertyValue, targetPset = "any", source = "property" } = options;
 
 
   // Check if propertyValue is a mapping object (element-specific values)
@@ -1284,12 +1299,64 @@ export function manageProperties(
   // Create a new array to return
   const result = elements.map((element) => {
     // Clone the element to avoid modifying the original
-    const updatedElement = { 
+    const updatedElement = {
       ...element,
       properties: element.properties ? { ...element.properties } : {},
       psets: element.psets ? JSON.parse(JSON.stringify(element.psets)) : {},
       qtos: element.qtos ? JSON.parse(JSON.stringify(element.qtos)) : {}
     };
+
+    // Handle attribute access directly
+    if (source === "attribute") {
+      // Try to get attribute from top-level element or properties
+      let value = (element as any)[propertyName];
+
+      // Fallback to properties if not found on root
+      if (value === undefined && element.properties) {
+        value = element.properties[propertyName];
+      }
+
+      if (action === "get") {
+        updatedElement.propertyInfo = {
+          name: propertyName,
+          exists: value !== undefined,
+          value: value,
+          psetName: "Attributes"
+        };
+      } else if (action === "set") {
+        // Determine the value to use for this specific element
+        let attributeValueToSet = propertyValue;
+
+        if (isMapping) {
+          // Look up the element-specific value by GlobalId
+          const globalId = element.properties?.GlobalId;
+          if (globalId && elementValueMap[globalId] !== undefined) {
+            attributeValueToSet = elementValueMap[globalId];
+            elementsModified++;
+          } else {
+            // Skip this element if no mapping exists for it
+            return updatedElement;
+          }
+        }
+
+        // Set attribute on the object
+        (updatedElement as any)[propertyName] = attributeValueToSet;
+
+        // Also update properties for consistency if it was there
+        if (updatedElement.properties) {
+          updatedElement.properties[propertyName] = attributeValueToSet;
+        }
+
+        updatedElement.propertyInfo = {
+          name: propertyName,
+          exists: true,
+          value: attributeValueToSet,
+          psetName: "Attributes"
+        };
+      }
+
+      return updatedElement;
+    }
 
     // Function to check if property exists and get its location and value
     const findProperty = (
@@ -2578,4 +2645,111 @@ export async function runPythonScript(
   });
 
   return resultPromise;
+}
+
+// Assign material to elements via worker
+export async function assignMaterial(
+  elements: IfcElement[],
+  materialName: string | any,
+  category?: string,
+  description?: string
+): Promise<{ assignedCount: number }> {
+  await initializeWorker();
+  if (!ifcWorker) throw new Error("IFC worker initialization failed");
+
+  const messageId = `assign_mat_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+  return new Promise((resolve, reject) => {
+    workerPromiseResolvers.set(messageId, { resolve, reject });
+
+    ifcWorker!.postMessage({
+      action: "assignMaterial",
+      messageId,
+      data: {
+        elements,
+        materialName,
+        category,
+        description
+      }
+    });
+
+    setTimeout(() => {
+      if (workerPromiseResolvers.has(messageId)) {
+        reject(new Error("Assign material timed out"));
+        workerPromiseResolvers.delete(messageId);
+      }
+    }, 60000);
+  }) as Promise<{ assignedCount: number }>;
+}
+
+// Export IFC using the shared worker (preserves material assignments and other modifications)
+export async function exportIfcWithWorker(
+  model: IfcModel,
+  fileName: string,
+  arrayBuffer?: ArrayBuffer
+): Promise<{ data: ArrayBuffer; fileName: string }> {
+  await initializeWorker();
+  if (!ifcWorker) throw new Error("IFC worker initialization failed");
+
+  const messageId = `export_ifc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+  return new Promise((resolve, reject) => {
+    workerPromiseResolvers.set(messageId, { resolve, reject });
+
+    const message: any = {
+      action: "exportIfc",
+      messageId,
+      model,
+      fileName
+    };
+
+    // Only include arrayBuffer if provided
+    if (arrayBuffer) {
+      message.arrayBuffer = arrayBuffer;
+      ifcWorker!.postMessage(message, [arrayBuffer]);
+    } else {
+      ifcWorker!.postMessage(message);
+    }
+
+    setTimeout(() => {
+      if (workerPromiseResolvers.has(messageId)) {
+        reject(new Error("IFC export timed out"));
+        workerPromiseResolvers.delete(messageId);
+      }
+    }, 120000); // 2 minute timeout for export
+  }) as Promise<{ data: ArrayBuffer; fileName: string }>;
+}
+
+
+// Create materials via worker
+export async function createMaterial(
+  materialName: string | any,
+  category?: string,
+  description?: string
+): Promise<{ createdCount: number; materials: any[] }> {
+  await initializeWorker();
+  if (!ifcWorker) throw new Error("IFC worker initialization failed");
+
+  const messageId = `create_mat_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+  return new Promise((resolve, reject) => {
+    workerPromiseResolvers.set(messageId, { resolve, reject });
+
+    ifcWorker!.postMessage({
+      action: "createMaterial",
+      messageId,
+      data: {
+        materialName,
+        category,
+        description
+      }
+    });
+
+    setTimeout(() => {
+      if (workerPromiseResolvers.has(messageId)) {
+        reject(new Error("Create material timed out"));
+        workerPromiseResolvers.delete(messageId);
+      }
+    }, 60000);
+  }) as Promise<{ createdCount: number; materials: any[] }>;
 }

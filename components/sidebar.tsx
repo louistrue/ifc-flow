@@ -45,6 +45,7 @@ import {
   GripVertical,
   Shuffle,
   Bot,
+  Palette,
 } from "lucide-react";
 import {
   type Workflow as WorkflowType,
@@ -156,6 +157,12 @@ export const nodeCategories = [
         id: "aiNode",
         label: "AI Chat",
         icon: <Bot className="h-4 w-4 mr-2" />,
+        status: "new",
+      },
+      {
+        id: "materialNode",
+        label: "Materials",
+        icon: <Palette className="h-4 w-4 mr-2" />,
         status: "new",
       },
     ],

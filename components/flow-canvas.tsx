@@ -90,12 +90,29 @@ export function FlowCanvas({
           y: cursorPosition.y,
         };
 
-        // Create a new node
+        // Set default properties based on node type
+        let defaultProperties = {};
+        if (nodeType === "propertyNode") {
+          defaultProperties = {
+            source: "property",
+            action: "get",
+            propertyName: "",
+            targetPset: "",
+          };
+        }
+
+        // Create a new node with proper label
+        // Map node types to their display labels
+        const nodeLabelMap: Record<string, string> = {
+          materialNode: "Materials",
+        };
+        const nodeLabel = nodeLabelMap[nodeType] || nodeType.replace("Node", "");
+        
         const newNode = {
           id: `${nodeType}-${Date.now()}`,
           type: nodeType,
           position,
-          data: { label: `${nodeType.replace("Node", "")}`, properties: {} },
+          data: { label: nodeLabel, properties: defaultProperties },
         };
 
         // Add the new node

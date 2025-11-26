@@ -17,6 +17,7 @@ import { PythonNode } from "./python-node"
 import { DataTransformNode } from "./data-transform-node"
 import { ClusterNode } from "./cluster-node"
 import { AiNode } from "./ai-node"
+import { MaterialNode } from "./material-node"
 
 // Define custom node types as a constant to prevent React Flow warning
 export const nodeTypes: NodeTypes = {
@@ -38,6 +39,7 @@ export const nodeTypes: NodeTypes = {
   dataTransformNode: DataTransformNode,
   clusterNode: ClusterNode,
   aiNode: AiNode,
+  materialNode: MaterialNode,
 } as const
 
 export {
@@ -59,5 +61,6 @@ export {
   PythonNode,
   ClusterNode,
   AiNode,
+  MaterialNode,
 }
 

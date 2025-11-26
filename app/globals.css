@@ -41,6 +41,15 @@
     --sidebar-accent-foreground: 240 5.9% 10%;
     --sidebar-border: 220 13% 91%;
     --sidebar-ring: 217.2 91.2% 59.8%;
+
+    --selection-color: 221.2 83.2% 53.3%;
+
+    /* Lasso selection customization */
+    --lasso-dash-length: 8;
+    --lasso-dash-gap: 6;
+    --lasso-stroke-opacity: 0.8;
+    --lasso-fill-opacity: 0.15;
+    --lasso-line-width: 2.5;
   }
 
   .dark {
@@ -79,16 +88,25 @@
     --sidebar-accent-foreground: 240 4.8% 95.9%;
     --sidebar-border: 240 3.7% 15.9%;
     --sidebar-ring: 217.2 91.2% 59.8%;
+
+    --selection-color: 217.2 91.2% 59.8%;
+
+    /* Lasso selection customization - dark theme */
+    --lasso-dash-length: 10;
+    --lasso-dash-gap: 5;
+    --lasso-stroke-opacity: 0.9;
+    --lasso-fill-opacity: 0.18;
+    --lasso-line-width: 2.5;
   }
 
   .tokyo-night-dark {
     --background: 229.6 24.2% 18.6%;
     --foreground: 228.7 72.6% 85.7%;
 
-    --card: 235 18.8% 12.5%;
+    --card: 230 25% 22%;
     --card-foreground: 228.7 72.6% 85.7%;
 
-    --popover: 235 18.8% 12.5%;
+    --popover: 230 25% 22%;
     --popover-foreground: 228.7 72.6% 85.7%;
 
     --primary: 220.8 88.7% 72.4%;
@@ -118,6 +136,15 @@
     --sidebar-accent-foreground: 228.7 72.6% 85.7%;
     --sidebar-border: 229.2 23.1% 33.1%;
     --sidebar-ring: 220.8 88.7% 72.4%;
+
+    --selection-color: 258 90% 66%;
+
+    /* Lasso selection customization - Tokyo Night Dark */
+    --lasso-dash-length: 6;
+    --lasso-dash-gap: 4;
+    --lasso-stroke-opacity: 0.85;
+    --lasso-fill-opacity: 0.2;
+    --lasso-line-width: 2.5;
   }
 
   .tokyo-night-light {
@@ -157,6 +184,15 @@
     --sidebar-accent-foreground: 231.4 16.3% 91.6%;
     --sidebar-border: 228 10.5% 28%;
     --sidebar-ring: 217.7 61.1% 41.4%;
+
+    --selection-color: 221.2 83.2% 53.3%;
+
+    /* Lasso selection customization - Tokyo Night Light */
+    --lasso-dash-length: 8;
+    --lasso-dash-gap: 6;
+    --lasso-stroke-opacity: 0.75;
+    --lasso-fill-opacity: 0.12;
+    --lasso-line-width: 2.5;
   }
 }
 
@@ -245,6 +281,42 @@ body {
     background: rgba(107, 114, 128, 0.9) !important;
     border-color: rgba(31, 41, 55, 0.8) !important;
   }
+
+  /* Lasso selection overlay */
+  .tool-overlay {
+    pointer-events: auto;
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 1001;
+    height: 100%;
+    width: 100%;
+    transform-origin: top left;
+    touch-action: none;
+  }
+
+  /* ReactFlow built-in selection boxes - HIDDEN (we draw our own) */
+  .react-flow__selection,
+  .react-flow__nodesselection,
+  .react-flow__nodesselection-rect,
+  .react-flow__selection-pane,
+  .react-flow__node-selection,
+  .react-flow__resize-control.selected,
+  .react-flow__transform-handle {
+    display: none !important;
+    opacity: 0 !important;
+    visibility: hidden !important;
+    border: none !important;
+    background: none !important;
+    pointer-events: none !important;
+  }
+
+  /* Animate the dashes for a nice effect */
+  @keyframes dash {
+    to {
+      stroke-dashoffset: -20;
+    }
+  }
 }
 
 @layer base {
@@ -274,6 +346,8 @@ body {
     z-index: 10 !important;
   }
 
+
+
   /*
     We target the inner node surface by its Tailwind border color class.
     This lets each node glow in its own color without touching component code.
@@ -281,84 +355,84 @@ body {
   */
   .react-flow__node.selected .border-blue-500,
   .react-flow__node.selected.border-blue-500 {
-    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.55), 0 0 16px rgba(59, 130, 246, 0.6), 0 0 36px rgba(59, 130, 246, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.25) !important;
+    box-shadow: 0 0 0 4px transparent, 0 0 0 6px rgba(59, 130, 246, 0.55), 0 0 20px rgba(59, 130, 246, 0.6), 0 0 40px rgba(59, 130, 246, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.25) !important;
   }
 
   .react-flow__node.selected .border-green-500,
   .react-flow__node.selected.border-green-500 {
-    box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.55), 0 0 16px rgba(34, 197, 94, 0.6), 0 0 36px rgba(34, 197, 94, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.25) !important;
+    box-shadow: 0 0 0 4px transparent, 0 0 0 6px rgba(34, 197, 94, 0.55), 0 0 20px rgba(34, 197, 94, 0.6), 0 0 40px rgba(34, 197, 94, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.25) !important;
   }
 
   .react-flow__node.selected .border-purple-500,
   .react-flow__node.selected.border-purple-500 {
-    box-shadow: 0 0 0 2px rgba(168, 85, 247, 0.55), 0 0 16px rgba(168, 85, 247, 0.6), 0 0 36px rgba(168, 85, 247, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.25) !important;
+    box-shadow: 0 0 0 4px transparent, 0 0 0 6px rgba(168, 85, 247, 0.55), 0 0 20px rgba(168, 85, 247, 0.6), 0 0 40px rgba(168, 85, 247, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.25) !important;
   }
 
   .react-flow__node.selected .border-orange-500,
   .react-flow__node.selected.border-orange-500 {
-    box-shadow: 0 0 0 2px rgba(249, 115, 22, 0.55), 0 0 16px rgba(249, 115, 22, 0.6), 0 0 36px rgba(249, 115, 22, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.25) !important;
+    box-shadow: 0 0 0 4px transparent, 0 0 0 6px rgba(249, 115, 22, 0.55), 0 0 20px rgba(249, 115, 22, 0.6), 0 0 40px rgba(249, 115, 22, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.25) !important;
   }
 
   .react-flow__node.selected .border-cyan-500,
   .react-flow__node.selected.border-cyan-500,
   .react-flow__node.selected .border-cyan-600,
   .react-flow__node.selected.border-cyan-600 {
-    box-shadow: 0 0 0 2px rgba(6, 182, 212, 0.55), 0 0 16px rgba(6, 182, 212, 0.6), 0 0 36px rgba(6, 182, 212, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.25) !important;
+    box-shadow: 0 0 0 4px transparent, 0 0 0 6px rgba(6, 182, 212, 0.55), 0 0 20px rgba(6, 182, 212, 0.6), 0 0 40px rgba(6, 182, 212, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.25) !important;
   }
 
   .react-flow__node.selected .border-amber-500,
   .react-flow__node.selected.border-amber-500 {
-    box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.55), 0 0 16px rgba(245, 158, 11, 0.6), 0 0 36px rgba(245, 158, 11, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.25) !important;
+    box-shadow: 0 0 0 4px transparent, 0 0 0 6px rgba(245, 158, 11, 0.55), 0 0 20px rgba(245, 158, 11, 0.6), 0 0 40px rgba(245, 158, 11, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.25) !important;
   }
 
   .react-flow__node.selected .border-pink-500,
   .react-flow__node.selected.border-pink-500 {
-    box-shadow: 0 0 0 2px rgba(236, 72, 153, 0.55), 0 0 16px rgba(236, 72, 153, 0.6), 0 0 36px rgba(236, 72, 153, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.25) !important;
+    box-shadow: 0 0 0 4px transparent, 0 0 0 6px rgba(236, 72, 153, 0.55), 0 0 20px rgba(236, 72, 153, 0.6), 0 0 40px rgba(236, 72, 153, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.25) !important;
   }
 
   .react-flow__node.selected .border-lime-500,
   .react-flow__node.selected.border-lime-500 {
-    box-shadow: 0 0 0 2px rgba(132, 204, 22, 0.55), 0 0 16px rgba(132, 204, 22, 0.6), 0 0 36px rgba(132, 204, 22, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.25) !important;
+    box-shadow: 0 0 0 4px transparent, 0 0 0 6px rgba(132, 204, 22, 0.55), 0 0 20px rgba(132, 204, 22, 0.6), 0 0 40px rgba(132, 204, 22, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.25) !important;
   }
 
   .react-flow__node.selected .border-sky-500,
   .react-flow__node.selected.border-sky-500 {
-    box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.55), 0 0 16px rgba(14, 165, 233, 0.6), 0 0 36px rgba(14, 165, 233, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.25) !important;
+    box-shadow: 0 0 0 4px transparent, 0 0 0 6px rgba(14, 165, 233, 0.55), 0 0 20px rgba(14, 165, 233, 0.6), 0 0 40px rgba(14, 165, 233, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.25) !important;
   }
 
   .react-flow__node.selected .border-teal-500,
   .react-flow__node.selected.border-teal-500 {
-    box-shadow: 0 0 0 2px rgba(20, 184, 166, 0.55), 0 0 16px rgba(20, 184, 166, 0.6), 0 0 36px rgba(20, 184, 166, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.25) !important;
+    box-shadow: 0 0 0 4px transparent, 0 0 0 6px rgba(20, 184, 166, 0.55), 0 0 20px rgba(20, 184, 166, 0.6), 0 0 40px rgba(20, 184, 166, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.25) !important;
   }
 
   .react-flow__node.selected .border-indigo-500,
   .react-flow__node.selected.border-indigo-500 {
-    box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.55), 0 0 16px rgba(99, 102, 241, 0.6), 0 0 36px rgba(99, 102, 241, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.25) !important;
+    box-shadow: 0 0 0 4px transparent, 0 0 0 6px rgba(99, 102, 241, 0.55), 0 0 20px rgba(99, 102, 241, 0.6), 0 0 40px rgba(99, 102, 241, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.25) !important;
   }
 
   .react-flow__node.selected .border-violet-500,
   .react-flow__node.selected.border-violet-500 {
-    box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.55), 0 0 16px rgba(139, 92, 246, 0.6), 0 0 36px rgba(139, 92, 246, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.25) !important;
+    box-shadow: 0 0 0 4px transparent, 0 0 0 6px rgba(139, 92, 246, 0.55), 0 0 20px rgba(139, 92, 246, 0.6), 0 0 40px rgba(139, 92, 246, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.25) !important;
   }
 
   .react-flow__node.selected .border-yellow-500,
   .react-flow__node.selected.border-yellow-500 {
-    box-shadow: 0 0 0 2px rgba(234, 179, 8, 0.55), 0 0 16px rgba(234, 179, 8, 0.6), 0 0 36px rgba(234, 179, 8, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.25) !important;
+    box-shadow: 0 0 0 4px transparent, 0 0 0 6px rgba(234, 179, 8, 0.55), 0 0 20px rgba(234, 179, 8, 0.6), 0 0 40px rgba(234, 179, 8, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.25) !important;
   }
 
   .react-flow__node.selected .border-teal-600,
   .react-flow__node.selected.border-teal-600 {
-    box-shadow: 0 0 0 2px rgba(13, 148, 136, 0.55), 0 0 16px rgba(13, 148, 136, 0.6), 0 0 36px rgba(13, 148, 136, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.25) !important;
+    box-shadow: 0 0 0 4px transparent, 0 0 0 6px rgba(13, 148, 136, 0.55), 0 0 20px rgba(13, 148, 136, 0.6), 0 0 40px rgba(13, 148, 136, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.25) !important;
   }
 
   .react-flow__node.selected .border-cyan-400,
   .react-flow__node.selected.border-cyan-400 {
-    box-shadow: 0 0 0 2px rgba(34, 211, 238, 0.55), 0 0 16px rgba(34, 211, 238, 0.6), 0 0 36px rgba(34, 211, 238, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.25) !important;
+    box-shadow: 0 0 0 4px transparent, 0 0 0 6px rgba(34, 211, 238, 0.55), 0 0 20px rgba(34, 211, 238, 0.6), 0 0 40px rgba(34, 211, 238, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.25) !important;
   }
 
   .react-flow__node.selected .border-gray-200,
   .react-flow__node.selected.border-gray-200 {
-    box-shadow: 0 0 0 2px rgba(229, 231, 235, 0.55), 0 0 16px rgba(229, 231, 235, 0.6), 0 0 36px rgba(229, 231, 235, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.25) !important;
+    box-shadow: 0 0 0 4px transparent, 0 0 0 6px rgba(229, 231, 235, 0.55), 0 0 20px rgba(229, 231, 235, 0.6), 0 0 40px rgba(229, 231, 235, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.25) !important;
   }
 
   /* Dark theme tweaks: slightly lighter neon for better contrast */
@@ -366,28 +440,28 @@ body {
   .dark .react-flow__node.selected.dark\\:border-blue-400,
   .dark .react-flow__node.selected .border-blue-500,
   .dark .react-flow__node.selected.border-blue-500 {
-    box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.65), 0 0 18px rgba(96, 165, 250, 0.7), 0 0 40px rgba(96, 165, 250, 0.4), inset 0 0 0 1px rgba(255, 255, 255, 0.18) !important;
+    box-shadow: 0 0 0 4px transparent, 0 0 0 6px rgba(96, 165, 250, 0.65), 0 0 20px rgba(96, 165, 250, 0.7), 0 0 40px rgba(96, 165, 250, 0.4), inset 0 0 0 1px rgba(255, 255, 255, 0.18) !important;
   }
 
   .dark .react-flow__node.selected .dark\\:border-green-400,
   .dark .react-flow__node.selected.dark\\:border-green-400,
   .dark .react-flow__node.selected .border-green-500,
   .dark .react-flow__node.selected.border-green-500 {
-    box-shadow: 0 0 0 2px rgba(52, 211, 153, 0.65), 0 0 18px rgba(52, 211, 153, 0.7), 0 0 40px rgba(52, 211, 153, 0.4), inset 0 0 0 1px rgba(255, 255, 255, 0.18) !important;
+    box-shadow: 0 0 0 4px transparent, 0 0 0 6px rgba(52, 211, 153, 0.65), 0 0 20px rgba(52, 211, 153, 0.7), 0 0 40px rgba(52, 211, 153, 0.4), inset 0 0 0 1px rgba(255, 255, 255, 0.18) !important;
   }
 
   .dark .react-flow__node.selected .dark\\:border-purple-400,
   .dark .react-flow__node.selected.dark\\:border-purple-400,
   .dark .react-flow__node.selected .border-purple-500,
   .dark .react-flow__node.selected.border-purple-500 {
-    box-shadow: 0 0 0 2px rgba(192, 132, 252, 0.65), 0 0 18px rgba(192, 132, 252, 0.7), 0 0 40px rgba(192, 132, 252, 0.4), inset 0 0 0 1px rgba(255, 255, 255, 0.18) !important;
+    box-shadow: 0 0 0 4px transparent, 0 0 0 6px rgba(192, 132, 252, 0.65), 0 0 20px rgba(192, 132, 252, 0.7), 0 0 40px rgba(192, 132, 252, 0.4), inset 0 0 0 1px rgba(255, 255, 255, 0.18) !important;
   }
 
   .dark .react-flow__node.selected .dark\\:border-orange-400,
   .dark .react-flow__node.selected.dark\\:border-orange-400,
   .dark .react-flow__node.selected .border-orange-500,
   .dark .react-flow__node.selected.border-orange-500 {
-    box-shadow: 0 0 0 2px rgba(251, 146, 60, 0.65), 0 0 18px rgba(251, 146, 60, 0.7), 0 0 40px rgba(251, 146, 60, 0.4), inset 0 0 0 1px rgba(255, 255, 255, 0.18) !important;
+    box-shadow: 0 0 0 4px transparent, 0 0 0 6px rgba(251, 146, 60, 0.65), 0 0 20px rgba(251, 146, 60, 0.7), 0 0 40px rgba(251, 146, 60, 0.4), inset 0 0 0 1px rgba(255, 255, 255, 0.18) !important;
   }
 
   .dark .react-flow__node.selected .dark\\:border-cyan-300,
@@ -400,35 +474,35 @@ body {
   .dark .react-flow__node.selected.border-cyan-500,
   .dark .react-flow__node.selected .border-cyan-600,
   .dark .react-flow__node.selected.border-cyan-600 {
-    box-shadow: 0 0 0 2px rgba(34, 211, 238, 0.65), 0 0 18px rgba(34, 211, 238, 0.7), 0 0 40px rgba(34, 211, 238, 0.4), inset 0 0 0 1px rgba(255, 255, 255, 0.18) !important;
+    box-shadow: 0 0 0 4px transparent, 0 0 0 6px rgba(34, 211, 238, 0.65), 0 0 20px rgba(34, 211, 238, 0.7), 0 0 40px rgba(34, 211, 238, 0.4), inset 0 0 0 1px rgba(255, 255, 255, 0.18) !important;
   }
 
   .dark .react-flow__node.selected .dark\\:border-amber-400,
   .dark .react-flow__node.selected.dark\\:border-amber-400,
   .dark .react-flow__node.selected .border-amber-500,
   .dark .react-flow__node.selected.border-amber-500 {
-    box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.65), 0 0 18px rgba(251, 191, 36, 0.7), 0 0 40px rgba(251, 191, 36, 0.4), inset 0 0 0 1px rgba(255, 255, 255, 0.18) !important;
+    box-shadow: 0 0 0 4px transparent, 0 0 0 6px rgba(251, 191, 36, 0.65), 0 0 20px rgba(251, 191, 36, 0.7), 0 0 40px rgba(251, 191, 36, 0.4), inset 0 0 0 1px rgba(255, 255, 255, 0.18) !important;
   }
 
   .dark .react-flow__node.selected .dark\\:border-pink-400,
   .dark .react-flow__node.selected.dark\\:border-pink-400,
   .dark .react-flow__node.selected .border-pink-500,
   .dark .react-flow__node.selected.border-pink-500 {
-    box-shadow: 0 0 0 2px rgba(244, 114, 182, 0.65), 0 0 18px rgba(244, 114, 182, 0.7), 0 0 40px rgba(244, 114, 182, 0.4), inset 0 0 0 1px rgba(255, 255, 255, 0.18) !important;
+    box-shadow: 0 0 0 4px transparent, 0 0 0 6px rgba(244, 114, 182, 0.65), 0 0 20px rgba(244, 114, 182, 0.7), 0 0 40px rgba(244, 114, 182, 0.4), inset 0 0 0 1px rgba(255, 255, 255, 0.18) !important;
   }
 
   .dark .react-flow__node.selected .dark\\:border-lime-400,
   .dark .react-flow__node.selected.dark\\:border-lime-400,
   .dark .react-flow__node.selected .border-lime-500,
   .dark .react-flow__node.selected.border-lime-500 {
-    box-shadow: 0 0 0 2px rgba(163, 230, 53, 0.65), 0 0 18px rgba(163, 230, 53, 0.7), 0 0 40px rgba(163, 230, 53, 0.4), inset 0 0 0 1px rgba(255, 255, 255, 0.18) !important;
+    box-shadow: 0 0 0 4px transparent, 0 0 0 6px rgba(163, 230, 53, 0.65), 0 0 20px rgba(163, 230, 53, 0.7), 0 0 40px rgba(163, 230, 53, 0.4), inset 0 0 0 1px rgba(255, 255, 255, 0.18) !important;
   }
 
   .dark .react-flow__node.selected .dark\\:border-sky-400,
   .dark .react-flow__node.selected.dark\\:border-sky-400,
   .dark .react-flow__node.selected .border-sky-500,
   .dark .react-flow__node.selected.border-sky-500 {
-    box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.65), 0 0 18px rgba(56, 189, 248, 0.7), 0 0 40px rgba(56, 189, 248, 0.4), inset 0 0 0 1px rgba(255, 255, 255, 0.18) !important;
+    box-shadow: 0 0 0 4px transparent, 0 0 0 6px rgba(56, 189, 248, 0.65), 0 0 20px rgba(56, 189, 248, 0.7), 0 0 40px rgba(56, 189, 248, 0.4), inset 0 0 0 1px rgba(255, 255, 255, 0.18) !important;
   }
 
   .dark .react-flow__node.selected .dark\\:border-teal-400,
@@ -437,35 +511,35 @@ body {
   .dark .react-flow__node.selected.border-teal-500,
   .dark .react-flow__node.selected .border-teal-600,
   .dark .react-flow__node.selected.border-teal-600 {
-    box-shadow: 0 0 0 2px rgba(45, 212, 191, 0.65), 0 0 18px rgba(45, 212, 191, 0.7), 0 0 40px rgba(45, 212, 191, 0.4), inset 0 0 0 1px rgba(255, 255, 255, 0.18) !important;
+    box-shadow: 0 0 0 4px transparent, 0 0 0 6px rgba(45, 212, 191, 0.65), 0 0 20px rgba(45, 212, 191, 0.7), 0 0 40px rgba(45, 212, 191, 0.4), inset 0 0 0 1px rgba(255, 255, 255, 0.18) !important;
   }
 
   .dark .react-flow__node.selected .dark\\:border-indigo-400,
   .dark .react-flow__node.selected.dark\\:border-indigo-400,
   .dark .react-flow__node.selected .border-indigo-500,
   .dark .react-flow__node.selected.border-indigo-500 {
-    box-shadow: 0 0 0 2px rgba(129, 140, 248, 0.65), 0 0 18px rgba(129, 140, 248, 0.7), 0 0 40px rgba(129, 140, 248, 0.4), inset 0 0 0 1px rgba(255, 255, 255, 0.18) !important;
+    box-shadow: 0 0 0 4px transparent, 0 0 0 6px rgba(129, 140, 248, 0.65), 0 0 20px rgba(129, 140, 248, 0.7), 0 0 40px rgba(129, 140, 248, 0.4), inset 0 0 0 1px rgba(255, 255, 255, 0.18) !important;
   }
 
   .dark .react-flow__node.selected .dark\\:border-violet-400,
   .dark .react-flow__node.selected.dark\\:border-violet-400,
   .dark .react-flow__node.selected .border-violet-500,
   .dark .react-flow__node.selected.border-violet-500 {
-    box-shadow: 0 0 0 2px rgba(167, 139, 250, 0.65), 0 0 18px rgba(167, 139, 250, 0.7), 0 0 40px rgba(167, 139, 250, 0.4), inset 0 0 0 1px rgba(255, 255, 255, 0.18) !important;
+    box-shadow: 0 0 0 4px transparent, 0 0 0 6px rgba(167, 139, 250, 0.65), 0 0 20px rgba(167, 139, 250, 0.7), 0 0 40px rgba(167, 139, 250, 0.4), inset 0 0 0 1px rgba(255, 255, 255, 0.18) !important;
   }
 
   .dark .react-flow__node.selected .dark\\:border-yellow-400,
   .dark .react-flow__node.selected.dark\\:border-yellow-400,
   .dark .react-flow__node.selected .border-yellow-500,
   .dark .react-flow__node.selected.border-yellow-500 {
-    box-shadow: 0 0 0 2px rgba(250, 204, 21, 0.65), 0 0 18px rgba(250, 204, 21, 0.7), 0 0 40px rgba(250, 204, 21, 0.4), inset 0 0 0 1px rgba(255, 255, 255, 0.18) !important;
+    box-shadow: 0 0 0 4px transparent, 0 0 0 6px rgba(250, 204, 21, 0.65), 0 0 20px rgba(250, 204, 21, 0.7), 0 0 40px rgba(250, 204, 21, 0.4), inset 0 0 0 1px rgba(255, 255, 255, 0.18) !important;
   }
 
   .dark .react-flow__node.selected .dark\\:border-gray-700,
   .dark .react-flow__node.selected.dark\\:border-gray-700,
   .dark .react-flow__node.selected .border-gray-200,
   .dark .react-flow__node.selected.border-gray-200 {
-    box-shadow: 0 0 0 2px rgba(156, 163, 175, 0.65), 0 0 18px rgba(156, 163, 175, 0.7), 0 0 40px rgba(156, 163, 175, 0.4), inset 0 0 0 1px rgba(255, 255, 255, 0.18) !important;
+    box-shadow: 0 0 0 4px transparent, 0 0 0 6px rgba(156, 163, 175, 0.65), 0 0 20px rgba(156, 163, 175, 0.7), 0 0 40px rgba(156, 163, 175, 0.4), inset 0 0 0 1px rgba(255, 255, 255, 0.18) !important;
   }
 
   /* Ensure smooth transitions for non-selected nodes */
@@ -488,16 +562,86 @@ body {
   }
 
   .react-flow__edge.selected .react-flow__edge-path {
-    stroke: #3b82f6 !important; /* blue-500 */
+    stroke: #3b82f6 !important;
+    /* blue-500 */
     stroke-width: 3px;
-    filter: drop-shadow(0 0 4px rgba(59, 130, 246, 0.7))
-      drop-shadow(0 0 10px rgba(59, 130, 246, 0.5));
+    filter: drop-shadow(0 0 4px rgba(59, 130, 246, 0.7)) drop-shadow(0 0 10px rgba(59, 130, 246, 0.5));
   }
 
   .dark .react-flow__edge.selected .react-flow__edge-path {
-    stroke: #93c5fd !important; /* blue-300 */
-    filter: drop-shadow(0 0 4px rgba(147, 197, 253, 0.7))
-      drop-shadow(0 0 10px rgba(147, 197, 253, 0.5));
+    stroke: #93c5fd !important;
+    /* blue-300 */
+    filter: drop-shadow(0 0 4px rgba(147, 197, 253, 0.7)) drop-shadow(0 0 10px rgba(147, 197, 253, 0.5));
+  }
+
+  /* Tokyo Night theme - use selection-color for node glow */
+  .tokyo-night-dark .react-flow__node.selected .border-blue-500,
+  .tokyo-night-dark .react-flow__node.selected.border-blue-500,
+  .tokyo-night-dark .react-flow__node.selected .border-green-500,
+  .tokyo-night-dark .react-flow__node.selected.border-green-500,
+  .tokyo-night-dark .react-flow__node.selected .border-purple-500,
+  .tokyo-night-dark .react-flow__node.selected.border-purple-500,
+  .tokyo-night-dark .react-flow__node.selected .border-orange-500,
+  .tokyo-night-dark .react-flow__node.selected.border-orange-500,
+  .tokyo-night-dark .react-flow__node.selected .border-cyan-500,
+  .tokyo-night-dark .react-flow__node.selected.border-cyan-500,
+  .tokyo-night-dark .react-flow__node.selected .border-cyan-600,
+  .tokyo-night-dark .react-flow__node.selected.border-cyan-600,
+  .tokyo-night-dark .react-flow__node.selected .border-amber-500,
+  .tokyo-night-dark .react-flow__node.selected.border-amber-500,
+  .tokyo-night-dark .react-flow__node.selected .border-pink-500,
+  .tokyo-night-dark .react-flow__node.selected.border-pink-500,
+  .tokyo-night-dark .react-flow__node.selected .border-lime-500,
+  .tokyo-night-dark .react-flow__node.selected.border-lime-500,
+  .tokyo-night-dark .react-flow__node.selected .border-sky-500,
+  .tokyo-night-dark .react-flow__node.selected.border-sky-500,
+  .tokyo-night-dark .react-flow__node.selected .border-teal-500,
+  .tokyo-night-dark .react-flow__node.selected.border-teal-500,
+  .tokyo-night-dark .react-flow__node.selected .border-teal-600,
+  .tokyo-night-dark .react-flow__node.selected.border-teal-600,
+  .tokyo-night-dark .react-flow__node.selected .border-indigo-500,
+  .tokyo-night-dark .react-flow__node.selected.border-indigo-500,
+  .tokyo-night-dark .react-flow__node.selected .border-violet-500,
+  .tokyo-night-dark .react-flow__node.selected.border-violet-500,
+  .tokyo-night-dark .react-flow__node.selected .border-yellow-500,
+  .tokyo-night-dark .react-flow__node.selected.border-yellow-500,
+  .tokyo-night-dark .react-flow__node.selected .border-cyan-400,
+  .tokyo-night-dark .react-flow__node.selected.border-cyan-400,
+  .tokyo-night-dark .react-flow__node.selected .border-gray-200,
+  .tokyo-night-dark .react-flow__node.selected.border-gray-200,
+  .tokyo-night-dark .react-flow__node.selected .dark\\:border-blue-400,
+  .tokyo-night-dark .react-flow__node.selected.dark\\:border-blue-400,
+  .tokyo-night-dark .react-flow__node.selected .dark\\:border-green-400,
+  .tokyo-night-dark .react-flow__node.selected.dark\\:border-green-400,
+  .tokyo-night-dark .react-flow__node.selected .dark\\:border-purple-400,
+  .tokyo-night-dark .react-flow__node.selected.dark\\:border-purple-400,
+  .tokyo-night-dark .react-flow__node.selected .dark\\:border-cyan-400,
+  .tokyo-night-dark .react-flow__node.selected.dark\\:border-cyan-400 {
+    box-shadow: none !important;
+    outline: 2px dashed hsl(var(--selection-color) / 0.7) !important;
+    outline-offset: 12px !important;
+    border-radius: 6px;
+    /* Ensure outline follows radius */
+  }
+
+  .tokyo-night-light .react-flow__node.selected .border-blue-500,
+  .tokyo-night-light .react-flow__node.selected.border-blue-500,
+  .tokyo-night-light .react-flow__node.selected .border-green-500,
+  .tokyo-night-light .react-flow__node.selected.border-green-500,
+  .tokyo-night-light .react-flow__node.selected .border-purple-500,
+  .tokyo-night-light .react-flow__node.selected.border-purple-500,
+  .tokyo-night-light .react-flow__node.selected .border-orange-500,
+  .tokyo-night-light .react-flow__node.selected.border-orange-500,
+  .tokyo-night-light .react-flow__node.selected .border-cyan-500,
+  .tokyo-night-light .react-flow__node.selected.border-cyan-500,
+  .tokyo-night-light .react-flow__node.selected .border-amber-500,
+  .tokyo-night-light .react-flow__node.selected.border-amber-500,
+  .tokyo-night-light .react-flow__node.selected .border-pink-500,
+  .tokyo-night-light .react-flow__node.selected.border-pink-500 {
+    box-shadow: none !important;
+    outline: 2px dashed hsl(var(--selection-color) / 0.7) !important;
+    outline-offset: 12px !important;
+    border-radius: 6px;
   }
 
   /* Remove focus outline from React Flow canvas */
@@ -508,4 +652,21 @@ body {
   .react-flow:focus-visible {
     outline: none !important;
   }
+}
+
+/* Global override for nodes in Tokyo Night themes to fix white background issue */
+/* Placed outside @layer base to ensure it overrides any component-level styles */
+.tokyo-night-dark .react-flow__node,
+.tokyo-night-dark .react-flow__node div[class*="bg-white"],
+.tokyo-night-dark .react-flow__node div[class*="bg-gray-50"] {
+  background-color: hsl(var(--card)) !important;
+  color: hsl(var(--card-foreground)) !important;
+  border-color: hsl(var(--border));
+}
+
+.tokyo-night-light .react-flow__node,
+.tokyo-night-light .react-flow__node div[class*="bg-white"] {
+  background-color: hsl(var(--card)) !important;
+  color: hsl(var(--card-foreground)) !important;
+  border-color: hsl(var(--border));
 }

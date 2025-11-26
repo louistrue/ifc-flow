@@ -11,6 +11,7 @@ import {
   Check,
   Database,
   List,
+  Layers,
 } from "lucide-react";
 import { formatPropertyValue } from "@/lib/ifc/property-utils";
 import React from "react";
@@ -121,6 +122,29 @@ interface OccupancyResults {
     totalArea: number;
     averageOccupancyDensity: number;
     spaceCount: number;
+  };
+}
+
+interface MaterialResults {
+  type: "materialResults";
+  materials: Array<{
+    name: string;
+    type: string;
+    source: string;
+    components: Array<{
+      name: string;
+      thickness?: number;
+      fraction?: number;
+      profileName?: string;
+    }>;
+    fullComposition?: string;
+    elementCount: number;
+    elements: Array<{ id: string; type: string }>;
+  }>;
+  summary: {
+    totalElements: number;
+    elementsWithMaterial: number;
+    uniqueMaterials: number;
   };
 }
 
@@ -365,16 +389,17 @@ export const WatchNode = memo(
 
     // Use local state data which persists through re-renders
     const inputData = localInputData || { type: "unknown", value: undefined };
-    if (inputData && inputData.type) {
-      console.log('👀 WatchNode input received:', {
-        type: inputData.type,
-        hasValue: !!inputData.value,
-        valueType: typeof inputData.value,
-        keys: inputData.value && typeof inputData.value === 'object' ? Object.keys(inputData.value) : undefined,
-        rows: Array.isArray(inputData.value) ? inputData.value.length : (inputData.value?.rowCount || 0),
-        sample: Array.isArray(inputData.value) ? inputData.value.slice(0, 2) : inputData.value
-      });
-    }
+    // Commented out to prevent console spam on every render
+    // if (inputData && inputData.type) {
+    //   console.log('👀 WatchNode input received:', {
+    //     type: inputData.type,
+    //     hasValue: !!inputData.value,
+    //     valueType: typeof inputData.value,
+    //     keys: inputData.value && typeof inputData.value === 'object' ? Object.keys(inputData.value) : undefined,
+    //     rows: Array.isArray(inputData.value) ? inputData.value.length : (inputData.value?.rowCount || 0),
+    //     sample: Array.isArray(inputData.value) ? inputData.value.slice(0, 2) : inputData.value
+    //   });
+    // }
     // Use the local display mode for rendering
     const displayMode = localDisplayMode || data.properties?.displayMode || "table";
 
@@ -410,9 +435,9 @@ export const WatchNode = memo(
 
     // Debug output - comment out in production
     const dataSource = inputData === localInputData ? '(from local)' : '(from props)';
-    console.log(`Rendering WatchNode ${id}, key: ${keyRef.current}, counter: ${updateCounter}, mode: ${displayMode}, data:`,
-      inputData.type, inputData.value ? (typeof inputData.value === 'object' ? Object.keys(inputData.value).length : inputData.value) : 'undefined',
-      dataSource);
+    // console.log(`Rendering WatchNode ${id}, key: ${keyRef.current}, counter: ${updateCounter}, mode: ${displayMode}, data:`,
+    //   inputData.type, inputData.value ? (typeof inputData.value === 'object' ? Object.keys(inputData.value).length : inputData.value) : 'undefined',
+    //   dataSource);
 
     // Handle window mouse events for resizing
     const startResize = useCallback(
@@ -1418,6 +1443,220 @@ export const WatchNode = memo(
     };
 
     // Render the data content based on input type and display mode
+    // Render material analysis results
+    const renderMaterialResults = (): JSX.Element | null => {
+      if (inputData.type !== "materialResults" || !inputData.value) {
+        return null;
+      }
+
+      const data = inputData.value as MaterialResults;
+      const { materials, summary } = data;
+
+      if (displayMode === "chart") {
+        // Prepare data for charts
+
+        // 1. Assigned Materials (Top Level)
+        const assignedMaterialsData = materials
+          .map((m, i) => ({
+            name: m.name,
+            value: m.elementCount,
+            fill: COLORS[i % COLORS.length],
+            fullComposition: m.fullComposition
+          }))
+          .sort((a, b) => b.value - a.value);
+
+        // 2. Constituent Materials (Breakdown)
+        const constituentMap = new Map<string, number>();
+
+        materials.forEach(m => {
+          if (m.components && m.components.length > 0) {
+            // It's a composite material
+            m.components.forEach(c => {
+              const count = m.elementCount;
+              constituentMap.set(c.name, (constituentMap.get(c.name) || 0) + count);
+            });
+          } else {
+            // It's a simple material
+            constituentMap.set(m.name, (constituentMap.get(m.name) || 0) + m.elementCount);
+          }
+        });
+
+        const constituentData = Array.from(constituentMap.entries())
+          .map(([name, value], i) => ({
+            name,
+            value,
+            fill: COLORS[(i + 2) % COLORS.length] // Offset colors slightly
+          }))
+          .sort((a, b) => b.value - a.value);
+
+        return (
+          <div className="space-y-4 p-1">
+            {/* Chart 1: Assigned Materials */}
+            <div className="bg-gray-50 dark:bg-gray-900/40 rounded-xl p-3 border border-gray-200 dark:border-gray-700/50 shadow-sm">
+              <div className="text-xs font-medium mb-2 flex justify-between items-center text-gray-700 dark:text-gray-200">
+                <span className="flex items-center gap-1.5">
+                  <div className="p-1 bg-blue-100 dark:bg-blue-900/50 rounded text-blue-600 dark:text-blue-400">
+                    <BarChart2 className="h-3 w-3" />
+                  </div>
+                  <span>Assigned Material Sets</span>
+                </span>
+                <span className="text-[10px] bg-gray-200 dark:bg-gray-700 px-1.5 py-0.5 rounded-full text-gray-600 dark:text-gray-300">
+                  {materials.length} types
+                </span>
+              </div>
+              <div style={{ width: '100%', height: 180 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={assignedMaterialsData}
+                      cx="50%"
+                      cy="50%"
+                      outerRadius={60}
+                      innerRadius={35}
+                      paddingAngle={2}
+                      dataKey="value"
+                      stroke="none"
+                    >
+                      {assignedMaterialsData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.fill} />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: 'rgba(255, 255, 255, 0.95)',
+                        borderRadius: '8px',
+                        border: 'none',
+                        boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
+                      }}
+                      itemStyle={{ fontSize: '12px', color: '#374151' }}
+                    />
+                    <Legend
+                      layout="vertical"
+                      align="right"
+                      verticalAlign="middle"
+                      wrapperStyle={{ fontSize: '10px', maxWidth: '40%' }}
+                      formatter={(value) => <span className="text-gray-600 dark:text-gray-300 ml-1">{value}</span>}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            {/* Chart 2: Constituent Breakdown */}
+            <div className="bg-gray-50 dark:bg-gray-900/40 rounded-xl p-3 border border-gray-200 dark:border-gray-700/50 shadow-sm">
+              <div className="text-xs font-medium mb-2 flex justify-between items-center text-gray-700 dark:text-gray-200">
+                <span className="flex items-center gap-1.5">
+                  <div className="p-1 bg-green-100 dark:bg-green-900/50 rounded text-green-600 dark:text-green-400">
+                    <Layers className="h-3 w-3" />
+                  </div>
+                  <span>Constituent Materials Breakdown</span>
+                </span>
+              </div>
+              <div style={{ width: '100%', height: 180 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={constituentData}
+                      cx="50%"
+                      cy="50%"
+                      outerRadius={60}
+                      innerRadius={35}
+                      paddingAngle={2}
+                      dataKey="value"
+                      stroke="none"
+                    >
+                      {constituentData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.fill} />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: 'rgba(255, 255, 255, 0.95)',
+                        borderRadius: '8px',
+                        border: 'none',
+                        boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
+                      }}
+                      itemStyle={{ fontSize: '12px', color: '#374151' }}
+                    />
+                    <Legend
+                      layout="vertical"
+                      align="right"
+                      verticalAlign="middle"
+                      wrapperStyle={{ fontSize: '10px', maxWidth: '40%' }}
+                      formatter={(value) => <span className="text-gray-600 dark:text-gray-300 ml-1">{value}</span>}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      return (
+        <div className="space-y-4 p-1">
+          <div className="text-xs mb-2 flex justify-between items-center">
+            <span className="flex items-center gap-1.5 font-medium text-gray-700 dark:text-gray-200">
+              <BarChart2 className="h-3.5 w-3.5 text-teal-500" />
+              <span>Material Analysis</span>
+            </span>
+          </div>
+
+          {/* Summary stats */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="bg-purple-50/50 dark:bg-purple-900/20 p-3 rounded-xl border border-purple-100 dark:border-purple-800/30">
+              <div className="font-medium text-purple-800 dark:text-purple-300 text-[10px] uppercase tracking-wider mb-0.5">Elements</div>
+              <div className="flex items-baseline gap-1">
+                <span className="text-lg font-bold text-purple-700 dark:text-purple-200">{summary.elementsWithMaterial}</span>
+                <span className="text-xs text-purple-500 dark:text-purple-400">/ {summary.totalElements}</span>
+              </div>
+            </div>
+            <div className="bg-blue-50/50 dark:bg-blue-900/20 p-3 rounded-xl border border-blue-100 dark:border-blue-800/30">
+              <div className="font-medium text-blue-800 dark:text-blue-300 text-[10px] uppercase tracking-wider mb-0.5">Unique Materials</div>
+              <div className="text-lg font-bold text-blue-700 dark:text-blue-200">{summary.uniqueMaterials}</div>
+            </div>
+          </div>
+
+          {/* Materials table */}
+          <div className="rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden shadow-sm">
+            <div className="overflow-auto" style={{ maxHeight: `${contentHeight - 140}px` }}>
+              <table className="w-full text-xs">
+                <thead className="bg-gray-50 dark:bg-gray-800 sticky top-0 z-10">
+                  <tr>
+                    <th className="p-2 text-left font-semibold text-gray-600 dark:text-gray-300 border-b border-gray-200 dark:border-gray-700">Material / Composition</th>
+                    <th className="p-2 text-right font-semibold text-gray-600 dark:text-gray-300 border-b border-gray-200 dark:border-gray-700">Elements</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100 dark:divide-gray-700/50 bg-white dark:bg-gray-900">
+                  {materials.map((m, i) => (
+                    <tr key={i} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
+                      <td className="p-2">
+                        <div className="font-medium text-gray-800 dark:text-gray-200 truncate" title={m.name}>{m.name}</div>
+                        {m.components && m.components.length > 0 && (
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {m.components.map((c, idx) => (
+                              <span key={idx} className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-700">
+                                {c.name}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </td>
+                      <td className="p-2 text-right align-top">
+                        <span className="inline-flex items-center justify-center min-w-[24px] h-5 px-1.5 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 font-medium text-[10px]">
+                          {m.elementCount}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      );
+    };
+
     const renderData = (): JSX.Element | null => {
       if (!inputData.value) {
         return (
@@ -1430,6 +1669,10 @@ export const WatchNode = memo(
       // Special handling for different analysis result types
       if (inputData.type === "propertyResults") {
         return renderPropertyResults();
+      }
+
+      if (inputData.type === "materialResults") {
+        return renderMaterialResults();
       }
 
       if (inputData.type === "roomAssignment" && (displayMode === "table" || displayMode === "chart")) {
