@@ -1324,18 +1324,33 @@ export function manageProperties(
           psetName: "Attributes"
         };
       } else if (action === "set") {
+        // Determine the value to use for this specific element
+        let attributeValueToSet = propertyValue;
+
+        if (isMapping) {
+          // Look up the element-specific value by GlobalId
+          const globalId = element.properties?.GlobalId;
+          if (globalId && elementValueMap[globalId] !== undefined) {
+            attributeValueToSet = elementValueMap[globalId];
+            elementsModified++;
+          } else {
+            // Skip this element if no mapping exists for it
+            return updatedElement;
+          }
+        }
+
         // Set attribute on the object
-        (updatedElement as any)[propertyName] = propertyValue;
+        (updatedElement as any)[propertyName] = attributeValueToSet;
 
         // Also update properties for consistency if it was there
         if (updatedElement.properties) {
-          updatedElement.properties[propertyName] = propertyValue;
+          updatedElement.properties[propertyName] = attributeValueToSet;
         }
 
         updatedElement.propertyInfo = {
           name: propertyName,
           exists: true,
-          value: propertyValue,
+          value: attributeValueToSet,
           psetName: "Attributes"
         };
       }
