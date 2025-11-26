@@ -101,12 +101,18 @@ export function FlowCanvas({
           };
         }
 
-        // Create a new node
+        // Create a new node with proper label
+        // Map node types to their display labels
+        const nodeLabelMap: Record<string, string> = {
+          materialNode: "Materials",
+        };
+        const nodeLabel = nodeLabelMap[nodeType] || nodeType.replace("Node", "");
+        
         const newNode = {
           id: `${nodeType}-${Date.now()}`,
           type: nodeType,
           position,
-          data: { label: `${nodeType.replace("Node", "")}`, properties: defaultProperties },
+          data: { label: nodeLabel, properties: defaultProperties },
         };
 
         // Add the new node

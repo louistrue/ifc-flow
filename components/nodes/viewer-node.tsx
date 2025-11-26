@@ -7,7 +7,7 @@ import {
   useReactFlow,
   NodeProps,
 } from "reactflow";
-import { CuboidIcon as Cube, Loader2, AlertCircle, CheckCircle, Focus, Eye, Layers, Scissors } from "lucide-react";
+import { CuboidIcon as Cube, Loader2, AlertCircle, CheckCircle, Focus } from "lucide-react";
 import { IfcViewer } from "@/lib/ifc/viewer-utils";
 import { ViewerNodeData as BaseViewerNodeData } from "./node-types";
 import { useViewerFocus } from "@/components/contexts/viewer-focus-context";
@@ -131,9 +131,9 @@ export const ViewerNode = memo(
     useEffect(() => {
       if (!viewerRef.current) return;
 
-      // Create a new viewer instance
+      // Create a new viewer instance with improved visuals
       const newViewer = new IfcViewer(viewerRef.current, {
-        backgroundColor: "#f5f5f5",
+        backgroundColor: "#e8ecf0", // Soft neutral background for better contrast
         showGrid: false,
         showAxes: false,
       });
@@ -334,9 +334,10 @@ export const ViewerNode = memo(
         <div className="p-3">
           <div
             ref={viewerRef}
-            className={`bg-gray-100 rounded-md flex items-center justify-center overflow-hidden ${isInFocusMode ? "ring-2 ring-cyan-400/30 shadow-inner" : "nodrag"
+            className={`bg-gray-100 dark:bg-gray-700 rounded-md flex items-center justify-center overflow-hidden ${isInFocusMode ? "ring-2 ring-cyan-400/30 shadow-inner" : "nodrag"
               } relative cursor-pointer transition-all duration-300`}
             style={{
+              width: '100%',
               height: `${viewerHeight}px`,
               zIndex: isInFocusMode ? 50 : 'auto' // Ensure viewer is on top when in focus mode
             }}
@@ -404,24 +405,9 @@ export const ViewerNode = memo(
                   <span>Waiting for connection...</span>
                 </div>
 
-                {/* Feature highlights */}
-                <div className="mt-4 grid grid-cols-2 gap-2 text-xs text-gray-400">
-                  <div className="flex items-center gap-1">
-                    <Eye className="w-3 h-3" />
-                    <span>Multiple Views</span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <Layers className="w-3 h-3" />
-                    <span>Clustering</span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <Scissors className="w-3 h-3" />
-                    <span>Sectioning</span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <Focus className="w-3 h-3" />
-                    <span>3D Focus</span>
-                  </div>
+                {/* Play instruction */}
+                <div className="mt-4 text-xs text-gray-500 dark:text-gray-400">
+                  Press play to see the model
                 </div>
               </div>
             )}

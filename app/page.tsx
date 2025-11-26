@@ -42,7 +42,7 @@ import { ParameterNode } from "@/components/nodes/parameter-node";
 import { PythonNode } from "@/components/nodes/python-node";
 import { Toaster } from "@/components/toaster";
 import { WorkflowExecutor } from "@/lib/workflow-executor";
-import { loadIfcFile, getIfcFile, downloadExportedFile } from "@/lib/ifc-utils";
+import { loadIfcFile, getIfcFile, downloadExportedFile, preloadWorker } from "@/lib/ifc-utils";
 import { useToast } from "@/hooks/use-toast";
 import { FileUp } from "lucide-react";
 import type { Workflow } from "@/lib/workflow-storage";
@@ -147,6 +147,9 @@ function FlowWithProvider() {
     setShowGridState(gridSetting);
     setShowMinimapState(minimapSetting);
     setIsSettingsLoaded(true);
+    
+    // Pre-warm Pyodide worker in background for faster first file load
+    preloadWorker();
   }, []); // Only run once on mount
 
 

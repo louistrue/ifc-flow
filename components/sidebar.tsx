@@ -161,7 +161,7 @@ export const nodeCategories = [
       },
       {
         id: "materialNode",
-        label: "Material",
+        label: "Materials",
         icon: <Palette className="h-4 w-4 mr-2" />,
         status: "new",
       },

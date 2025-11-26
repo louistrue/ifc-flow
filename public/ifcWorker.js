@@ -350,79 +350,16 @@ async function initPyodide() {
       sqlite_databases = {}
     `);
 
-    // Best-effort install of ifcpatch and additional dependencies for comprehensive Ifc2Sql functionality
-    try {
-      await pyodide.runPythonAsync(`
-import micropip
-try:
-    await micropip.install('ifcpatch', keep_going=True)
-    print('ifcpatch installed')
-except Exception as e:
-    print('ifcpatch install warning:', e)
-
-# Install additional dependencies that might be needed for full ifc2sql functionality
-try:
-    await micropip.install(['numpy', 'shapely'], keep_going=True)
-    print('Additional dependencies installed')
-except Exception as e:
-    print('Additional dependencies install warning:', e)
-
-# Also install ifcopenshell dependencies
-try:
-    await micropip.install(['ifcopenshell'], keep_going=True)
-    print('ifcopenshell installed for ifc2sql.py')
-except Exception as e:
-    print('ifcopenshell install warning:', e)
-      `);
-    } catch { }
-
-    const ifc2sqlText = await ensureIfc2sqlPyCode();
-    if (ifc2sqlText) {
-      const encoded = btoa(unescape(encodeURIComponent(ifc2sqlText)));
-      await pyodide.runPythonAsync(`
-import base64
-import sys
-import importlib
-
-# First ensure ifcopenshell is available
-try:
-    import ifcopenshell
-    print('ifcopenshell available for ifc2sql.py')
-except ImportError as e:
-    print('ifcopenshell not available:', e)
-
-try:
-    import ifcpatch
-    print('ifcpatch available for ifc2sql.py')
-except ImportError as e:
-    print('ifcpatch not available:', e)
-
-# Decode and execute the ifc2sql.py code
-src = base64.b64decode('${encoded}').decode('utf-8')
-
-# Create a new module and execute the code in it
-import types
-ifc2sql_module = types.ModuleType('ifc2sql')
-sys.modules['ifc2sql'] = ifc2sql_module
-
-try:
-    exec(src, ifc2sql_module.__dict__)
-    Patcher = getattr(ifc2sql_module, 'Patcher', None)
-    print('official ifc2sql.py loaded successfully:', bool(Patcher))
-    if Patcher:
-        print('Patcher class found:', Patcher.__name__)
-        # Make Patcher available globally for later use
-        globals()['Patcher'] = Patcher
-        print('Patcher class added to globals')
-    else:
-        print('Patcher class not found in ifc2sql.py')
-except Exception as e:
-    print('Error loading ifc2sql.py:', e)
-    import traceback
-    print(traceback.format_exc())
-    Patcher = None
-      `);
-    }
+    // NOTE: We intentionally skip installing ifcpatch here.
+    // ifcpatch corrupts the ifcopenshell WASM module when imported, causing
+    // "'function' object has no attribute 'file_schema'" errors.
+    // The SQLite conversion will use ifcopenshell.sql directly instead.
+    
+    // Patcher will be None - SQLite conversion will use fallback methods
+    await pyodide.runPythonAsync(`
+Patcher = None
+print('Skipping ifc2sql.py Patcher (ifcpatch not compatible with WASM)')
+    `);
 
     self.postMessage({
       type: "progress",
@@ -456,10 +393,6 @@ self.onmessage = async (event) => {
 
       case "loadIfc":
         await handleLoadIfc({ ...data, messageId });
-        break;
-
-      case "loadIfcFast":
-        await handleLoadIfcFast({ ...data, messageId });
         break;
 
       case "extractData":
@@ -519,6 +452,10 @@ self.onmessage = async (event) => {
         await handleBuildSqlite({ ...data, messageId });
         break;
 
+      case "getMaterialDetails":
+        await handleGetMaterialDetails({ ...data, messageId });
+        break;
+
       default:
         throw new Error(`Unknown action: ${action}`);
     }
@@ -539,402 +476,6 @@ function postSqliteStatus(status, modelKey, extra) {
     self.postMessage({ type: "sqliteStatus", status, modelKey, ...extra });
   } catch (e) {
     // ignore
-  }
-}
-
-// Handle loading an IFC file
-async function handleLoadIfc({ arrayBuffer, filename, messageId }) {
-  try {
-
-    // Make sure Pyodide is initialized
-    await initPyodide();
-
-
-    self.postMessage({
-      type: "progress",
-      message: "Preparing IFC file...",
-      percentage: 60,
-      messageId,
-    });
-
-    try {
-
-      // Create a virtual file in the Pyodide file system
-      let uint8Array = new Uint8Array(arrayBuffer);
-
-      // Schema normalization: Convert IFC4X3 variants to IFC4X3_ADD2
-      try {
-        self.postMessage({
-          type: "progress",
-          message: "Normalizing IFC schema...",
-          percentage: 65,
-          messageId,
-        });
-
-        // Convert to string for regex processing
-        const fileContents = new TextDecoder('utf-8').decode(uint8Array);
-        console.log("handleLoadIfc: Applying schema normalization");
-
-        // Regex to match FILE_SCHEMA with IFC4X3 variants and replace with IFC4X3_ADD2
-        const regex = /FILE_SCHEMA\s*\(\s*\(\s*'IFC4X3(?:_[A-Z0-9]+)?'\s*\)\s*\)/;
-        const replacement = "FILE_SCHEMA(('IFC4X3_ADD2'))";
-
-        const normalizedContents = fileContents.replace(regex, replacement);
-        if (normalizedContents !== fileContents) {
-          console.log("handleLoadIfc: Schema normalization applied - converted IFC4X3 variant to IFC4X3_ADD2");
-        }
-
-        // Convert back to Uint8Array
-        uint8Array = new TextEncoder().encode(normalizedContents);
-      } catch (normalizationError) {
-        console.warn("handleLoadIfc: Schema normalization failed, proceeding with original file:", normalizationError);
-        // Continue with original uint8Array if normalization fails
-      }
-
-      self.postMessage({
-        type: "progress",
-        message: "Writing file to memory...",
-        percentage: 70,
-        messageId,
-      });
-
-      pyodide.FS.writeFile("model.ifc", uint8Array);
-      console.log("handleLoadIfc: File written to filesystem");
-
-      // Use IfcOpenShell to load the file and extract basic information
-      self.postMessage({
-        type: "progress",
-        message: "Opening IFC file with IfcOpenShell...",
-        percentage: 75,
-        messageId,
-      });
-
-      // Additional progress message to indicate the potentially long processing step
-      self.postMessage({
-        type: "progress",
-        message: "Discovering element types dynamically...",
-        percentage: 80,
-        messageId,
-      });
-
-      // Add error handling for Python execution
-      try {
-        // Send progress update before starting Python processing
-        self.postMessage({
-          type: "progress",
-          message: "Analyzing IFC structure...",
-          percentage: 85,
-          messageId,
-        });
-
-
-        // Create a dedicated namespace for this operation
-        const namespace = pyodide.globals.get("dict")();
-
-        // First run the imports and setup
-        await pyodide.runPythonAsync(
-          `
-          import ifcopenshell
-          import json
-          import sys
-          import traceback
-          import sqlite3
-        `,
-          { globals: namespace }
-        );
-
-        // Then process the IFC file and store result in a variable
-        await pyodide.runPythonAsync(
-          `
-          try:
-              print("Python: Loading IFC file...")
-              # Load the IFC file from the virtual filesystem
-              ifc_file = ifcopenshell.open('model.ifc')
-              print("Python: IFC file loaded successfully")
-              
-              # Extract schema and basic info
-              schema = ifc_file.schema
-              print(f"Python: Schema identified as {schema}")
-              
-              # Get project info
-              projects = ifc_file.by_type("IfcProject")
-              project_info = None
-              if projects:
-                  project = projects[0]
-                  project_info = {
-                      "GlobalId": project.GlobalId,
-                      "Name": project.Name or "Unnamed Project",
-                      "Description": project.Description or ""
-                  }
-                  print(f"Python: Project info extracted: {project_info}")
-              
-              # Count elements by type
-              element_counts = {}
-              for ifc_class in [
-                  "IfcWall", "IfcSlab", "IfcBeam", "IfcColumn", "IfcDoor", 
-                  "IfcWindow", "IfcRoof", "IfcStair", "IfcFurnishingElement"
-              ]:
-                  elements = ifc_file.by_type(ifc_class)
-                  element_counts[ifc_class] = len(elements)
-                  print(f"Python: Count for {ifc_class}: {len(elements)}")
-              
-              # Create result object
-              result_obj = {
-                  "filename": "${filename}",
-                  "schema": schema,
-                  "project": project_info,
-                  "element_counts": element_counts,
-                  "total_elements": sum(element_counts.values()),
-                  "model_id": "${filename}"
-              }
-              print("Python: Result object created")
-              
-              # Enhanced Pyodide Ifc2Sql integration using official Patcher if available
-              print("Python: Enhanced Ifc2Sql integration starting...")
-              sqlite_db_path = '/model.db'
-              sqlite_success = False
-              try:
-                  # Prefer official ifc2sql.py Patcher loaded during init
-                  use_official = False
-                  Patcher = None
-
-                  try:
-                      # Try to import from ifc2sql module first
-                      import ifc2sql
-                      Patcher = ifc2sql.Patcher
-                      use_official = True
-                      print("Python: Using official ifc2sql.py Patcher from module")
-                  except (ImportError, AttributeError) as e:
-                      print(f"Python: Could not import Patcher from ifc2sql module: {e}")
-
-                  # Fallback: try global namespace
-                  if not Patcher:
-                      try:
-                          Patcher = globals().get('Patcher', None)
-                          if Patcher:
-                              use_official = True
-                              print("Python: Using official ifc2sql.py Patcher from globals")
-                      except:
-                          pass
-
-                  if not Patcher:
-                      print("Python: Official Patcher not present; trying ifcopenshell.ifcpatch")
-
-                  if use_official and Patcher:
-                      # Use Patcher class to create SQLite DB
-                      try:
-                          import os
-                          if os.path.exists(sqlite_db_path):
-                              os.remove(sqlite_db_path)
-                          patcher = Patcher(
-                              file=ifc_file,
-                              sql_type="SQLite",
-                              database=sqlite_db_path,
-                              full_schema=True,
-                              is_strict=False,
-                              should_expand=False,
-                              should_get_inverses=True,
-                              should_get_psets=True,
-                              should_get_geometry=False,
-                              should_skip_geometry_data=False
-                          )
-                          patcher.patch()
-                          sqlite_success = os.path.exists(sqlite_db_path)
-
-                          # Check and log database statistics
-                          if sqlite_success:
-                              try:
-                                  import sqlite3
-                                  conn = sqlite3.connect(sqlite_db_path)
-                                  cursor = conn.cursor()
-
-                                  # Get table count
-                                  cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
-                                  tables = cursor.fetchall()
-                                  table_count = len(tables)
-                                  print(f"Python: Created {table_count} tables")
-
-                                  # Get total row count across all tables
-                                  total_rows = 0
-                                  for table in tables:
-                                      table_name = table[0]
-                                      cursor.execute(f"SELECT COUNT(*) FROM {table_name}")
-                                      count = cursor.fetchone()[0]
-                                      total_rows += count
-                                      if count > 0:  # Only log non-empty tables
-                                          print(f"Python: Table {table_name}: {count} rows")
-
-                                  print(f"Python: Total rows across all tables: {total_rows}")
-                                  conn.close()
-                              except Exception as db_error:
-                                  print(f"Python: Error checking database statistics: {db_error}")
-
-                          print(f"Python: Patcher-based SQLite creation completed: {sqlite_success}")
-                      except Exception as e:
-                          print(f"Python: Patcher-based Ifc2Sql failed: {e}")
-                          import traceback
-                          print(traceback.format_exc())
-                          sqlite_success = False
-
-                  if not sqlite_success:
-                      try:
-                          import ifcopenshell.ifcpatch
-                          print("Python: ifcpatch module loaded successfully")
-                          config = {
-                              'input': 'model.ifc',
-                              'file': None,
-                              'recipe': 'Ifc2Sql',
-                              'arguments': {
-                                  'sqlite_path': sqlite_db_path,
-                                  'full_schema': True,   # Create all IFC class tables for comprehensive database
-                                  'should_get_psets': True,
-                                  'should_get_inverses': True,
-                                  'should_get_geometry': False,  # Skip geometry processing (Pyodide limitation)
-                                  'should_skip_geometry_data': False
-                              }
-                          }
-                          result = ifcopenshell.ifcpatch.execute(config)
-                          print(f"Python: Ifc2Sql execution completed: {result}")
-                          import os
-                          sqlite_success = os.path.exists(sqlite_db_path)
-                      except Exception as e:
-                          print(f"Python: IfcPatch Ifc2Sql failed: {e}")
-                          import traceback
-                          print(traceback.format_exc())
-                          sqlite_success = False
-              except Exception as e:
-                  print(f"Python: Unexpected error in Ifc2Sql integration: {e}")
-                  import traceback
-                  print(traceback.format_exc())
-                  sqlite_success = False
-
-              # Store as JSON in a variable - don't return it yet
-              result_obj["sqlite_db"] = sqlite_db_path if sqlite_success else None
-              result_obj["sqlite_success"] = sqlite_success
-              result_json = json.dumps(result_obj)
-              print("Python: JSON serialization complete")
-
-              # Store a success flag
-              success = True
-              error_msg = None
-              error_trace = None
-          except Exception as e:
-              print(f"Python ERROR: {str(e)}")
-              error_msg = str(e)
-              error_trace = traceback.format_exc()
-              print(f"Python TRACEBACK: {error_trace}")
-              success = False
-              result_json = None
-        `,
-          { globals: namespace }
-        );
-
-        // Check if there was an error
-        const success = namespace.get("success");
-
-
-        if (!success) {
-          const errorMsg = namespace.get("error_msg");
-          const errorTrace = namespace.get("error_trace");
-          throw new Error(`Python error: ${errorMsg}\n${errorTrace}`);
-        }
-
-        // Get the actual result from the namespace
-        const result = namespace.get("result_json");
-
-
-        if (!result) {
-          throw new Error("Python execution did not produce a result");
-        }
-
-        // Parse the result JSON
-        const modelInfo = JSON.parse(result);
-        // Store model info in the JavaScript side cache as well
-        ifcModelCache = {
-          filename: modelInfo.filename,
-          schema: modelInfo.schema,
-          model_id: modelInfo.model_id
-        };
-
-
-        // If Ifc2Sql created a SQLite DB, persist it to IndexedDB for client-side queries
-        try {
-          if (modelInfo.sqlite_success && modelInfo.sqlite_db) {
-
-            const dbBytes = pyodide.FS.readFile(modelInfo.sqlite_db);
-
-
-
-            const key = `model-sqlite-db:${modelInfo.model_id || modelInfo.filename || 'default'}`;
-            currentSqlKey = key;
-
-
-            // Clear any existing cached database first to ensure we use the new comprehensive one
-            try {
-              await idbDelete(key);
-
-            } catch (deleteError) {
-
-            }
-
-            await idbPut(key, dbBytes);
-
-
-
-            // Verify the storage worked
-            try {
-              const verifyBytes = await idbGet(key);
-              if (verifyBytes && verifyBytes.length === dbBytes.length) {
-
-              } else {
-
-
-              }
-            } catch (verifyError) {
-
-            }
-          } else {
-
-
-          }
-        } catch (e) {
-
-        }
-
-        // Clean up
-        namespace.destroy();
-
-        // Final progress update
-        self.postMessage({
-          type: "progress",
-          message: "File processed successfully!",
-          percentage: 100,
-          messageId,
-        });
-
-        // Send the result back
-        self.postMessage({
-          type: "loadComplete",
-          messageId,
-          ...modelInfo, // Spread the properties directly instead of nesting
-        });
-
-      } catch (pythonError) {
-
-        throw new Error(`Python error: ${pythonError.message}`);
-      }
-    } catch (fileProcessingError) {
-
-      throw fileProcessingError;
-    }
-  } catch (error) {
-
-    self.postMessage({
-      type: "error",
-      message: `Error loading IFC file: ${error.message}`,
-      stack: error.stack,
-      messageId,
-    });
   }
 }
 
@@ -2714,6 +2255,10 @@ try:
                 "id": mat.id()
             })
 
+    # Write the modified file back to the filesystem so export and other handlers can use it
+    file.write('model.ifc')
+    print(f"Wrote modified IFC file with {len(created_materials)} materials created")
+
     success = True
     error_msg = None
 except Exception as e:
@@ -3139,12 +2684,53 @@ async function handleWarmSqlite({ modelKey, messageId }) {
   }
 }
 
-// Fast path loader: parse IFC metadata and counts, then build SQLite in background
-async function handleLoadIfcFast({ arrayBuffer, filename, messageId }) {
+// Normalize IFC4X3 schema variants to IFC4X3_ADD2
+// Converts IFC4X3_RC1, IFC4X3_RC2, IFC4X3_RC3, etc. to IFC4X3_ADD2
+// This is required because ifcopenshell may not recognize older IFC4X3 schema variants
+// Optimized: Only scans first 10KB (header section) instead of entire file
+function normalizeIfc4x3Schema(uint8Array) {
+  try {
+    // Only scan header section (~first 10KB contains FILE_SCHEMA)
+    const headerSize = Math.min(10240, uint8Array.length);
+    const headerBytes = uint8Array.subarray(0, headerSize);
+    const headerText = new TextDecoder('utf-8').decode(headerBytes);
+    
+    const regex = /FILE_SCHEMA\s*\(\s*\(\s*'IFC4X3(?:_[A-Z0-9]+)?'\s*\)\s*\)/;
+    const match = headerText.match(regex);
+    
+    if (match) {
+      // Find position and replace in full array
+      const matchStart = headerText.indexOf(match[0]);
+      const replacement = "FILE_SCHEMA(('IFC4X3_ADD2'))";
+      const before = uint8Array.subarray(0, matchStart);
+      const after = uint8Array.subarray(matchStart + match[0].length);
+      const replacementBytes = new TextEncoder().encode(replacement);
+      
+      const result = new Uint8Array(before.length + replacementBytes.length + after.length);
+      result.set(before, 0);
+      result.set(replacementBytes, before.length);
+      result.set(after, before.length + replacementBytes.length);
+      
+      console.log("Schema normalization applied - converted IFC4X3 variant to IFC4X3_ADD2");
+      return result;
+    }
+    return uint8Array;
+  } catch (normalizationError) {
+    console.warn("Schema normalization failed, using original file:", normalizationError);
+    return uint8Array;
+  }
+}
+
+// Handle loading an IFC file: parse IFC metadata and counts, then build SQLite in background
+async function handleLoadIfc({ arrayBuffer, filename, messageId }) {
   try {
     await initPyodide();
 
-    const uint8Array = new Uint8Array(arrayBuffer);
+    let uint8Array = new Uint8Array(arrayBuffer);
+    
+    // Normalize IFC4X3 schema variants
+    uint8Array = normalizeIfc4x3Schema(uint8Array);
+    
     pyodide.FS.writeFile("model.ifc", uint8Array);
 
     const ns = pyodide.globals.get("dict")();
@@ -3163,280 +2749,102 @@ try:
       'Name': getattr(p,'Name', None) or 'Unnamed Project',
       'Description': getattr(p,'Description', None) or ''
     }
-  # FAST extraction of ALL elements from the IFC file
+  # Single-pass extraction using IfcOpenShell's efficient by_type()
   print("Python: Fast extraction of all IFC elements...")
-
-  # Get all elements in the model using by_type for better performance
+  
   all_elements = []
   element_counts = {}
-
-  # FULLY DYNAMIC: Only extract elements with geometric representation (no hardcoded classes!)
   
-  # Get all IfcProduct elements (physical elements that can have geometry)
-  all_products = f.by_type('IfcProduct')
+  # Essential spatial types to always include
+  SPATIAL_TYPES = ['IfcProject', 'IfcSite', 'IfcBuilding', 'IfcBuildingStorey', 
+                   'IfcSpace', 'IfcZone', 'IfcFacility', 'IfcFacilityPart']
   
-  # Always include essential spatial/project elements (they organize the model)
-  essential_spatial_types = {
-    'IFCPROJECT', 'IFCSITE', 'IFCBUILDING', 'IFCBUILDINGSTOREY', 
-    'IFCSPACE', 'IFCZONE', 'IFCFACILITY', 'IFCFACILITYPART'
-  }
-  
-  discovered_types = set()
-  
-  # Add essential spatial elements first
-  for element in f:
+  # Get products with geometry in one pass
+  products_with_geom = []
+  for e in f.by_type('IfcProduct'):
     try:
-      element_type = element.is_a()
-      if element_type.upper() in essential_spatial_types:
-        discovered_types.add(element_type)
+      if hasattr(e, 'Representation') and e.Representation is not None:
+        products_with_geom.append(e)
     except:
       continue
   
-  # Filter IfcProduct elements based on geometric representation (optimized for large models)
-  processed_count = 0
-  chunk_size = 100  # Process in chunks to avoid blocking
+  # Collect unique types from products with geometry
+  types_found = set(e.is_a() for e in products_with_geom)
   
-  for i, element in enumerate(all_products):
+  # Add spatial types that exist in the model
+  for spatial_type in SPATIAL_TYPES:
     try:
-      element_type = element.is_a()
-      
-      # Skip if already added as spatial element
-      if element_type.upper() in essential_spatial_types:
-        continue
-      
-      # Check if element has geometric representation
-      has_geometry = False
-      try:
-        if hasattr(element, 'Representation') and element.Representation is not None:
-          has_geometry = True
-      except Exception as geom_error:
-        # If we can't check geometry, assume no geometry
-        continue
-      
-      # Only add elements that have geometric representation
-      if has_geometry:
-        discovered_types.add(element_type)
-      
-      processed_count += 1
-      
-      # For large models, limit the discovery phase to avoid timeouts
-      if len(all_products) > 1000 and processed_count > 1000:
-        break
-        
-    except Exception as e:
+      spatial_elements = f.by_type(spatial_type)
+      if spatial_elements:
+        types_found.add(spatial_type)
+    except:
       continue
   
-  # Convert set to sorted list for consistent ordering
-  element_types_to_extract = sorted(list(discovered_types))
-
-  # Second pass: extract all elements by their discovered types
-  for element_type in element_types_to_extract:
+  # Extract elements by type (single iteration per type)
+  for element_type in sorted(types_found):
     try:
-      elements_of_type = f.by_type(element_type)
-      if elements_of_type:
-        element_counts[element_type] = len(elements_of_type)
-
-        # Process elements efficiently
-        for element in elements_of_type:
-          try:
-            # Create minimal element dictionary
-            element_dict = {
-              'expressId': element.id(),
-              'type': element_type,
-              'properties': {},
-              'psets': {},
-              'relationships': {}
-            }
-
-            # Extract only essential properties (fast)
-            if hasattr(element, 'GlobalId') and element.GlobalId:
-              element_dict['properties']['GlobalId'] = element.GlobalId
-            if hasattr(element, 'Name') and element.Name:
-              element_dict['properties']['Name'] = element.Name
-
-            # Extract Material Associations (Directly on element)
-            if hasattr(element, "HasAssociations") and element.HasAssociations:
-                associations = []
-                for assoc in element.HasAssociations:
-                    if assoc.is_a("IfcRelAssociatesMaterial"):
-                        rel_data = {"type": "IfcRelAssociatesMaterial"}
-                        if hasattr(assoc, "RelatingMaterial"):
-                            mat = assoc.RelatingMaterial
-                            rel_data["RelatingMaterial"] = {
-                                "Name": getattr(mat, "Name", None),
-                                "type": mat.is_a()
-                            }
-                            # Handle LayerSets/Constituents/Profiles
-                            if mat.is_a("IfcMaterialLayerSetUsage"):
-                                if hasattr(mat, "ForLayerSet"):
-                                    ls = mat.ForLayerSet
-                                    rel_data["RelatingMaterial"]["ForLayerSet"] = {
-                                        "LayerSetName": getattr(ls, "LayerSetName", None),
-                                        "MaterialLayers": []
-                                    }
-                                    if hasattr(ls, "MaterialLayers"):
-                                        for layer in ls.MaterialLayers:
-                                            layer_mat_name = getattr(layer.Material, "Name", None) if hasattr(layer, "Material") and layer.Material else "Unnamed"
-                                            rel_data["RelatingMaterial"]["ForLayerSet"]["MaterialLayers"].append({
-                                                "Material": {"Name": layer_mat_name},
-                                                "LayerThickness": getattr(layer, "LayerThickness", 0)
-                                            })
-                            elif mat.is_a("IfcMaterialLayerSet"):
-                                rel_data["RelatingMaterial"]["MaterialLayers"] = []
-                                if hasattr(mat, "MaterialLayers"):
-                                    for layer in mat.MaterialLayers:
-                                        layer_mat_name = getattr(layer.Material, "Name", None) if hasattr(layer, "Material") and layer.Material else "Unnamed"
-                                        rel_data["RelatingMaterial"]["MaterialLayers"].append({
-                                            "Material": {"Name": layer_mat_name},
-                                            "LayerThickness": getattr(layer, "LayerThickness", 0)
-                                        })
-                            elif mat.is_a("IfcMaterialConstituentSet"):
-                                rel_data["RelatingMaterial"]["MaterialConstituents"] = []
-                                if hasattr(mat, "MaterialConstituents"):
-                                    for const in mat.MaterialConstituents:
-                                        const_mat_name = getattr(const.Material, "Name", None) if hasattr(const, "Material") and const.Material else "Unnamed"
-                                        rel_data["RelatingMaterial"]["MaterialConstituents"].append({
-                                            "Material": {"Name": const_mat_name},
-                                            "Name": getattr(const, "Name", None),
-                                            "Fraction": getattr(const, "Fraction", None)
-                                        })
-                            elif mat.is_a("IfcMaterialProfileSet"):
-                                rel_data["RelatingMaterial"]["MaterialProfiles"] = []
-                                if hasattr(mat, "MaterialProfiles"):
-                                    for prof in mat.MaterialProfiles:
-                                        prof_mat_name = getattr(prof.Material, "Name", None) if hasattr(prof, "Material") and prof.Material else "Unnamed"
-                                        rel_data["RelatingMaterial"]["MaterialProfiles"].append({
-                                            "Material": {"Name": prof_mat_name},
-                                            "Name": getattr(prof, "Name", None)
-                                        })
-                            elif mat.is_a("IfcMaterialProfileSetUsage"):
-                                if hasattr(mat, "ForProfileSet"):
-                                    ps = mat.ForProfileSet
-                                    rel_data["RelatingMaterial"]["ForProfileSet"] = {
-                                        "Name": getattr(ps, "Name", None),
-                                        "MaterialProfiles": []
-                                    }
-                                    if hasattr(ps, "MaterialProfiles"):
-                                        for prof in ps.MaterialProfiles:
-                                            prof_mat_name = getattr(prof.Material, "Name", None) if hasattr(prof, "Material") and prof.Material else "Unnamed"
-                                            rel_data["RelatingMaterial"]["ForProfileSet"]["MaterialProfiles"].append({
-                                                "Material": {"Name": prof_mat_name},
-                                                "Name": getattr(prof, "Name", None)
-                                            })
-                        associations.append(rel_data)
-                if associations:
-                    element_dict['relationships']['HasAssociations'] = associations
-
-            # Extract Type Definition and Type-level Materials
-            if hasattr(element, "IsTypedBy") and element.IsTypedBy:
-                # IsTypedBy is a list/set of IfcRelDefinesByType
-                for rel in element.IsTypedBy:
-                    if rel.is_a("IfcRelDefinesByType"):
-                        relating_type = rel.RelatingType
-                        type_data = {
-                            "RelatingType": {
-                                "Name": getattr(relating_type, "Name", None),
-                                "type": relating_type.is_a(),
-                                "relationships": {}
-                            }
-                        }
-                        
-                        # Check for materials on the TYPE
-                        if hasattr(relating_type, "HasAssociations") and relating_type.HasAssociations:
-                            type_assocs = []
-                            for assoc in relating_type.HasAssociations:
-                                if assoc.is_a("IfcRelAssociatesMaterial"):
-                                    rel_data = {"type": "IfcRelAssociatesMaterial"}
-                                    if hasattr(assoc, "RelatingMaterial"):
-                                        mat = assoc.RelatingMaterial
-                                        rel_data["RelatingMaterial"] = {
-                                            "Name": getattr(mat, "Name", None),
-                                            "type": mat.is_a()
-                                        }
-                                        # Handle LayerSets/Constituents/Profiles on Type
-                                        if mat.is_a("IfcMaterialLayerSetUsage"):
-                                            if hasattr(mat, "ForLayerSet"):
-                                                ls = mat.ForLayerSet
-                                                rel_data["RelatingMaterial"]["ForLayerSet"] = {
-                                                    "LayerSetName": getattr(ls, "LayerSetName", None),
-                                                    "MaterialLayers": []
-                                                }
-                                                if hasattr(ls, "MaterialLayers"):
-                                                    for layer in ls.MaterialLayers:
-                                                        layer_mat_name = getattr(layer.Material, "Name", None) if hasattr(layer, "Material") and layer.Material else "Unnamed"
-                                                        rel_data["RelatingMaterial"]["ForLayerSet"]["MaterialLayers"].append({
-                                                            "Material": {"Name": layer_mat_name},
-                                                            "LayerThickness": getattr(layer, "LayerThickness", 0)
-                                                        })
-                                        elif mat.is_a("IfcMaterialLayerSet"):
-                                            rel_data["RelatingMaterial"]["MaterialLayers"] = []
-                                            if hasattr(mat, "MaterialLayers"):
-                                                for layer in mat.MaterialLayers:
-                                                    layer_mat_name = getattr(layer.Material, "Name", None) if hasattr(layer, "Material") and layer.Material else "Unnamed"
-                                                    rel_data["RelatingMaterial"]["MaterialLayers"].append({
-                                                        "Material": {"Name": layer_mat_name},
-                                                        "LayerThickness": getattr(layer, "LayerThickness", 0)
-                                                    })
-                                        elif mat.is_a("IfcMaterialConstituentSet"):
-                                            rel_data["RelatingMaterial"]["MaterialConstituents"] = []
-                                            if hasattr(mat, "MaterialConstituents"):
-                                                for const in mat.MaterialConstituents:
-                                                    const_mat_name = getattr(const.Material, "Name", None) if hasattr(const, "Material") and const.Material else "Unnamed"
-                                                    rel_data["RelatingMaterial"]["MaterialConstituents"].append({
-                                                        "Material": {"Name": const_mat_name},
-                                                        "Name": getattr(const, "Name", None),
-                                                        "Fraction": getattr(const, "Fraction", None)
-                                                    })
-                                        elif mat.is_a("IfcMaterialProfileSet"):
-                                            rel_data["RelatingMaterial"]["MaterialProfiles"] = []
-                                            if hasattr(mat, "MaterialProfiles"):
-                                                for prof in mat.MaterialProfiles:
-                                                    prof_mat_name = getattr(prof.Material, "Name", None) if hasattr(prof, "Material") and prof.Material else "Unnamed"
-                                                    rel_data["RelatingMaterial"]["MaterialProfiles"].append({
-                                                        "Material": {"Name": prof_mat_name},
-                                                        "Name": getattr(prof, "Name", None)
-                                                    })
-                                        elif mat.is_a("IfcMaterialProfileSetUsage"):
-                                            if hasattr(mat, "ForProfileSet"):
-                                                ps = mat.ForProfileSet
-                                                rel_data["RelatingMaterial"]["ForProfileSet"] = {
-                                                    "Name": getattr(ps, "Name", None),
-                                                    "MaterialProfiles": []
-                                                }
-                                                if hasattr(ps, "MaterialProfiles"):
-                                                    for prof in ps.MaterialProfiles:
-                                                        prof_mat_name = getattr(prof.Material, "Name", None) if hasattr(prof, "Material") and prof.Material else "Unnamed"
-                                                        rel_data["RelatingMaterial"]["ForProfileSet"]["MaterialProfiles"].append({
-                                                            "Material": {"Name": prof_mat_name},
-                                                            "Name": getattr(prof, "Name", None)
-                                                        })
-                                    type_assocs.append(rel_data)
-                            if type_assocs:
-                                type_data["RelatingType"]["relationships"]["HasAssociations"] = type_assocs
-                        
-                        element_dict['relationships']['IsTypedBy'] = type_data
-                        break # Usually only one type definition
-
-            # Add type-specific essential properties for common types
-            if element_type == 'IFCBUILDINGSTOREY' and hasattr(element, 'Elevation'):
-              element_dict['properties']['Elevation'] = element.Elevation
-            elif element_type == 'IFCPROJECT' and hasattr(element, 'LongName') and element.LongName:
-              element_dict['properties']['LongName'] = element.LongName
-            elif element_type == 'IFCSITE' and hasattr(element, 'RefLatitude'):
-              # Could add site-specific properties if needed
-              pass
-
-            all_elements.append(element_dict)
-
-          except Exception as e:
-            # Skip problematic elements but continue
-            continue
-
+      elements = f.by_type(element_type)
+      if not elements:
+        continue
+      
+      element_counts[element_type] = len(elements)
+      
+      for el in elements:
+        try:
+          element_dict = {
+            'expressId': el.id(),
+            'type': element_type,
+            'properties': {},
+            'psets': {},
+            'relationships': {}
+          }
+          
+          # Extract essential properties
+          if hasattr(el, 'GlobalId') and el.GlobalId:
+            element_dict['properties']['GlobalId'] = el.GlobalId
+          if hasattr(el, 'Name') and el.Name:
+            element_dict['properties']['Name'] = el.Name
+          
+          # Lightweight material reference (name only, not full structure)
+          if hasattr(el, 'HasAssociations') and el.HasAssociations:
+            for assoc in el.HasAssociations:
+              if assoc.is_a('IfcRelAssociatesMaterial'):
+                mat = getattr(assoc, 'RelatingMaterial', None)
+                if mat:
+                  element_dict['relationships']['material'] = {
+                    'name': getattr(mat, 'Name', None),
+                    'type': mat.is_a()
+                  }
+                break
+          
+          # Extract Type Definition (lightweight)
+          if hasattr(el, 'IsTypedBy') and el.IsTypedBy:
+            for rel in el.IsTypedBy:
+              if rel.is_a('IfcRelDefinesByType'):
+                relating_type = rel.RelatingType
+                element_dict['relationships']['IsTypedBy'] = {
+                  'RelatingType': {
+                    'Name': getattr(relating_type, 'Name', None),
+                    'type': relating_type.is_a()
+                  }
+                }
+                break
+          
+          # Add type-specific essential properties
+          if element_type == 'IfcBuildingStorey' and hasattr(el, 'Elevation'):
+            element_dict['properties']['Elevation'] = el.Elevation
+          elif element_type == 'IfcProject' and hasattr(el, 'LongName') and el.LongName:
+            element_dict['properties']['LongName'] = el.LongName
+          
+          all_elements.append(element_dict)
+          
+        except Exception as e:
+          # Skip problematic elements but continue
+          continue
+          
     except Exception as e:
       # Skip element types that don't exist
       continue
-
-  # Dynamic discovery complete
 
   result_obj = {
     'filename': '${filename}',
@@ -3499,7 +2907,7 @@ except Exception as e:
     }, 0);
   } catch (error) {
 
-    self.postMessage({ type: "error", message: `Error loading IFC (fast): ${error.message}`, messageId });
+    self.postMessage({ type: "error", message: `Error loading IFC file: ${error.message}`, messageId });
   }
 }
 
@@ -3525,22 +2933,13 @@ try:
     raise FileNotFoundError('model.ifc not found')
   f = ifcopenshell.open('model.ifc')
   if Patcher is None:
-    import ifcopenshell.ifcpatch
-    cfg = {
-      'input': 'model.ifc',
-      'file': None,
-      'recipe': 'Ifc2Sql',
-      'arguments': {
-        'sqlite_path': db_path,
-        'full_schema': True,
-        'should_get_psets': True,
-        'should_get_inverses': True,
-        'should_get_geometry': False,
-        'should_skip_geometry_data': True
-      }
-    }
-    ifcopenshell.ifcpatch.execute(cfg)
+    # NOTE: Skipping ifcopenshell.ifcpatch - it corrupts the WASM module
+    # Use ifcopenshell.sql directly instead
+    import ifcopenshell.sql
+    print("Python: Using ifcopenshell.sql for SQLite conversion")
+    db = ifcopenshell.sql.sqlite(db_path)
     success = os.path.exists(db_path)
+    print(f"Python: ifcopenshell.sql SQLite created: {success}")
   else:
     if os.path.exists(db_path):
       os.remove(db_path)
@@ -3597,5 +2996,129 @@ except Exception as e:
     if (messageId) {
       self.postMessage({ type: 'error', message: `Error building SQLite: ${error.message}`, messageId });
     }
+  }
+}
+
+// Get full material details for an element
+async function handleGetMaterialDetails({ elementId, expressId, messageId }) {
+  try {
+    await initPyodide();
+
+    if (!pyodide.FS.analyzePath('model.ifc').exists) {
+      throw new Error('Model file not found');
+    }
+
+    const ns = pyodide.globals.get("dict")();
+    await pyodide.runPythonAsync(
+      `
+import ifcopenshell, json
+try:
+  f = ifcopenshell.open('model.ifc')
+  
+  # Find element by expressId
+  element = f.by_id(${expressId})
+  
+  material_details = None
+  
+  # Extract full material associations
+  if hasattr(element, "HasAssociations") and element.HasAssociations:
+    for assoc in element.HasAssociations:
+      if assoc.is_a("IfcRelAssociatesMaterial"):
+        mat = getattr(assoc, "RelatingMaterial", None)
+        if mat:
+          material_details = {
+            "Name": getattr(mat, "Name", None),
+            "type": mat.is_a()
+          }
+          
+          # Extract full layer/constituent/profile details
+          if mat.is_a("IfcMaterialLayerSetUsage"):
+            if hasattr(mat, "ForLayerSet"):
+              ls = mat.ForLayerSet
+              material_details["ForLayerSet"] = {
+                "LayerSetName": getattr(ls, "LayerSetName", None),
+                "MaterialLayers": []
+              }
+              if hasattr(ls, "MaterialLayers"):
+                for layer in ls.MaterialLayers:
+                  layer_mat_name = getattr(layer.Material, "Name", None) if hasattr(layer, "Material") and layer.Material else "Unnamed"
+                  material_details["ForLayerSet"]["MaterialLayers"].append({
+                    "Material": {"Name": layer_mat_name},
+                    "LayerThickness": getattr(layer, "LayerThickness", 0)
+                  })
+          elif mat.is_a("IfcMaterialLayerSet"):
+            material_details["MaterialLayers"] = []
+            if hasattr(mat, "MaterialLayers"):
+              for layer in mat.MaterialLayers:
+                layer_mat_name = getattr(layer.Material, "Name", None) if hasattr(layer, "Material") and layer.Material else "Unnamed"
+                material_details["MaterialLayers"].append({
+                  "Material": {"Name": layer_mat_name},
+                  "LayerThickness": getattr(layer, "LayerThickness", 0)
+                })
+          elif mat.is_a("IfcMaterialConstituentSet"):
+            material_details["MaterialConstituents"] = []
+            if hasattr(mat, "MaterialConstituents"):
+              for const in mat.MaterialConstituents:
+                const_mat_name = getattr(const.Material, "Name", None) if hasattr(const, "Material") and const.Material else "Unnamed"
+                material_details["MaterialConstituents"].append({
+                  "Material": {"Name": const_mat_name},
+                  "Name": getattr(const, "Name", None),
+                  "Fraction": getattr(const, "Fraction", None)
+                })
+          elif mat.is_a("IfcMaterialProfileSet"):
+            material_details["MaterialProfiles"] = []
+            if hasattr(mat, "MaterialProfiles"):
+              for prof in mat.MaterialProfiles:
+                prof_mat_name = getattr(prof.Material, "Name", None) if hasattr(prof, "Material") and prof.Material else "Unnamed"
+                material_details["MaterialProfiles"].append({
+                  "Material": {"Name": prof_mat_name},
+                  "Name": getattr(prof, "Name", None)
+                })
+          elif mat.is_a("IfcMaterialProfileSetUsage"):
+            if hasattr(mat, "ForProfileSet"):
+              ps = mat.ForProfileSet
+              material_details["ForProfileSet"] = {
+                "Name": getattr(ps, "Name", None),
+                "MaterialProfiles": []
+              }
+              if hasattr(ps, "MaterialProfiles"):
+                for prof in ps.MaterialProfiles:
+                  prof_mat_name = getattr(prof.Material, "Name", None) if hasattr(prof, "Material") and prof.Material else "Unnamed"
+                  material_details["ForProfileSet"]["MaterialProfiles"].append({
+                    "Material": {"Name": prof_mat_name},
+                    "Name": getattr(prof, "Name", None)
+                  })
+          break
+  
+  result_json = json.dumps(material_details) if material_details else json.dumps(None)
+  success = True
+except Exception as e:
+  result_json = json.dumps(None)
+  error_msg = str(e)
+  success = False
+      `,
+      { globals: ns }
+    );
+
+    const ok = ns.get("success");
+    if (!ok) {
+      const em = ns.get("error_msg") || "Unknown error";
+      throw new Error(String(em));
+    }
+    
+    const materialDetails = JSON.parse(ns.get("result_json"));
+    ns.destroy();
+
+    self.postMessage({
+      type: "materialDetails",
+      messageId,
+      materialDetails,
+    });
+  } catch (error) {
+    self.postMessage({
+      type: "error",
+      message: `Error getting material details: ${error.message}`,
+      messageId,
+    });
   }
 }
