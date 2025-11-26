@@ -2805,16 +2805,75 @@ try:
           if hasattr(el, 'Name') and el.Name:
             element_dict['properties']['Name'] = el.Name
           
-          # Lightweight material reference (name only, not full structure)
+          # Extract material information with support for composite materials
           if hasattr(el, 'HasAssociations') and el.HasAssociations:
             for assoc in el.HasAssociations:
               if assoc.is_a('IfcRelAssociatesMaterial'):
                 mat = getattr(assoc, 'RelatingMaterial', None)
                 if mat:
-                  element_dict['relationships']['material'] = {
+                  mat_info = {
                     'name': getattr(mat, 'Name', None),
-                    'type': mat.is_a()
+                    'type': mat.is_a(),
+                    'components': []
                   }
+                  
+                  # Handle different material types
+                  if mat.is_a('IfcMaterialLayerSetUsage') and hasattr(mat, 'ForLayerSet'):
+                    layer_set = mat.ForLayerSet
+                    if layer_set and hasattr(layer_set, 'MaterialLayers') and layer_set.MaterialLayers:
+                      mat_info['name'] = getattr(layer_set, 'LayerSetName', None) or 'Layer Set'
+                      for layer in layer_set.MaterialLayers:
+                        if hasattr(layer, 'Material') and layer.Material:
+                          mat_info['components'].append({
+                            'name': getattr(layer.Material, 'Name', 'Unnamed'),
+                            'thickness': getattr(layer, 'LayerThickness', None)
+                          })
+                  elif mat.is_a('IfcMaterialLayerSet') and hasattr(mat, 'MaterialLayers'):
+                    mat_info['name'] = getattr(mat, 'LayerSetName', None) or 'Layer Set'
+                    for layer in mat.MaterialLayers:
+                      if hasattr(layer, 'Material') and layer.Material:
+                        mat_info['components'].append({
+                          'name': getattr(layer.Material, 'Name', 'Unnamed'),
+                          'thickness': getattr(layer, 'LayerThickness', None)
+                        })
+                  elif mat.is_a('IfcMaterialConstituentSet') and hasattr(mat, 'MaterialConstituents'):
+                    mat_info['name'] = getattr(mat, 'Name', None) or 'Constituent Set'
+                    for const in mat.MaterialConstituents:
+                      if hasattr(const, 'Material') and const.Material:
+                        mat_info['components'].append({
+                          'name': getattr(const.Material, 'Name', 'Unnamed'),
+                          'fraction': getattr(const, 'Fraction', None)
+                        })
+                  elif mat.is_a('IfcMaterialProfileSetUsage') and hasattr(mat, 'ForProfileSet'):
+                    profile_set = mat.ForProfileSet
+                    if profile_set and hasattr(profile_set, 'MaterialProfiles'):
+                      mat_info['name'] = getattr(profile_set, 'Name', None) or 'Profile Set'
+                      for prof in profile_set.MaterialProfiles:
+                        if hasattr(prof, 'Material') and prof.Material:
+                          mat_info['components'].append({
+                            'name': getattr(prof.Material, 'Name', 'Unnamed')
+                          })
+                  elif mat.is_a('IfcMaterialProfileSet') and hasattr(mat, 'MaterialProfiles'):
+                    mat_info['name'] = getattr(mat, 'Name', None) or 'Profile Set'
+                    for prof in mat.MaterialProfiles:
+                      if hasattr(prof, 'Material') and prof.Material:
+                        mat_info['components'].append({
+                          'name': getattr(prof.Material, 'Name', 'Unnamed')
+                        })
+                  
+                  # Create readable name from components if no name set
+                  if not mat_info['name'] and mat_info['components']:
+                    comp_names = [c['name'] for c in mat_info['components'] if c.get('name') and c['name'] != 'Unnamed']
+                    if len(comp_names) > 3:
+                      mat_info['name'] = f"{comp_names[0]} + {len(comp_names) - 1} more"
+                    elif comp_names:
+                      mat_info['name'] = ' + '.join(comp_names)
+                    else:
+                      mat_info['name'] = 'Unknown Material'
+                  elif not mat_info['name']:
+                    mat_info['name'] = 'Unknown Material'
+                  
+                  element_dict['relationships']['material'] = mat_info
                 break
           
           # Extract Type Definition (lightweight)

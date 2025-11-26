@@ -866,7 +866,40 @@ export class WorkflowExecutor {
               }
             }
 
-            // Check for material in relationships
+            // Check for simplified material reference from ifcWorker (element.relationships.material)
+            if (!materialInfo && element.relationships && element.relationships.material) {
+              const mat = element.relationships.material;
+              if (mat.name) {
+                // Build composite name from components if available
+                let displayName = mat.name;
+                let fullComposition = undefined;
+                
+                if (mat.components && mat.components.length > 0) {
+                  const compNames = mat.components
+                    .map((c: any) => c.name)
+                    .filter((n: string) => n && n !== "Unnamed");
+                  
+                  if (compNames.length > 0) {
+                    fullComposition = compNames.join(" + ");
+                    if (compNames.length > 3) {
+                      displayName = `${compNames[0]} + ${compNames.length - 1} others`;
+                    } else if (!displayName || displayName === "Layer Set" || displayName === "Constituent Set" || displayName === "Profile Set") {
+                      displayName = compNames.join(" + ");
+                    }
+                  }
+                }
+                
+                materialInfo = {
+                  name: displayName,
+                  type: mat.type || "IfcMaterial",
+                  source: "relationship",
+                  components: mat.components || [],
+                  fullComposition
+                };
+              }
+            }
+
+            // Check for material in relationships (legacy/full IFC structure)
             if (!materialInfo && element.relationships && element.relationships.HasAssociations) {
               const materialAssoc = element.relationships.HasAssociations.find(
                 (assoc: any) => assoc.type === "IfcRelAssociatesMaterial"

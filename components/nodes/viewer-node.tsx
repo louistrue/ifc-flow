@@ -32,10 +32,10 @@ export const ViewerNode = memo(
     const { setNodes } = useReactFlow();
     const { focusedViewerId, setFocusedViewerId } = useViewerFocus();
 
-    // Default sizes with fallback values
-    const width = data.width || 220;
-    const height = data.height || 200;
-    const viewerHeight = Math.max(height - 60, 100); // Subtract space for header and footer
+    // Default sizes with fallback values (larger for better 3D viewing)
+    const width = data.width || 440;
+    const height = data.height || 400;
+    const viewerHeight = Math.max(height - 60, 200); // Subtract space for header and footer
 
     // Check if this viewer is in focus mode
     const isInFocusMode = focusedViewerId === id;
@@ -95,8 +95,8 @@ export const ViewerNode = memo(
         const startHeight = height;
 
         const onMouseMove = (e: MouseEvent) => {
-          const newWidth = Math.max(180, startWidth + e.clientX - startX);
-          const newHeight = Math.max(150, startHeight + e.clientY - startY);
+          const newWidth = Math.max(280, startWidth + e.clientX - startX);
+          const newHeight = Math.max(250, startHeight + e.clientY - startY);
 
           setNodes((nodes) =>
             nodes.map((node) => {

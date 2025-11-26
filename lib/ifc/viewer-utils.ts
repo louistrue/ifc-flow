@@ -435,7 +435,8 @@ export class IfcViewer {
     const fov = this.camera.fov * (Math.PI / 180);
     let cameraDistance = Math.abs(maxDim / (2 * Math.tan(fov / 2)));
     const sizeLength = size.length();
-    cameraDistance = Math.max(cameraDistance * 1.6, sizeLength * 0.6, 1);
+    // Tighter fit - model fills more of the viewport
+    cameraDistance = Math.max(cameraDistance * 1.1, sizeLength * 0.45, 1);
 
     if (!Number.isFinite(cameraDistance)) {
       console.warn("Calculated infinite camera distance. Resetting camera.");
