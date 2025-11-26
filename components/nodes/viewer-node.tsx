@@ -32,6 +32,17 @@ export const ViewerNode = memo(
     const { setNodes } = useReactFlow();
     const { focusedViewerId, setFocusedViewerId } = useViewerFocus();
 
+    const getViewerBackgroundColor = useCallback(() => {
+      if (typeof window === "undefined") return "#e8ecf0";
+
+      const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+      const hasDarkClass =
+        document.documentElement.classList.contains("dark") ||
+        !!viewerRef.current?.closest(".dark");
+
+      return prefersDark || hasDarkClass ? "#0b1120" : "#e8ecf0"; // Deep slate for dark mode
+    }, []);
+
     // Default sizes with fallback values (larger for better 3D viewing)
     const width = data.width || 440;
     const height = data.height || 400;
@@ -131,9 +142,11 @@ export const ViewerNode = memo(
     useEffect(() => {
       if (!viewerRef.current) return;
 
+      const initialBackgroundColor = getViewerBackgroundColor();
+
       // Create a new viewer instance with improved visuals
       const newViewer = new IfcViewer(viewerRef.current, {
-        backgroundColor: "#e8ecf0", // Soft neutral background for better contrast
+        backgroundColor: initialBackgroundColor, // Theme-aware background
         showGrid: false,
         showAxes: false,
       });
@@ -151,7 +164,33 @@ export const ViewerNode = memo(
         }
         setViewer(null);
       };
-    }, []);
+    }, [getViewerBackgroundColor, id]);
+
+    // Keep viewer background in sync with theme changes
+    useEffect(() => {
+      if (!viewer) return;
+
+      const applyBackground = () => {
+        const background = getViewerBackgroundColor();
+        viewer.setBackgroundColor(background);
+      };
+
+      applyBackground();
+
+      const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+      mediaQuery.addEventListener("change", applyBackground);
+
+      const observer = new MutationObserver(applyBackground);
+      observer.observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ["class"],
+      });
+
+      return () => {
+        mediaQuery.removeEventListener("change", applyBackground);
+        observer.disconnect();
+      };
+    }, [getViewerBackgroundColor, viewer]);
 
     // Update viewer when size changes
     useEffect(() => {

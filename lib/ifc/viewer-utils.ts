@@ -63,7 +63,7 @@ export class IfcViewer {
     this.camera.lookAt(0, 0, 0); // Look at origin initially
 
     // Set up renderer with better quality settings
-    this.renderer = new THREE.WebGLRenderer({ 
+    this.renderer = new THREE.WebGLRenderer({
       antialias: true,
       alpha: false,
       powerPreference: "high-performance"
@@ -73,6 +73,7 @@ export class IfcViewer {
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.0;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.renderer.setClearColor(new THREE.Color(bgColor));
     container.appendChild(this.renderer.domElement);
 
     // Set up controls
@@ -126,6 +127,11 @@ export class IfcViewer {
 
     // Handle window resize
     window.addEventListener("resize", this.handleResize);
+  }
+
+  setBackgroundColor(color: string) {
+    this.scene.background = new THREE.Color(color);
+    this.renderer.setClearColor(new THREE.Color(color));
   }
 
   // Initialize IfcAPI for web-ifc
