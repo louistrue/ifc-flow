@@ -988,6 +988,35 @@ async function handleExportIfc(data) {
             
             print(f"Found {len(property_changes)} elements with property changes")
             
+            # Check for GUID changes from Python script (GUID cleaning)
+            guid_changes_count = 0
+            for element_data in model_data['elements']:
+                express_id = element_data.get('expressId')
+                new_guid = element_data.get('properties', {}).get('GlobalId')
+                
+                if express_id and new_guid:
+                    # Find element by express ID
+                    element = all_entities_by_id.get(express_id)
+                    if element and hasattr(element, 'GlobalId'):
+                        old_guid = element.GlobalId
+                        # Check if GUID changed (Python script cleaned it)
+                        if old_guid != new_guid:
+                            try:
+                                element.GlobalId = new_guid
+                                guid_changes_count += 1
+                                if guid_changes_count <= 3:
+                                    print(f"🔄 Updated GUID for {element.is_a()} (expressId: {express_id}): {old_guid[:8]}... -> {new_guid[:8]}...")
+                                # Update lookup table if it's a product
+                                if element.is_a('IfcProduct'):
+                                    all_products_by_guid[new_guid] = element
+                                    if old_guid in all_products_by_guid:
+                                        del all_products_by_guid[old_guid]
+                            except Exception as e:
+                                print(f"Error updating GUID for element {express_id}: {e}")
+            
+            if guid_changes_count > 0:
+                print(f"✓ Successfully updated {guid_changes_count} GUIDs")
+            
             # Apply the property changes to the IFC file
             for element_id, change in property_changes.items():
                 try:
