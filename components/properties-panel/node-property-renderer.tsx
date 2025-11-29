@@ -4,8 +4,8 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { useEffect, useState } from "react";
-import { getModelPropertyNames } from "@/lib/ifc-utils";
+import { useEffect, useState, useRef } from "react";
+import { getModelPropertyNames, getModelPsets, getModelPsetsFromSqlite, getModelPropertiesFromSqlite, getModelPropertiesForPsetFromSqlite, getSqliteWarmStatus, getLastLoadedModel } from "@/lib/ifc-utils";
 import {
   Select,
   SelectContent,
@@ -13,6 +13,21 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { Check, ChevronsUpDown } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { DataTransformEditor } from "./property-editors/data-transform-editor";
 
 interface NodePropertyRendererProps {
@@ -27,10 +42,92 @@ export function NodePropertyRenderer({
   setProperties,
 }: NodePropertyRendererProps) {
   const [modelProps, setModelProps] = useState<string[]>([]);
+  const [modelPsets, setModelPsets] = useState<string[]>([]);
+  const [sqliteReady, setSqliteReady] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const lastStatusRef = useRef<string>('');
 
+  // Check SQLite status and load data when ready
   useEffect(() => {
-    setModelProps(getModelPropertyNames());
-  }, []);
+    let mounted = true;
+    let loadingTimeout: NodeJS.Timeout | null = null;
+
+    const loadData = async (forceReload = false) => {
+      if (!mounted) return;
+
+      const model = getLastLoadedModel();
+      const status = model ? getSqliteWarmStatus(model) : 'idle';
+
+      // Skip if status hasn't changed and not forced
+      if (!forceReload && status === lastStatusRef.current) {
+        return;
+      }
+      lastStatusRef.current = status;
+
+      // Only query SQLite if it's ready
+      if (status === 'ready') {
+        setSqliteReady(true);
+        setIsLoading(true);
+
+        // Try to load from SQLite
+        const psets = await getModelPsetsFromSqlite();
+        if (!mounted) return;
+
+        if (psets.length > 0) {
+          setModelPsets(psets);
+        } else {
+          setModelPsets(getModelPsets());
+        }
+
+        // Fetch properties based on selected Pset
+        let props: string[] = [];
+        if (properties.targetPset && properties.targetPset !== "any" && properties.targetPset !== "CustomProperties") {
+          // When a specific pset is selected, ONLY show properties from that pset
+          props = await getModelPropertiesForPsetFromSqlite(undefined, properties.targetPset);
+          if (!mounted) return;
+          setModelProps(props.length > 0 ? props : []);
+        } else {
+          // If no specific pset selected, fetch all properties
+          props = await getModelPropertiesFromSqlite();
+          if (!mounted) return;
+          if (props.length > 0) {
+            setModelProps(props);
+          } else {
+            setModelProps(getModelPropertyNames());
+          }
+        }
+
+        if (mounted) setIsLoading(false);
+      } else {
+        // SQLite not ready - use in-memory fallback for now
+        setSqliteReady(false);
+        setIsLoading(false);
+        setModelPsets(getModelPsets());
+        setModelProps(getModelPropertyNames());
+      }
+    };
+
+    // Initial load
+    loadData(true);
+
+    // Debounced handler for events
+    const handleSqliteEvent = () => {
+      if (loadingTimeout) clearTimeout(loadingTimeout);
+      loadingTimeout = setTimeout(() => {
+        loadData(false);
+      }, 100);
+    };
+
+    window.addEventListener('sqlite:ready', handleSqliteEvent);
+    window.addEventListener('sqlite:warmStatus', handleSqliteEvent);
+
+    return () => {
+      mounted = false;
+      if (loadingTimeout) clearTimeout(loadingTimeout);
+      window.removeEventListener('sqlite:ready', handleSqliteEvent);
+      window.removeEventListener('sqlite:warmStatus', handleSqliteEvent);
+    };
+  }, [node, properties.targetPset]);
   // Return null for ifcNode type to prevent properties panel from rendering anything
   if (node.type === "ifcNode") {
     return null;
@@ -544,39 +641,48 @@ export function NodePropertyRenderer({
 
           {properties.source !== "attribute" && (
             <div className="space-y-2">
-              <Label htmlFor="targetPset">Property Set</Label>
-              <Select
-                value={properties.targetPset || ""}
-                onValueChange={(value) =>
-                  setProperties({ ...properties, targetPset: value })
-                }
-              >
-                <SelectTrigger id="targetPset">
-                  <SelectValue placeholder="Select property set" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="any">Any Property Set</SelectItem>
-                  <SelectItem value="Pset_WallCommon">Pset_WallCommon</SelectItem>
-                  <SelectItem value="Pset_BeamCommon">Pset_BeamCommon</SelectItem>
-                  <SelectItem value="Pset_SlabCommon">Pset_SlabCommon</SelectItem>
-                  <SelectItem value="Pset_ColumnCommon">
-                    Pset_ColumnCommon
-                  </SelectItem>
-                  <SelectItem value="Pset_WindowCommon">
-                    Pset_WindowCommon
-                  </SelectItem>
-                  <SelectItem value="Pset_DoorCommon">Pset_DoorCommon</SelectItem>
-                  <SelectItem value="Pset_BuildingCommon">
-                    Pset_BuildingCommon
-                  </SelectItem>
-                  <SelectItem value="Pset_SpaceCommon">
-                    Pset_SpaceCommon
-                  </SelectItem>
-                  <SelectItem value="CustomProperties">
-                    CustomProperties
-                  </SelectItem>
-                </SelectContent>
-              </Select>
+              <Label htmlFor="targetPset">
+                Property Set
+                {isLoading && <span className="ml-2 text-xs text-muted-foreground">(loading...)</span>}
+                {!isLoading && !sqliteReady && <span className="ml-2 text-xs text-amber-500">(building database...)</span>}
+              </Label>
+              {(properties.action || "get") === "get" ? (
+                <SearchableSelect
+                  value={properties.targetPset || ""}
+                  onChange={(value) =>
+                    setProperties({ ...properties, targetPset: value })
+                  }
+                  options={[
+                    "any",
+                    "CustomProperties",
+                    ...modelPsets.filter(p => p !== "CustomProperties")
+                  ]}
+                  placeholder={isLoading ? "Loading property sets..." : "Select property set..."}
+                  disabled={isLoading}
+                />
+              ) : (
+                <Select
+                  value={properties.targetPset || ""}
+                  onValueChange={(value) =>
+                    setProperties({ ...properties, targetPset: value })
+                  }
+                >
+                  <SelectTrigger id="targetPset">
+                    <SelectValue placeholder="Select property set" />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-[400px] overflow-y-auto">
+                    <SelectItem value="any">Any Property Set</SelectItem>
+                    {modelPsets.map((pset) => (
+                      <SelectItem key={pset} value={pset}>
+                        {pset}
+                      </SelectItem>
+                    ))}
+                    <SelectItem value="CustomProperties">
+                      CustomProperties
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
               <div className="text-xs text-muted-foreground">
                 For "get" action: Where to look for the property (optional). For
                 "set/add" actions: Where to add the property.
@@ -607,18 +713,33 @@ export function NodePropertyRenderer({
               </Select>
             ) : (
               <>
-                <Input
-                  id="propertyName"
-                  value={properties.propertyName || ""}
-                  onChange={(e) =>
-                    setProperties({
-                      ...properties,
-                      propertyName: e.target.value,
-                    })
-                  }
-                  placeholder="e.g. IsExternal, FireRating"
-                />
-                <div className="text-xs text-muted-foreground">
+                {(properties.action || "get") === "get" ? (
+                  <SearchableSelect
+                    value={properties.propertyName || ""}
+                    onChange={(value) =>
+                      setProperties({
+                        ...properties,
+                        propertyName: value,
+                      })
+                    }
+                    options={modelProps}
+                    placeholder={isLoading ? "Loading properties..." : "Select property..."}
+                    disabled={isLoading}
+                  />
+                ) : (
+                  <Input
+                    id="propertyName"
+                    value={properties.propertyName || ""}
+                    onChange={(e) =>
+                      setProperties({
+                        ...properties,
+                        propertyName: e.target.value,
+                      })
+                    }
+                    placeholder="e.g. IsExternal, FireRating"
+                  />
+                )}
+                <div className="text-xs text-muted-foreground mt-1">
                   Common properties: IsExternal, FireRating, LoadBearing,
                   ThermalTransmittance
                 </div>
@@ -1234,4 +1355,71 @@ export function NodePropertyRenderer({
         </div>
       );
   }
+}
+
+function SearchableSelect({
+  value,
+  onChange,
+  options,
+  placeholder = "Select...",
+  emptyMessage = "No results found.",
+  disabled = false,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  options: string[];
+  placeholder?: string;
+  emptyMessage?: string;
+  disabled?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          className="w-full justify-between font-normal"
+          disabled={disabled}
+        >
+          {value ? (
+            <span className="truncate">{value}</span>
+          ) : (
+            <span className="text-muted-foreground">{placeholder}</span>
+          )}
+          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[300px] p-0 max-h-[400px] overflow-hidden" align="start">
+        <Command className="max-h-[400px]">
+          <CommandInput placeholder={`Search ${placeholder.toLowerCase()}...`} />
+          <CommandList className="max-h-[350px] overflow-y-auto">
+            <CommandEmpty>{emptyMessage}</CommandEmpty>
+            <CommandGroup>
+              {options.map((option) => (
+                <CommandItem
+                  key={option}
+                  value={option}
+                  onSelect={() => {
+                    onChange(option === value ? "" : option);
+                    setOpen(false);
+                  }}
+                >
+                  <Check
+                    className={cn(
+                      "mr-2 h-4 w-4",
+                      value === option ? "opacity-100" : "opacity-0"
+                    )}
+                  />
+                  <span className="truncate">{option}</span>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
 }

@@ -36,7 +36,16 @@ import ifcopenshell.util.placement
 import ifcopenshell.util.schema
 import ifcopenshell.util.shape
 import ifcopenshell.util.unit
-import ifcpatch
+# Make ifcpatch import optional for WASM compatibility
+try:
+    import ifcpatch
+    BasePatcher = ifcpatch.BasePatcher
+except ImportError:
+    # Stub BasePatcher for WASM where ifcpatch is not available
+    class BasePatcher:
+        def __init__(self, file, logger=None):
+            self.file = file
+            self.logger = logger
 from pathlib import Path
 from typing import Any, TYPE_CHECKING, Literal, Union
 from typing_extensions import assert_never
@@ -64,7 +73,7 @@ else:
 DEFAULT_DATABASE_NAME = "database"
 
 
-class Patcher(ifcpatch.BasePatcher):
+class Patcher(BasePatcher):
     def __init__(
         self,
         file: ifcopenshell.file,
@@ -669,18 +678,18 @@ class Patcher(ifcpatch.BasePatcher):
 
     def get_permutations(self, lst: list[Any], indexes: list[int]) -> list[Any]:
         """
-        Original row (`lst`):
-        \`\`\`
+        Original row (lst):
+        ```
         ifc_id, x, (a, b), (c,d)
-        \`\`\`
+        ```
 
         Resulting permutations:
-        \`\`\`
+        ```
         ifc_id, x, a, c
         ifc_id, x, a, d
         ifc_id, x, b, c
         ifc_id, x, b, d
-        \`\`\`
+        ```
         """
         nested_lists = [lst[i] for i in indexes]
 

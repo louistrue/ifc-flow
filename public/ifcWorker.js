@@ -350,16 +350,23 @@ async function initPyodide() {
       sqlite_databases = {}
     `);
 
-    // NOTE: We intentionally skip installing ifcpatch here.
-    // ifcpatch corrupts the ifcopenshell WASM module when imported, causing
-    // "'function' object has no attribute 'file_schema'" errors.
-    // The SQLite conversion will use ifcopenshell.sql directly instead.
-    
-    // Patcher will be None - SQLite conversion will use fallback methods
-    await pyodide.runPythonAsync(`
+    // Load ifc2sql.py Patcher (modified to work without ifcpatch)
+    try {
+      const ifc2sqlCode = await ensureIfc2sqlPyCode();
+      // Write to Pyodide filesystem and execute
+      pyodide.FS.writeFile('/ifc2sql.py', ifc2sqlCode);
+      await pyodide.runPythonAsync(`
+exec(open('/ifc2sql.py').read())
+print('✅ Loaded ifc2sql.py Patcher (ifcpatch-free mode)')
+      `);
+    } catch (e) {
+      console.warn('Failed to load ifc2sql.py Patcher:', e);
+      // Fallback: set Patcher to None
+      await pyodide.runPythonAsync(`
 Patcher = None
-print('Skipping ifc2sql.py Patcher (ifcpatch not compatible with WASM)')
-    `);
+print('⚠️ Using fallback SQLite conversion (ifc2sql.py not available)')
+      `);
+    }
 
     self.postMessage({
       type: "progress",
@@ -2985,11 +2992,13 @@ except Exception as e:
 
     // Background build of comprehensive SQLite for ALL models (non-blocking)
     try { postSqliteStatus('building', result.model_id || result.filename, {}); } catch { }
+    console.log('Starting background SQLite build...');
     setTimeout(async () => {
       try {
         await handleBuildSqlite({ modelKey: result.model_id || result.filename, dbKey });
+        console.log('SQLite build completed successfully');
       } catch (e) {
-
+        console.error('SQLite build failed:', e.message);
         try { postSqliteStatus('error', result.model_id || result.filename, { message: e.message }); } catch { }
       }
     }, 0);
@@ -3009,10 +3018,16 @@ async function handleBuildSqlite({ modelKey, dbKey, messageId }) {
     await pyodide.runPythonAsync(
       `
 import os, sqlite3, json
+  # Load Patcher from ifc2sql.py file (it's already in filesystem from initPyodide)
 try:
-  from ifc2sql import Patcher
-except Exception:
-  Patcher = globals().get('Patcher', None)
+  # Execute the file to load Patcher class into current namespace
+  exec(open('/ifc2sql.py').read(), globals())
+  # Verify Patcher is available
+  if 'Patcher' not in globals():
+    raise Exception('Patcher class not found after loading ifc2sql.py')
+except Exception as import_err:
+  raise Exception(f'Patcher not available: {import_err}')
+
 success = False
 db_path = '/model.db'
 try:
@@ -3021,13 +3036,7 @@ try:
     raise FileNotFoundError('model.ifc not found')
   f = ifcopenshell.open('model.ifc')
   if Patcher is None:
-    # NOTE: Skipping ifcopenshell.ifcpatch - it corrupts the WASM module
-    # Use ifcopenshell.sql directly instead
-    import ifcopenshell.sql
-    print("Python: Using ifcopenshell.sql for SQLite conversion")
-    db = ifcopenshell.sql.sqlite(db_path)
-    success = os.path.exists(db_path)
-    print(f"Python: ifcopenshell.sql SQLite created: {success}")
+    raise Exception('Patcher not available - ifc2sql.py failed to load')
   else:
     if os.path.exists(db_path):
       os.remove(db_path)
@@ -3064,7 +3073,9 @@ except Exception as e:
     );
     const pyRes = JSON.parse(ns.get("result"));
     ns.destroy();
-    if (!pyRes.success) throw new Error(pyRes.error || 'SQLite build failed');
+    if (!pyRes.success) {
+      throw new Error(pyRes.error || 'SQLite build failed');
+    }
 
     // If a duplicate exists under dbKey, skip storing/building
     const dbBytes = pyodide.FS.readFile(pyRes.db_path);

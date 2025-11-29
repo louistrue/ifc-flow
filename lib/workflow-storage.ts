@@ -103,251 +103,214 @@ export class WorkflowStorage {
     return false;
   }
 
-  // Generate a thumbnail from flow data (client-only, renders offscreen ReactFlow)
+  // Generate a thumbnail from flow data using Canvas (simple and reliable)
   async generateThumbnail(flowData: any): Promise<string> {
-    const placeholder = "/placeholder.svg?height=200&width=300";
-    if (typeof window === 'undefined') return placeholder;
+    if (typeof window === 'undefined') return '';
 
     try {
       const hasNodes = Array.isArray(flowData?.nodes) && flowData.nodes.length > 0;
       const hasEdges = Array.isArray(flowData?.edges);
-      if (!hasNodes) return placeholder;
+      if (!hasNodes) return '';
 
-      const [{ toPng }, React, ReactDOMClient, ReactFlowModule, nodesModule] = await Promise.all([
-        import('html-to-image'),
-        import('react'),
-        import('react-dom/client'),
-        import('reactflow'),
-        import('@/components/nodes'),
-      ]);
-
-      const nodeTypes = (nodesModule as any).nodeTypes || undefined;
-      const ReactFlowComponent = (ReactFlowModule as any).default;
-      const Background = (ReactFlowModule as any).Background;
-      const ReactFlowProvider = (ReactFlowModule as any).ReactFlowProvider;
-
-      // Simplify nodes to avoid heavy custom renderers during thumbnailing
-      const thumbnailNodes = (flowData.nodes as any[]).map((n: any) => ({
-        id: n.id,
-        type: 'default',
-        position: n.position,
-        style: { width: 140, height: 44 },
-        data: { label: n.data?.label ?? n.type ?? 'Node' },
-      }));
-      const thumbnailEdges = (hasEdges ? flowData.edges : []).map((e: any, idx: number) => ({
-        id: e.id ?? `e-${idx}`,
-        source: e.source,
-        target: e.target,
-        label: e.label,
-        type: e.type,
-      }));
-
-      // Offscreen container
       const width = 300;
       const height = 200;
-      const container = document.createElement('div');
-      container.style.position = 'fixed';
-      container.style.top = '-10000px';
-      container.style.left = '-10000px';
-      container.style.width = `${width}px`;
-      container.style.height = `${height}px`;
-      container.style.pointerEvents = 'none';
-      container.style.background = 'white';
-      document.body.appendChild(container);
-
-      const root = (ReactDOMClient as any).createRoot(container);
-
-      const onInit = (instance: any) => {
-        try {
-          if (flowData?.viewport) {
-            instance.setViewport?.(flowData.viewport);
-          } else {
-            instance.fitView?.({ padding: 0.15, duration: 0 });
-          }
-        } catch { }
-      };
-
-      // Precompute viewport to avoid blank captures
-      let computedViewport: { x: number; y: number; zoom: number } | undefined;
-      try {
-        if (!flowData?.viewport && thumbnailNodes.length > 0) {
-          const padding = 16;
-          let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-          for (const n of thumbnailNodes as any[]) {
-            const w = n.style?.width ?? 140;
-            const h = n.style?.height ?? 44;
-            const x1 = n.position?.x ?? 0;
-            const y1 = n.position?.y ?? 0;
-            const x2 = x1 + w;
-            const y2 = y1 + h;
-            if (x1 < minX) minX = x1;
-            if (y1 < minY) minY = y1;
-            if (x2 > maxX) maxX = x2;
-            if (y2 > maxY) maxY = y2;
-          }
-          const contentW = Math.max(1, maxX - minX);
-          const contentH = Math.max(1, maxY - minY);
-          const scaleX = width / (contentW + padding * 2);
-          const scaleY = height / (contentH + padding * 2);
-          const zoom = Math.max(0.1, Math.min(2, Math.min(scaleX, scaleY)));
-          const centerX = (minX + maxX) / 2;
-          const centerY = (minY + maxY) / 2;
-          const x = (width / 2) - centerX * zoom;
-          const y = (height / 2) - centerY * zoom;
-          computedViewport = { x, y, zoom };
-        }
-      } catch { }
-
-      // Render ReactFlow offscreen
-      root.render(
-        React.createElement(
-          ReactFlowProvider,
-          null,
-          React.createElement(
-            ReactFlowComponent,
-            {
-              nodes: thumbnailNodes,
-              edges: thumbnailEdges,
-              nodeTypes,
-              fitView: !(flowData?.viewport || computedViewport),
-              defaultViewport: flowData?.viewport || computedViewport,
-              minZoom: 0.1,
-              maxZoom: 2,
-              nodesDraggable: false,
-              nodesConnectable: false,
-              elementsSelectable: false,
-              panOnDrag: false,
-              panOnScroll: false,
-              zoomOnScroll: false,
-              zoomOnPinch: false,
-              zoomOnDoubleClick: false,
-              onInit,
-              proOptions: { hideAttribution: true },
-              style: { width: `${width}px`, height: `${height}px`, background: 'white' },
-            },
-            React.createElement(Background, { color: '#e5e7eb', gap: 12 })
-          )
-        )
-      );
-
-      // Allow layout to settle
-      await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
-      await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
-      await new Promise((resolve) => setTimeout(resolve, 300));
-
-      // Capture
-      const dataUrl = await toPng(container, {
-        cacheBust: true,
-        width,
-        height,
-        style: { background: 'white' },
-      });
-
-      // Cleanup
-      try { root.unmount(); } catch { }
-      try { document.body.removeChild(container); } catch { }
-
-      if (typeof dataUrl === 'string' && dataUrl.startsWith('data:image') && dataUrl.length > 1000) {
-        return dataUrl;
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        console.warn('Canvas 2D context not available');
+        return '';
       }
 
-      // Fallback: draw a simple thumbnail using Canvas (no ReactFlow)
-      try {
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) throw new Error('No 2D context');
-
-        // Background
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, width, height);
-
-        // Compute bounds
-        const nodesArr = (flowData.nodes as any[]) as Array<{ id: string; position: { x: number; y: number }; }>;
-        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-        for (const n of nodesArr) {
-          const x = n.position?.x ?? 0;
-          const y = n.position?.y ?? 0;
-          const w = 140;
-          const h = 44;
-          if (x < minX) minX = x;
-          if (y < minY) minY = y;
-          if (x + w > maxX) maxX = x + w;
-          if (y + h > maxY) maxY = y + h;
+      // Polyfill for roundRect - provides fallback for older browsers
+      const drawRoundRect = (
+        context: CanvasRenderingContext2D,
+        x: number,
+        y: number,
+        w: number,
+        h: number,
+        radii: number | number[]
+      ) => {
+        // Normalize radii to array format [topLeft, topRight, bottomRight, bottomLeft]
+        let r: number[];
+        if (typeof radii === 'number') {
+          r = [radii, radii, radii, radii];
+        } else if (radii.length === 1) {
+          r = [radii[0], radii[0], radii[0], radii[0]];
+        } else if (radii.length === 2) {
+          r = [radii[0], radii[1], radii[0], radii[1]];
+        } else if (radii.length === 4) {
+          r = radii;
+        } else {
+          r = [0, 0, 0, 0];
         }
-        if (!isFinite(minX) || !isFinite(minY) || !isFinite(maxX) || !isFinite(maxY)) return placeholder;
 
-        const padding = 24;
-        const contentW = Math.max(1, maxX - minX);
-        const contentH = Math.max(1, maxY - minY);
-        const scale = Math.max(0.1, Math.min((width - padding * 2) / contentW, (height - padding * 2) / contentH));
-        const offsetX = (width - contentW * scale) / 2 - minX * scale;
-        const offsetY = (height - contentH * scale) / 2 - minY * scale;
+        // Clamp radii to half of smallest dimension
+        const maxRadius = Math.min(w, h) / 2;
+        r = r.map(radius => Math.min(radius, maxRadius));
 
-        // Draw edges
-        ctx.strokeStyle = '#cbd5e1';
-        ctx.lineWidth = 2;
-        const edgesArr = (hasEdges ? flowData.edges : []) as Array<{ source: string; target: string }>;
-        const idToPos = new Map<string, { x: number; y: number }>();
-        for (const n of nodesArr) {
-          idToPos.set(n.id, { x: n.position?.x ?? 0, y: n.position?.y ?? 0 });
+        context.moveTo(x + r[0], y);
+        context.lineTo(x + w - r[1], y);
+        context.quadraticCurveTo(x + w, y, x + w, y + r[1]);
+        context.lineTo(x + w, y + h - r[2]);
+        context.quadraticCurveTo(x + w, y + h, x + w - r[2], y + h);
+        context.lineTo(x + r[3], y + h);
+        context.quadraticCurveTo(x, y + h, x, y + h - r[3]);
+        context.lineTo(x, y + r[0]);
+        context.quadraticCurveTo(x, y, x + r[0], y);
+        context.closePath();
+      };
+
+      // Background with subtle grid pattern
+      ctx.fillStyle = '#fafafa';
+      ctx.fillRect(0, 0, width, height);
+
+      // Draw grid dots
+      ctx.fillStyle = '#e5e7eb';
+      for (let gx = 0; gx < width; gx += 16) {
+        for (let gy = 0; gy < height; gy += 16) {
+          ctx.beginPath();
+          ctx.arc(gx, gy, 1, 0, Math.PI * 2);
+          ctx.fill();
         }
+      }
+
+      // Compute bounds from nodes
+      const nodesArr = flowData.nodes as Array<{ id: string; type?: string; position: { x: number; y: number }; data?: { label?: string } }>;
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      const nodeWidth = 140;
+      const nodeHeight = 44;
+
+      for (const n of nodesArr) {
+        const x = n.position?.x ?? 0;
+        const y = n.position?.y ?? 0;
+        if (x < minX) minX = x;
+        if (y < minY) minY = y;
+        if (x + nodeWidth > maxX) maxX = x + nodeWidth;
+        if (y + nodeHeight > maxY) maxY = y + nodeHeight;
+      }
+
+      if (!isFinite(minX) || !isFinite(minY) || !isFinite(maxX) || !isFinite(maxY)) {
+        return '';
+      }
+
+      // Calculate scale and offset to fit nodes in canvas
+      const padding = 24;
+      const contentW = Math.max(1, maxX - minX);
+      const contentH = Math.max(1, maxY - minY);
+      const scale = Math.max(0.15, Math.min(1.5, Math.min(
+        (width - padding * 2) / contentW,
+        (height - padding * 2) / contentH
+      )));
+      const offsetX = (width - contentW * scale) / 2 - minX * scale;
+      const offsetY = (height - contentH * scale) / 2 - minY * scale;
+
+      // Build position map for edges
+      const idToPos = new Map<string, { x: number; y: number }>();
+      for (const n of nodesArr) {
+        idToPos.set(n.id, { x: n.position?.x ?? 0, y: n.position?.y ?? 0 });
+      }
+
+      // Draw edges first (behind nodes)
+      if (hasEdges) {
+        const edgesArr = flowData.edges as Array<{ source: string; target: string; sourceHandle?: string; targetHandle?: string }>;
+        ctx.strokeStyle = '#94a3b8';
+        ctx.lineWidth = Math.max(1.5, 2 * scale);
+        ctx.lineCap = 'round';
+
         for (const e of edgesArr) {
           const s = idToPos.get(e.source);
           const t = idToPos.get(e.target);
           if (!s || !t) continue;
-          const sx = offsetX + (s.x + 140) * scale;
-          const sy = offsetY + (s.y + 22) * scale;
+
+          // Source: right side of node, Target: left side of node
+          const sx = offsetX + (s.x + nodeWidth) * scale;
+          const sy = offsetY + (s.y + nodeHeight / 2) * scale;
           const tx = offsetX + t.x * scale;
-          const ty = offsetY + (t.y + 22) * scale;
+          const ty = offsetY + (t.y + nodeHeight / 2) * scale;
+
+          // Draw bezier curve for nicer look
           ctx.beginPath();
           ctx.moveTo(sx, sy);
-          ctx.lineTo(tx, ty);
+          const cpOffset = Math.min(50, Math.abs(tx - sx) / 2) * scale;
+          ctx.bezierCurveTo(sx + cpOffset, sy, tx - cpOffset, ty, tx, ty);
           ctx.stroke();
         }
-
-        // Draw nodes
-        for (const n of nodesArr) {
-          const x = offsetX + (n.position?.x ?? 0) * scale;
-          const y = offsetY + (n.position?.y ?? 0) * scale;
-          const w = 140 * scale;
-          const h = 44 * scale;
-          ctx.fillStyle = '#f8fafc';
-          ctx.strokeStyle = '#e2e8f0';
-          ctx.lineWidth = 1;
-          const r = 6 * scale;
-          ctx.beginPath();
-          ctx.moveTo(x + r, y);
-          ctx.lineTo(x + w - r, y);
-          ctx.quadraticCurveTo(x + w, y, x + w, y + r);
-          ctx.lineTo(x + w, y + h - r);
-          ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-          ctx.lineTo(x + r, y + h);
-          ctx.quadraticCurveTo(x, y + h, x, y + h - r);
-          ctx.lineTo(x, y + r);
-          ctx.quadraticCurveTo(x, y, x + r, y);
-          ctx.closePath();
-          ctx.fill();
-          ctx.stroke();
-
-          // Label
-          const label = (flowData.nodes.find((nn: any) => nn.id === n.id)?.data?.label) ?? 'Node';
-          ctx.fillStyle = '#0f172a';
-          ctx.font = `${Math.max(10, 12 * scale)}px Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif`;
-          ctx.textBaseline = 'middle';
-          ctx.fillText(String(label).slice(0, 18), x + 8 * scale, y + h / 2);
-        }
-
-        return canvas.toDataURL('image/png');
-      } catch {
-        // Ignore and return placeholder
       }
 
-      return placeholder;
+      // Node type colors
+      const nodeColors: Record<string, { bg: string; border: string; accent: string }> = {
+        ifcNode: { bg: '#dbeafe', border: '#3b82f6', accent: '#2563eb' },
+        filterNode: { bg: '#fef3c7', border: '#f59e0b', accent: '#d97706' },
+        aiNode: { bg: '#f3e8ff', border: '#a855f7', accent: '#9333ea' },
+        viewerNode: { bg: '#dcfce7', border: '#22c55e', accent: '#16a34a' },
+        exportNode: { bg: '#fee2e2', border: '#ef4444', accent: '#dc2626' },
+        propertyNode: { bg: '#e0e7ff', border: '#6366f1', accent: '#4f46e5' },
+        spatialNode: { bg: '#cffafe', border: '#06b6d4', accent: '#0891b2' },
+        geometryNode: { bg: '#fce7f3', border: '#ec4899', accent: '#db2777' },
+        materialNode: { bg: '#ffedd5', border: '#f97316', accent: '#ea580c' },
+        default: { bg: '#f1f5f9', border: '#64748b', accent: '#475569' },
+      };
+
+      // Draw nodes
+      for (const n of nodesArr) {
+        const x = offsetX + (n.position?.x ?? 0) * scale;
+        const y = offsetY + (n.position?.y ?? 0) * scale;
+        const w = nodeWidth * scale;
+        const h = nodeHeight * scale;
+        const r = Math.max(4, 6 * scale);
+
+        const colors = nodeColors[n.type || 'default'] || nodeColors.default;
+
+        // Node shadow
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.08)';
+        ctx.beginPath();
+        drawRoundRect(ctx, x + 2, y + 2, w, h, r);
+        ctx.fill();
+
+        // Node background
+        ctx.fillStyle = colors.bg;
+        ctx.strokeStyle = colors.border;
+        ctx.lineWidth = Math.max(1, 1.5 * scale);
+        ctx.beginPath();
+        drawRoundRect(ctx, x, y, w, h, r);
+        ctx.fill();
+        ctx.stroke();
+
+        // Accent bar on left
+        ctx.fillStyle = colors.accent;
+        ctx.beginPath();
+        drawRoundRect(ctx, x, y, Math.max(3, 4 * scale), h, [r, 0, 0, r]);
+        ctx.fill();
+
+        // Label text
+        const label = n.data?.label || n.type || 'Node';
+        const fontSize = Math.max(8, Math.min(11, 11 * scale));
+        ctx.fillStyle = '#1e293b';
+        ctx.font = `500 ${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+        ctx.textBaseline = 'middle';
+        ctx.textAlign = 'left';
+
+        // Truncate label if needed
+        const maxTextWidth = w - 12 * scale;
+        let displayLabel = String(label);
+        while (ctx.measureText(displayLabel).width > maxTextWidth && displayLabel.length > 3) {
+          displayLabel = displayLabel.slice(0, -1);
+        }
+        if (displayLabel !== String(label)) {
+          displayLabel = displayLabel.slice(0, -2) + '…';
+        }
+
+        ctx.fillText(displayLabel, x + 8 * scale, y + h / 2);
+      }
+
+      const dataUrl = canvas.toDataURL('image/png');
+      console.log('Thumbnail generated successfully, length:', dataUrl.length);
+      return dataUrl;
     } catch (error) {
-      console.warn('Thumbnail generation failed:', error);
-      return placeholder;
+      console.error('Thumbnail generation failed:', error);
+      return '';
     }
   }
 
@@ -477,6 +440,79 @@ export function cleanWorkflowData(flowData: any): any {
   }
 
   return cleanedData;
+}
+
+// Capture screenshot of ReactFlow canvas
+export async function captureCanvasScreenshot(
+  element: HTMLElement,
+  fitViewCallback?: () => void
+): Promise<string> {
+  if (typeof window === 'undefined') return '';
+
+  try {
+    // Optionally fit view first to ensure all nodes are visible
+    if (fitViewCallback) {
+      fitViewCallback();
+      // Wait for viewport to update - use multiple animation frames for reliable rendering
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+      // Additional delay to ensure ReactFlow has fully updated the viewport
+      await new Promise((resolve) => setTimeout(resolve, 350));
+    }
+
+    // Find the ReactFlow container - this has the proper fixed dimensions
+    // Don't use .react-flow__viewport as it has transforms applied
+    let captureElement: HTMLElement = element;
+    const reactFlowContainer = element.querySelector('.react-flow') as HTMLElement;
+    if (reactFlowContainer) {
+      captureElement = reactFlowContainer;
+    }
+
+    // Get the actual dimensions of the element for capture
+    const rect = captureElement.getBoundingClientRect();
+    const captureWidth = Math.min(rect.width, 1200); // Cap width to avoid huge images
+    const captureHeight = Math.min(rect.height, 800);
+
+    // Import html-to-image dynamically
+    const { toPng } = await import('html-to-image');
+
+    // Capture the element with proper filtering
+    const dataUrl = await toPng(captureElement, {
+      cacheBust: true,
+      backgroundColor: '#ffffff',
+      pixelRatio: 1,
+      quality: 0.95,
+      width: captureWidth,
+      height: captureHeight,
+      filter: (node) => {
+        // Exclude controls, minimap, and other UI elements
+        const className = (node as HTMLElement).className || '';
+        if (typeof className === 'string') {
+          // Exclude ReactFlow controls
+          if (className.includes('react-flow__controls')) return false;
+          if (className.includes('react-flow__minimap')) return false;
+          // Exclude any overlay elements
+          if (className.includes('react-flow__panel')) return false;
+          // Exclude selection overlays
+          if (className.includes('react-flow__selection')) return false;
+          // Exclude attribution
+          if (className.includes('react-flow__attribution')) return false;
+        }
+        return true;
+      },
+    });
+
+    if (typeof dataUrl === 'string' && dataUrl.startsWith('data:image') && dataUrl.length > 1000) {
+      console.log('Canvas screenshot captured successfully, length:', dataUrl.length);
+      return dataUrl;
+    }
+
+    console.warn('Screenshot capture returned invalid data URL');
+    return '';
+  } catch (error) {
+    console.error('Failed to capture canvas screenshot:', error);
+    return '';
+  }
 }
 
 // Create a singleton instance

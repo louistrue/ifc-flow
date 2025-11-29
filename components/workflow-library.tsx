@@ -35,11 +35,24 @@ import {
   FilePlus2,
   AlertTriangle,
   Check,
+  Workflow as WorkflowIcon,
 } from "lucide-react";
 import { type Workflow, workflowStorage } from "@/lib/workflow-storage";
 import { useToast } from "@/hooks/use-toast";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AspectRatio } from "@/components/ui/aspect-ratio";
+
+// Placeholder component for missing/broken thumbnails
+function WorkflowPlaceholder({ name, nodeCount }: { name: string; nodeCount: number }) {
+  return (
+    <div className="h-full w-full flex flex-col items-center justify-center bg-muted/50 rounded-md border border-dashed">
+      <WorkflowIcon className="h-8 w-8 text-muted-foreground/50 mb-2" />
+      <span className="text-xs text-muted-foreground/70 text-center px-2 truncate max-w-full">
+        {nodeCount} node{nodeCount !== 1 ? 's' : ''}
+      </span>
+    </div>
+  );
+}
 
 interface WorkflowLibraryProps {
   open: boolean;
@@ -288,15 +301,35 @@ export function WorkflowLibrary({
                       <CardContent className="pb-2">
                         <div className="mb-2">
                           <AspectRatio ratio={3 / 2}>
-                            <img
-                              src={
-                                workflow.thumbnail ||
-                                "/placeholder.svg?height=200&width=300"
-                              }
-                              alt={`${workflow.name} thumbnail`}
-                              className="h-full w-full object-cover rounded-md border"
-                              loading="lazy"
-                            />
+                            {workflow.thumbnail && workflow.thumbnail.startsWith('data:image') ? (
+                              <img
+                                src={workflow.thumbnail}
+                                alt={`${workflow.name} thumbnail`}
+                                className="h-full w-full object-cover rounded-md border"
+                                loading="lazy"
+                                onError={(e) => {
+                                  // Hide the broken image and show fallback
+                                  const target = e.target as HTMLImageElement;
+                                  target.style.display = 'none';
+                                  // Insert placeholder after the img
+                                  const parent = target.parentElement;
+                                  if (parent && !parent.querySelector('.workflow-placeholder')) {
+                                    const placeholder = document.createElement('div');
+                                    placeholder.className = 'workflow-placeholder h-full w-full flex flex-col items-center justify-center bg-muted/50 rounded-md border border-dashed';
+                                    placeholder.innerHTML = `
+                                      <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-muted-foreground/50 mb-2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>
+                                      <span class="text-xs text-muted-foreground/70">${workflow.flowData?.nodes?.length || 0} nodes</span>
+                                    `;
+                                    parent.appendChild(placeholder);
+                                  }
+                                }}
+                              />
+                            ) : (
+                              <WorkflowPlaceholder 
+                                name={workflow.name} 
+                                nodeCount={workflow.flowData?.nodes?.length || 0} 
+                              />
+                            )}
                           </AspectRatio>
                         </div>
                         <div className="flex items-center text-xs text-muted-foreground gap-4 mb-2">

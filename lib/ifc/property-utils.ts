@@ -1,4 +1,5 @@
-import type { IfcElement } from "@/lib/ifc-utils";
+import type { IfcElement, IfcModel } from "@/lib/ifc-utils";
+import { querySqliteDatabase, getLastLoadedModel } from "@/lib/ifc-utils";
 
 /**
  * Get a property value from an element using IfcOpenShell conventions
@@ -6,13 +7,15 @@ import type { IfcElement } from "@/lib/ifc-utils";
  * @param element The IFC element
  * @param propertyName The name of the property to retrieve
  * @param psetName Optional property set name to look in
+ * @param model Optional model reference for SQLite fallback
  * @returns The property value or undefined if not found
  */
-function getPropertyValue(
+async function getPropertyValue(
   element: IfcElement,
   propertyName: string,
-  psetName?: string
-): any {
+  psetName?: string,
+  model?: IfcModel
+): Promise<any> {
   // If pset specified, look only there
   if (psetName && element.psets?.[psetName]) {
     return element.psets[psetName][propertyName];
@@ -24,7 +27,7 @@ function getPropertyValue(
   }
 
   // Then check all property sets (simulates ifcopenshell.util.element.get_property)
-  if (element.psets) {
+  if (element.psets && Object.keys(element.psets).length > 0) {
     for (const psetName in element.psets) {
       const pset = element.psets[psetName];
       if (pset && pset[propertyName] !== undefined) {
@@ -40,6 +43,30 @@ function getPropertyValue(
       if (qto && qto[propertyName] !== undefined) {
         return qto[propertyName];
       }
+    }
+  }
+
+  // Fallback to SQLite if psets are empty (fast load scenario)
+  if (!element.psets || Object.keys(element.psets).length === 0) {
+    try {
+      const currentModel = model || getLastLoadedModel();
+      if (currentModel && element.expressId) {
+        // Query the psets table for this element's properties
+        let sql: string;
+        if (psetName) {
+          sql = `SELECT value FROM psets WHERE ifc_id = ${element.expressId} AND pset_name = '${psetName}' AND name = '${propertyName}' LIMIT 1`;
+        } else {
+          sql = `SELECT value FROM psets WHERE ifc_id = ${element.expressId} AND name = '${propertyName}' LIMIT 1`;
+        }
+
+        const result = await querySqliteDatabase(currentModel, sql);
+
+        if (result && result.length > 0) {
+          return result[0].value;
+        }
+      }
+    } catch (e) {
+      // Silently fail - fallback to undefined
     }
   }
 
@@ -228,33 +255,74 @@ export function getAllProperties(element: IfcElement): Record<string, any> {
 }
 
 // Property management functions - Using IfcOpenShell-like approach
-export function manageProperties(
+export async function manageProperties(
   elements: IfcElement[],
-  action = "get",
-  propertyName = "",
-  propertyValue = "",
-  targetPset = "CustomProperties"
-): IfcElement[] {
-  console.log(
-    "Managing properties:",
-    action,
-    propertyName,
-    propertyValue,
-    targetPset ? `in pset: ${targetPset}` : ""
-  );
+  options: {
+    action?: string;
+    propertyName?: string;
+    propertyValue?: any;
+    targetPset?: string;
+    source?: string;
+    model?: IfcModel;
+  } = {}
+): Promise<IfcElement[]> {
+  const {
+    action = "get",
+    propertyName = "",
+    propertyValue = "",
+    targetPset = "CustomProperties",
+    source = "property",
+    model
+  } = options;
+
 
   // Handle empty or "any" values for targetPset
-  if (targetPset === "any") {
-    targetPset = "";
+  let effectiveTargetPset = targetPset;
+  if (effectiveTargetPset === "any") {
+    effectiveTargetPset = "";
   }
 
   const result = [...elements];
 
   switch (action.toLowerCase()) {
     case "get":
+      // Batch SQLite queries for better performance
+      const elementsNeedingSqlite = result.filter(el => 
+        (!el.psets || Object.keys(el.psets).length === 0) && el.expressId
+      );
+      
+      // If we have elements needing SQLite, batch query them
+      let batchedResults: Map<number, any> = new Map();
+      if (elementsNeedingSqlite.length > 0 && model) {
+        try {
+          const expressIds = elementsNeedingSqlite.map(el => el.expressId).join(',');
+          let batchSql: string;
+          if (effectiveTargetPset) {
+            batchSql = `SELECT ifc_id, value FROM psets WHERE ifc_id IN (${expressIds}) AND pset_name = '${effectiveTargetPset}' AND name = '${propertyName}'`;
+          } else {
+            batchSql = `SELECT ifc_id, value FROM psets WHERE ifc_id IN (${expressIds}) AND name = '${propertyName}'`;
+          }
+          const batchResult = await querySqliteDatabase(model, batchSql);
+          batchResult.forEach((row: any) => {
+            batchedResults.set(row.ifc_id, row.value);
+          });
+        } catch (e) {
+          // Fallback to individual queries if batch fails
+        }
+      }
+
       // Return original elements, with propertyInfo added for the specified property
-      return result.map((element) => {
-        const value = getPropertyValue(element, propertyName);
+      return Promise.all(result.map(async (element) => {
+        let value: any;
+        
+        // Use batched result if available
+        if (batchedResults.has(element.expressId)) {
+          value = batchedResults.get(element.expressId);
+        } else {
+          // Fallback to individual query for elements with psets or if batch failed
+          value = await getPropertyValue(element, propertyName, effectiveTargetPset, model);
+        }
+        
         const psetName = findPropertySet(element, propertyName);
 
         return {
@@ -266,7 +334,7 @@ export function manageProperties(
             psetName: psetName,
           },
         };
-      });
+      }));
 
     case "set":
       // Set property, always using targetPset
@@ -275,7 +343,7 @@ export function manageProperties(
           element,
           propertyName,
           propertyValue,
-          targetPset || "CustomProperties"
+          effectiveTargetPset || "CustomProperties"
         )
       );
 
@@ -286,14 +354,14 @@ export function manageProperties(
           element,
           propertyName,
           propertyValue,
-          targetPset || "CustomProperties"
+          effectiveTargetPset || "CustomProperties"
         )
       );
 
     case "remove":
       // Remove the property from all elements
       return result.map((element) =>
-        removePropertyValue(element, propertyName, targetPset)
+        removePropertyValue(element, propertyName, effectiveTargetPset)
       );
 
     default:
@@ -308,7 +376,6 @@ export function manageClassifications(
   action = "get",
   code = ""
 ): IfcElement[] {
-  console.log("Managing classifications:", system, action, code);
 
   if (action === "get") {
     // Extract classification data from elements using IfcOpenShell conventions
