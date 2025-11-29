@@ -113,12 +113,17 @@ export async function getModelPsetsFromSqlite(model?: IfcModel): Promise<string[
   const current = model || getLastLoadedModel();
   if (!current) return [];
 
+  // Check if SQLite is ready before querying
+  const status = getSqliteWarmStatus(current);
+  if (status !== 'ready') {
+    return [];
+  }
+
   try {
     // Use the optimized 'psets' table created by ifc2sql
     const result = await querySqliteDatabase(current, "SELECT DISTINCT pset_name FROM psets WHERE pset_name IS NOT NULL ORDER BY pset_name");
     return result.map(r => r.pset_name);
   } catch (e) {
-    console.warn("Failed to query psets from SQLite:", e);
     return [];
   }
 }
@@ -128,12 +133,17 @@ export async function getModelPropertiesFromSqlite(model?: IfcModel): Promise<st
   const current = model || getLastLoadedModel();
   if (!current) return [];
 
+  // Check if SQLite is ready before querying
+  const status = getSqliteWarmStatus(current);
+  if (status !== 'ready') {
+    return [];
+  }
+
   try {
     // Use the optimized 'psets' table created by ifc2sql
     const result = await querySqliteDatabase(current, "SELECT DISTINCT name FROM psets WHERE name IS NOT NULL ORDER BY name");
     return result.map(r => r.name);
   } catch (e) {
-    console.warn("Failed to query properties from SQLite:", e);
     return [];
   }
 }
@@ -143,15 +153,19 @@ export async function getModelPropertiesForPsetFromSqlite(model: IfcModel | unde
   const current = model || getLastLoadedModel();
   if (!current) return [];
 
+  // Check if SQLite is ready before querying
+  const status = getSqliteWarmStatus(current);
+  if (status !== 'ready') {
+    return [];
+  }
+
   try {
     // Use the optimized 'psets' table created by ifc2sql
     const sql = `SELECT DISTINCT name FROM psets WHERE pset_name = '${psetName}' AND name IS NOT NULL ORDER BY name`;
     const result = await querySqliteDatabase(current, sql);
     return result.map(r => r.name);
   } catch (e) {
-    console.warn(`Failed to query properties for pset ${psetName} from SQLite:`, e);
-    // Fallback to all properties so the UI isn't broken
-    return getModelPropertiesFromSqlite(model);
+    return [];
   }
 }
 
@@ -174,6 +188,7 @@ export function getModelPsets(model?: IfcModel): string[] {
 // Worker management
 let ifcWorker: Worker | null = null;
 let isWorkerInitialized = false;
+let workerInitPromise: Promise<void> | null = null;
 const workerPromiseResolvers: Map<
   string,
   { resolve: Function; reject: Function }
@@ -203,176 +218,194 @@ export function preloadWorker(): void {
 
 // Initialize the worker
 export async function initializeWorker(): Promise<void> {
-  if (isWorkerInitialized) {
+  // Return immediately if already initialized
+  if (isWorkerInitialized && ifcWorker) {
     return;
   }
 
-  try {
+  // If initialization is in progress, wait for it
+  if (workerInitPromise) {
+    return workerInitPromise;
+  }
 
-    // Guard: only create Web Worker in browser context
-    if (typeof window === 'undefined' || typeof Worker === 'undefined') {
-      throw new Error('Worker is not defined');
-    }
-    // Create worker
-    ifcWorker = new Worker("/ifcWorker.js");
+  // Create new initialization promise (singleton pattern)
+  workerInitPromise = (async () => {
+    try {
+      // Guard: only create Web Worker in browser context
+      if (typeof window === 'undefined' || typeof Worker === 'undefined') {
+        throw new Error('Worker is not defined');
+      }
 
-    // Add message handler
-    ifcWorker.onmessage = (event) => {
-      const { type, messageId, error, ...data } = event.data;
+      // Double-check after async gap
+      if (isWorkerInitialized && ifcWorker) {
+        return;
+      }
+
+      // Create worker with cache-buster to ensure latest version
+      const cacheBuster = `?v=${Date.now()}`;
+      ifcWorker = new Worker(`/ifcWorker.js${cacheBuster}`);
+
+      // Add message handler
+      ifcWorker.onmessage = (event) => {
+        const { type, messageId, error, ...data } = event.data;
 
 
 
-      // Handle different message types
-      if (type === "error") {
+        // Handle different message types
+        if (type === "error") {
 
-        // Resolve the corresponding promise
-        if (messageId && workerPromiseResolvers.has(messageId)) {
-          workerPromiseResolvers
-            .get(messageId)!
-            .reject(new Error(data.message));
-          workerPromiseResolvers.delete(messageId);
-        }
-      } else if (type === "initialized") {
+          // Resolve the corresponding promise
+          if (messageId && workerPromiseResolvers.has(messageId)) {
+            workerPromiseResolvers
+              .get(messageId)!
+              .reject(new Error(data.message));
+            workerPromiseResolvers.delete(messageId);
+          }
+        } else if (type === "initialized") {
 
-        if (messageId && workerPromiseResolvers.has(messageId)) {
-          workerPromiseResolvers.get(messageId)!.resolve();
-          workerPromiseResolvers.delete(messageId);
-        }
-      } else if (type === "loadComplete") {
+          if (messageId && workerPromiseResolvers.has(messageId)) {
+            workerPromiseResolvers.get(messageId)!.resolve();
+            workerPromiseResolvers.delete(messageId);
+          }
+        } else if (type === "loadComplete") {
 
-        if (messageId && workerPromiseResolvers.has(messageId)) {
-          // Pass the complete model info object, not just a nested property
-          workerPromiseResolvers.get(messageId)!.resolve(data);
-          workerPromiseResolvers.delete(messageId);
-        }
-      } else if (type === "dataExtracted") {
+          if (messageId && workerPromiseResolvers.has(messageId)) {
+            // Pass the complete model info object, not just a nested property
+            workerPromiseResolvers.get(messageId)!.resolve(data);
+            workerPromiseResolvers.delete(messageId);
+          }
+        } else if (type === "dataExtracted") {
 
-        if (messageId && workerPromiseResolvers.has(messageId)) {
-          workerPromiseResolvers.get(messageId)!.resolve(data);
-          workerPromiseResolvers.delete(messageId);
-        }
-      } else if (type === "ifcExported") {
+          if (messageId && workerPromiseResolvers.has(messageId)) {
+            workerPromiseResolvers.get(messageId)!.resolve(data);
+            workerPromiseResolvers.delete(messageId);
+          }
+        } else if (type === "ifcExported") {
 
-        if (messageId && workerPromiseResolvers.has(messageId)) {
-          workerPromiseResolvers.get(messageId)!.resolve(data);
-          workerPromiseResolvers.delete(messageId);
-        }
-      } else if (type === "geometry") {
-        if (messageId && workerPromiseResolvers.has(messageId)) {
-          workerPromiseResolvers.get(messageId)!.resolve(data.elements || []);
-          workerPromiseResolvers.delete(messageId);
-        }
-      } else if (type === "extractQuantities") {
+          if (messageId && workerPromiseResolvers.has(messageId)) {
+            workerPromiseResolvers.get(messageId)!.resolve(data);
+            workerPromiseResolvers.delete(messageId);
+          }
+        } else if (type === "geometry") {
+          if (messageId && workerPromiseResolvers.has(messageId)) {
+            workerPromiseResolvers.get(messageId)!.resolve(data.elements || []);
+            workerPromiseResolvers.delete(messageId);
+          }
+        } else if (type === "extractQuantities") {
 
-        if (messageId && workerPromiseResolvers.has(messageId)) {
-          workerPromiseResolvers.get(messageId)!.resolve(data);
-          workerPromiseResolvers.delete(messageId);
-        }
-      } else if (type === "quantityResults") {
+          if (messageId && workerPromiseResolvers.has(messageId)) {
+            workerPromiseResolvers.get(messageId)!.resolve(data);
+            workerPromiseResolvers.delete(messageId);
+          }
+        } else if (type === "quantityResults") {
 
-        if (messageId && workerPromiseResolvers.has(messageId)) {
-          workerPromiseResolvers.get(messageId)!.resolve(data.data);
-          workerPromiseResolvers.delete(messageId);
-        }
-      } else if (type === "pythonResult") {
+          if (messageId && workerPromiseResolvers.has(messageId)) {
+            workerPromiseResolvers.get(messageId)!.resolve(data.data);
+            workerPromiseResolvers.delete(messageId);
+          }
+        } else if (type === "pythonResult") {
 
-        if (messageId && workerPromiseResolvers.has(messageId)) {
-          workerPromiseResolvers.get(messageId)!.resolve(data.result);
-          workerPromiseResolvers.delete(messageId);
-        }
-      } else if (type === "sqliteResult") {
+          if (messageId && workerPromiseResolvers.has(messageId)) {
+            workerPromiseResolvers.get(messageId)!.resolve(data.result);
+            workerPromiseResolvers.delete(messageId);
+          }
+        } else if (type === "sqliteResult") {
 
-        if (messageId && workerPromiseResolvers.has(messageId)) {
-          workerPromiseResolvers.get(messageId)!.resolve(data.result);
-          workerPromiseResolvers.delete(messageId);
-        }
-        // A successful query implies the DB is open in sql.js → mark as ready
-        try {
+          if (messageId && workerPromiseResolvers.has(messageId)) {
+            workerPromiseResolvers.get(messageId)!.resolve(data.result);
+            workerPromiseResolvers.delete(messageId);
+          }
+          // A successful query implies the DB is open in sql.js → mark as ready
+          try {
+            const model = getLastLoadedModel();
+            if (model) {
+              sqliteWarmStatus.set(model.id, 'ready');
+              dispatchWarmStatus(model.id, 'ready');
+              window.dispatchEvent(new CustomEvent('sqlite:ready', { detail: { modelId: model.id } }));
+            }
+          } catch { }
+        } else if (type === "sqliteExport") {
+
+          if (messageId && workerPromiseResolvers.has(messageId)) {
+            workerPromiseResolvers.get(messageId)!.resolve(data.bytes);
+            workerPromiseResolvers.delete(messageId);
+          }
+        } else if (type === "sqliteBuilt") {
+          // DB bytes persisted; notify UI listeners of warm/build status
+          const model = getLastLoadedModel();
+          if (model) {
+            sqliteWarmStatus.set(model.id, 'warming');
+            dispatchWarmStatus(model.id, 'warming');
+          }
+          if (messageId && workerPromiseResolvers.has(messageId)) {
+            workerPromiseResolvers.get(messageId)!.resolve(data);
+            workerPromiseResolvers.delete(messageId);
+          }
+        } else if (type === "sqliteWarmed") {
           const model = getLastLoadedModel();
           if (model) {
             sqliteWarmStatus.set(model.id, 'ready');
-            dispatchWarmStatus(model.id, 'ready');
-            window.dispatchEvent(new CustomEvent('sqlite:ready', { detail: { modelId: model.id } }));
-          }
-        } catch { }
-      } else if (type === "sqliteExport") {
-
-        if (messageId && workerPromiseResolvers.has(messageId)) {
-          workerPromiseResolvers.get(messageId)!.resolve(data.bytes);
-          workerPromiseResolvers.delete(messageId);
-        }
-      } else if (type === "sqliteBuilt") {
-        // DB bytes persisted; notify UI listeners of warm/build status
-        const model = getLastLoadedModel();
-        if (model) {
-          sqliteWarmStatus.set(model.id, 'warming');
-          dispatchWarmStatus(model.id, 'warming');
-        }
-        if (messageId && workerPromiseResolvers.has(messageId)) {
-          workerPromiseResolvers.get(messageId)!.resolve(data);
-          workerPromiseResolvers.delete(messageId);
-        }
-      } else if (type === "sqliteWarmed") {
-        const model = getLastLoadedModel();
-        if (model) {
-          sqliteWarmStatus.set(model.id, 'ready');
-          dispatchWarmStatus(model.id, 'ready', { tableCount: data.tableCount });
-        }
-        if (messageId && workerPromiseResolvers.has(messageId)) {
-          workerPromiseResolvers.get(messageId)!.resolve({ key: data.key, tableCount: data.tableCount });
-          workerPromiseResolvers.delete(messageId);
-        }
-      } else if (type === "materialAssigned") {
-        if (messageId && workerPromiseResolvers.has(messageId)) {
-          workerPromiseResolvers.get(messageId)!.resolve(data.result);
-          workerPromiseResolvers.delete(messageId);
-        }
-      } else if (type === "sqliteStatus") {
-        // Background status from worker: building/ready/error
-        const model = getLastLoadedModel();
-        if (model) {
-          if (data.status === 'ready') {
-            sqliteWarmStatus.set(model.id, 'ready');
             dispatchWarmStatus(model.id, 'ready', { tableCount: data.tableCount });
-          } else if (data.status === 'building') {
-            sqliteWarmStatus.set(model.id, 'building');
-            dispatchWarmStatus(model.id, 'warming');
-          } else if (data.status === 'error') {
-            sqliteWarmStatus.set(model.id, 'error');
-            dispatchWarmStatus(model.id, 'error', { message: data.message });
+          }
+          if (messageId && workerPromiseResolvers.has(messageId)) {
+            workerPromiseResolvers.get(messageId)!.resolve({ key: data.key, tableCount: data.tableCount });
+            workerPromiseResolvers.delete(messageId);
+          }
+        } else if (type === "materialAssigned") {
+          if (messageId && workerPromiseResolvers.has(messageId)) {
+            workerPromiseResolvers.get(messageId)!.resolve(data.result);
+            workerPromiseResolvers.delete(messageId);
+          }
+        } else if (type === "sqliteStatus") {
+          // Background status from worker: building/ready/error
+          const model = getLastLoadedModel();
+          if (model) {
+            if (data.status === 'ready') {
+              sqliteWarmStatus.set(model.id, 'ready');
+              dispatchWarmStatus(model.id, 'ready', { tableCount: data.tableCount });
+              // Dispatch sqlite:ready event for UI components to reload
+              window.dispatchEvent(new CustomEvent('sqlite:ready', { detail: { modelId: model.id } }));
+            } else if (data.status === 'building') {
+              sqliteWarmStatus.set(model.id, 'building');
+              dispatchWarmStatus(model.id, 'building');
+            } else if (data.status === 'error') {
+              sqliteWarmStatus.set(model.id, 'error');
+              dispatchWarmStatus(model.id, 'error', { message: data.message });
+            }
           }
         }
-      }
-    };
+      };
 
-    // Initialize the worker
-    const messageId = `init_${Date.now()}`;
-    await new Promise((resolve, reject) => {
-      workerPromiseResolvers.set(messageId, { resolve, reject });
-      ifcWorker!.postMessage({
-        action: "init",
-        messageId,
+      // Initialize the worker
+      const messageId = `init_${Date.now()}`;
+      await new Promise((resolve, reject) => {
+        workerPromiseResolvers.set(messageId, { resolve, reject });
+        ifcWorker!.postMessage({
+          action: "init",
+          messageId,
+        });
+
+        // Set a timeout for initialization
+        setTimeout(() => {
+          if (workerPromiseResolvers.has(messageId)) {
+
+            reject(new Error("Worker initialization timed out"));
+            workerPromiseResolvers.delete(messageId);
+          }
+        }, 30000); // 30 second timeout for initialization
       });
 
-      // Set a timeout for initialization
-      setTimeout(() => {
-        if (workerPromiseResolvers.has(messageId)) {
+      isWorkerInitialized = true;
+      workerInitPromise = null; // Clear promise on success
+    } catch (err) {
+      workerInitPromise = null; // Clear promise on error
+      throw new Error(
+        `Failed to initialize worker: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  })();
 
-          reject(new Error("Worker initialization timed out"));
-          workerPromiseResolvers.delete(messageId);
-        }
-      }, 30000); // 30 second timeout for initialization
-    });
-
-    isWorkerInitialized = true;
-
-  } catch (err) {
-
-    throw new Error(
-      `Failed to initialize worker: ${err instanceof Error ? err.message : String(err)
-      }`
-    );
-  }
+  return workerInitPromise;
 }
 
 // Load an IFC file using IfcOpenShell via the worker

@@ -59,19 +59,14 @@ async function getPropertyValue(
           sql = `SELECT value FROM psets WHERE ifc_id = ${element.expressId} AND name = '${propertyName}' LIMIT 1`;
         }
 
-        console.log(`🔍 Querying SQLite for property '${propertyName}' on element ${element.expressId}:`, sql);
         const result = await querySqliteDatabase(currentModel, sql);
-        console.log(`📊 SQLite result:`, result);
 
         if (result && result.length > 0) {
-          console.log(`✅ Found property value:`, result[0].value);
           return result[0].value;
-        } else {
-          console.warn(`❌ No property value found for '${propertyName}' on element ${element.expressId}`);
         }
       }
     } catch (e) {
-      console.warn(`Failed to query property ${propertyName} from SQLite:`, e);
+      // Silently fail - fallback to undefined
     }
   }
 
@@ -280,13 +275,6 @@ export async function manageProperties(
     model
   } = options;
 
-  console.log(
-    "Managing properties:",
-    action,
-    propertyName,
-    propertyValue,
-    targetPset ? `in pset: ${targetPset}` : ""
-  );
 
   // Handle empty or "any" values for targetPset
   let effectiveTargetPset = targetPset;
@@ -298,11 +286,43 @@ export async function manageProperties(
 
   switch (action.toLowerCase()) {
     case "get":
-      console.log("📝 In manageProperties 'get' case, processing", result.length, "elements");
+      // Batch SQLite queries for better performance
+      const elementsNeedingSqlite = result.filter(el => 
+        (!el.psets || Object.keys(el.psets).length === 0) && el.expressId
+      );
+      
+      // If we have elements needing SQLite, batch query them
+      let batchedResults: Map<number, any> = new Map();
+      if (elementsNeedingSqlite.length > 0 && model) {
+        try {
+          const expressIds = elementsNeedingSqlite.map(el => el.expressId).join(',');
+          let batchSql: string;
+          if (effectiveTargetPset) {
+            batchSql = `SELECT ifc_id, value FROM psets WHERE ifc_id IN (${expressIds}) AND pset_name = '${effectiveTargetPset}' AND name = '${propertyName}'`;
+          } else {
+            batchSql = `SELECT ifc_id, value FROM psets WHERE ifc_id IN (${expressIds}) AND name = '${propertyName}'`;
+          }
+          const batchResult = await querySqliteDatabase(model, batchSql);
+          batchResult.forEach((row: any) => {
+            batchedResults.set(row.ifc_id, row.value);
+          });
+        } catch (e) {
+          // Fallback to individual queries if batch fails
+        }
+      }
+
       // Return original elements, with propertyInfo added for the specified property
-      return Promise.all(result.map(async (element, index) => {
-        console.log(`🔍 Processing element ${index + 1}/${result.length}, expressId: ${element.expressId}`);
-        const value = await getPropertyValue(element, propertyName, effectiveTargetPset, model);
+      return Promise.all(result.map(async (element) => {
+        let value: any;
+        
+        // Use batched result if available
+        if (batchedResults.has(element.expressId)) {
+          value = batchedResults.get(element.expressId);
+        } else {
+          // Fallback to individual query for elements with psets or if batch failed
+          value = await getPropertyValue(element, propertyName, effectiveTargetPset, model);
+        }
+        
         const psetName = findPropertySet(element, propertyName);
 
         return {
@@ -356,7 +376,6 @@ export function manageClassifications(
   action = "get",
   code = ""
 ): IfcElement[] {
-  console.log("Managing classifications:", system, action, code);
 
   if (action === "get") {
     // Extract classification data from elements using IfcOpenShell conventions

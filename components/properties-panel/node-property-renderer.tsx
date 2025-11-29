@@ -4,8 +4,8 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { useEffect, useState } from "react";
-import { getModelPropertyNames, getModelPsets, getModelPsetsFromSqlite, getModelPropertiesFromSqlite, getModelPropertiesForPsetFromSqlite } from "@/lib/ifc-utils";
+import { useEffect, useState, useRef } from "react";
+import { getModelPropertyNames, getModelPsets, getModelPsetsFromSqlite, getModelPropertiesFromSqlite, getModelPropertiesForPsetFromSqlite, getSqliteWarmStatus, getLastLoadedModel } from "@/lib/ifc-utils";
 import {
   Select,
   SelectContent,
@@ -43,35 +43,90 @@ export function NodePropertyRenderer({
 }: NodePropertyRendererProps) {
   const [modelProps, setModelProps] = useState<string[]>([]);
   const [modelPsets, setModelPsets] = useState<string[]>([]);
+  const [sqliteReady, setSqliteReady] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const lastStatusRef = useRef<string>('');
 
+  // Check SQLite status and load data when ready
   useEffect(() => {
-    const loadData = async () => {
-      // Try to load from SQLite first for complete data
-      const psets = await getModelPsetsFromSqlite();
-      if (psets.length > 0) {
-        setModelPsets(psets);
+    let mounted = true;
+    let loadingTimeout: NodeJS.Timeout | null = null;
+
+    const loadData = async (forceReload = false) => {
+      if (!mounted) return;
+
+      const model = getLastLoadedModel();
+      const status = model ? getSqliteWarmStatus(model) : 'idle';
+
+      // Skip if status hasn't changed and not forced
+      if (!forceReload && status === lastStatusRef.current) {
+        return;
+      }
+      lastStatusRef.current = status;
+
+      // Only query SQLite if it's ready
+      if (status === 'ready') {
+        setSqliteReady(true);
+        setIsLoading(true);
+
+        // Try to load from SQLite
+        const psets = await getModelPsetsFromSqlite();
+        if (!mounted) return;
+
+        if (psets.length > 0) {
+          setModelPsets(psets);
+        } else {
+          setModelPsets(getModelPsets());
+        }
+
+        // Fetch properties based on selected Pset
+        let props: string[] = [];
+        if (properties.targetPset && properties.targetPset !== "any" && properties.targetPset !== "CustomProperties") {
+          // When a specific pset is selected, ONLY show properties from that pset
+          props = await getModelPropertiesForPsetFromSqlite(undefined, properties.targetPset);
+          if (!mounted) return;
+          setModelProps(props.length > 0 ? props : []);
+        } else {
+          // If no specific pset selected, fetch all properties
+          props = await getModelPropertiesFromSqlite();
+          if (!mounted) return;
+          if (props.length > 0) {
+            setModelProps(props);
+          } else {
+            setModelProps(getModelPropertyNames());
+          }
+        }
+
+        if (mounted) setIsLoading(false);
       } else {
+        // SQLite not ready - use in-memory fallback for now
+        setSqliteReady(false);
+        setIsLoading(false);
         setModelPsets(getModelPsets());
-      }
-
-      // Fetch properties based on selected Pset
-      let props: string[] = [];
-      if (properties.targetPset && properties.targetPset !== "any" && properties.targetPset !== "CustomProperties") {
-        props = await getModelPropertiesForPsetFromSqlite(undefined, properties.targetPset);
-      }
-
-      // If no specific pset selected or query failed/returned empty, fetch all
-      if (props.length === 0) {
-        props = await getModelPropertiesFromSqlite();
-      }
-
-      if (props.length > 0) {
-        setModelProps(props);
-      } else {
         setModelProps(getModelPropertyNames());
       }
     };
-    loadData();
+
+    // Initial load
+    loadData(true);
+
+    // Debounced handler for events
+    const handleSqliteEvent = () => {
+      if (loadingTimeout) clearTimeout(loadingTimeout);
+      loadingTimeout = setTimeout(() => {
+        loadData(false);
+      }, 100);
+    };
+
+    window.addEventListener('sqlite:ready', handleSqliteEvent);
+    window.addEventListener('sqlite:warmStatus', handleSqliteEvent);
+
+    return () => {
+      mounted = false;
+      if (loadingTimeout) clearTimeout(loadingTimeout);
+      window.removeEventListener('sqlite:ready', handleSqliteEvent);
+      window.removeEventListener('sqlite:warmStatus', handleSqliteEvent);
+    };
   }, [node, properties.targetPset]);
   // Return null for ifcNode type to prevent properties panel from rendering anything
   if (node.type === "ifcNode") {
@@ -586,7 +641,11 @@ export function NodePropertyRenderer({
 
           {properties.source !== "attribute" && (
             <div className="space-y-2">
-              <Label htmlFor="targetPset">Property Set</Label>
+              <Label htmlFor="targetPset">
+                Property Set
+                {isLoading && <span className="ml-2 text-xs text-muted-foreground">(loading...)</span>}
+                {!isLoading && !sqliteReady && <span className="ml-2 text-xs text-amber-500">(building database...)</span>}
+              </Label>
               {(properties.action || "get") === "get" ? (
                 <SearchableSelect
                   value={properties.targetPset || ""}
@@ -598,7 +657,8 @@ export function NodePropertyRenderer({
                     "CustomProperties",
                     ...modelPsets.filter(p => p !== "CustomProperties")
                   ]}
-                  placeholder="Select property set..."
+                  placeholder={isLoading ? "Loading property sets..." : "Select property set..."}
+                  disabled={isLoading}
                 />
               ) : (
                 <Select
@@ -610,24 +670,13 @@ export function NodePropertyRenderer({
                   <SelectTrigger id="targetPset">
                     <SelectValue placeholder="Select property set" />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent className="max-h-[400px] overflow-y-auto">
                     <SelectItem value="any">Any Property Set</SelectItem>
-                    <SelectItem value="Pset_WallCommon">Pset_WallCommon</SelectItem>
-                    <SelectItem value="Pset_BeamCommon">Pset_BeamCommon</SelectItem>
-                    <SelectItem value="Pset_SlabCommon">Pset_SlabCommon</SelectItem>
-                    <SelectItem value="Pset_ColumnCommon">
-                      Pset_ColumnCommon
-                    </SelectItem>
-                    <SelectItem value="Pset_WindowCommon">
-                      Pset_WindowCommon
-                    </SelectItem>
-                    <SelectItem value="Pset_DoorCommon">Pset_DoorCommon</SelectItem>
-                    <SelectItem value="Pset_BuildingCommon">
-                      Pset_BuildingCommon
-                    </SelectItem>
-                    <SelectItem value="Pset_SpaceCommon">
-                      Pset_SpaceCommon
-                    </SelectItem>
+                    {modelPsets.map((pset) => (
+                      <SelectItem key={pset} value={pset}>
+                        {pset}
+                      </SelectItem>
+                    ))}
                     <SelectItem value="CustomProperties">
                       CustomProperties
                     </SelectItem>
@@ -674,7 +723,8 @@ export function NodePropertyRenderer({
                       })
                     }
                     options={modelProps}
-                    placeholder="Select property..."
+                    placeholder={isLoading ? "Loading properties..." : "Select property..."}
+                    disabled={isLoading}
                   />
                 ) : (
                   <Input
@@ -1342,10 +1392,10 @@ function SearchableSelect({
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-[300px] p-0" align="start">
-        <Command>
+      <PopoverContent className="w-[300px] p-0 max-h-[400px] overflow-hidden" align="start">
+        <Command className="max-h-[400px]">
           <CommandInput placeholder={`Search ${placeholder.toLowerCase()}...`} />
-          <CommandList>
+          <CommandList className="max-h-[350px] overflow-y-auto">
             <CommandEmpty>{emptyMessage}</CommandEmpty>
             <CommandGroup>
               {options.map((option) => (

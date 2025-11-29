@@ -645,14 +645,6 @@ export class WorkflowExecutor {
           ? inputValues.input
           : undefined;
 
-        console.log("🔧 About to call manageProperties with:", {
-          action: action.toLowerCase(),
-          propertyName,
-          targetPset: effectiveTargetPset,
-          elementCount: nodeElements.length,
-          hasModel: !!modelForQuery
-        });
-
         // Manage properties using the utility function with options object
         const updatedElements = await manageProperties(nodeElements, {
           action: action.toLowerCase(),
@@ -663,7 +655,6 @@ export class WorkflowExecutor {
           model: modelForQuery,
         });
 
-        console.log("✅ manageProperties completed, updated elements:", updatedElements.length);
 
         // Return the result with the updated elements
         result = { elements: updatedElements };
