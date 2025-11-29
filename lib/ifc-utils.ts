@@ -108,6 +108,69 @@ export function getModelPropertyNames(model?: IfcModel): string[] {
   return Array.from(props).sort();
 }
 
+// Get unique property set names from SQLite
+export async function getModelPsetsFromSqlite(model?: IfcModel): Promise<string[]> {
+  const current = model || getLastLoadedModel();
+  if (!current) return [];
+
+  try {
+    // Use the optimized 'psets' table created by ifc2sql
+    const result = await querySqliteDatabase(current, "SELECT DISTINCT pset_name FROM psets WHERE pset_name IS NOT NULL ORDER BY pset_name");
+    return result.map(r => r.pset_name);
+  } catch (e) {
+    console.warn("Failed to query psets from SQLite:", e);
+    return [];
+  }
+}
+
+// Get unique property names from SQLite
+export async function getModelPropertiesFromSqlite(model?: IfcModel): Promise<string[]> {
+  const current = model || getLastLoadedModel();
+  if (!current) return [];
+
+  try {
+    // Use the optimized 'psets' table created by ifc2sql
+    const result = await querySqliteDatabase(current, "SELECT DISTINCT name FROM psets WHERE name IS NOT NULL ORDER BY name");
+    return result.map(r => r.name);
+  } catch (e) {
+    console.warn("Failed to query properties from SQLite:", e);
+    return [];
+  }
+}
+
+// Get unique property names for a specific property set from SQLite
+export async function getModelPropertiesForPsetFromSqlite(model: IfcModel | undefined, psetName: string): Promise<string[]> {
+  const current = model || getLastLoadedModel();
+  if (!current) return [];
+
+  try {
+    // Use the optimized 'psets' table created by ifc2sql
+    const sql = `SELECT DISTINCT name FROM psets WHERE pset_name = '${psetName}' AND name IS NOT NULL ORDER BY name`;
+    const result = await querySqliteDatabase(current, sql);
+    return result.map(r => r.name);
+  } catch (e) {
+    console.warn(`Failed to query properties for pset ${psetName} from SQLite:`, e);
+    // Fallback to all properties so the UI isn't broken
+    return getModelPropertiesFromSqlite(model);
+  }
+}
+
+// Get a list of unique property set names available in the given model
+export function getModelPsets(model?: IfcModel): string[] {
+  const current = model || getLastLoadedModel();
+  if (!current) return [];
+
+  const psets = new Set<string>();
+
+  current.elements.forEach((el) => {
+    if (el.psets) {
+      Object.keys(el.psets).forEach((pset) => psets.add(pset));
+    }
+  });
+
+  return Array.from(psets).sort();
+}
+
 // Worker management
 let ifcWorker: Worker | null = null;
 let isWorkerInitialized = false;
@@ -1230,361 +1293,7 @@ export interface PropertyActions {
   propertyValue?: any;
   targetPset?: string;
   source?: string;
-}
-
-// More flexible properties management function that accepts an options object
-export function manageProperties(
-  elements: IfcElement[],
-  options: PropertyActions
-): IfcElement[] {
-  const { action, propertyName, propertyValue, targetPset = "any", source = "property" } = options;
-
-
-  // Check if propertyValue is a mapping object (element-specific values)
-  const isMapping = propertyValue &&
-    typeof propertyValue === 'object' &&
-    !Array.isArray(propertyValue) &&
-    (propertyValue.mappings || propertyValue.elements);
-
-  let elementValueMap: Record<string, any> = {};
-  let elementsModified = 0;
-
-  if (isMapping) {
-    // Extract the mappings from the value object
-    if (propertyValue.mappings) {
-      elementValueMap = propertyValue.mappings;
-    } else if (propertyValue.elements) {
-      elementValueMap = propertyValue.elements;
-    }
-    console.log(`Using element-specific values for ${Object.keys(elementValueMap).length} elements`);
-  }
-
-  // Check for undefined or empty elements
-  if (!elements || elements.length === 0) {
-    return [];
-  }
-
-  // Make sure elements is an array
-  if (!Array.isArray(elements)) {
-    return [];
-  }
-
-  // Handle empty property name
-  if (!propertyName) {
-    return elements;
-  }
-
-  // Parse the property name to extract Pset if provided in format "Pset:Property"
-  let actualPropertyName = propertyName;
-  let explicitPset = "";
-
-  if (propertyName.includes(":")) {
-    const parts = propertyName.split(":");
-    explicitPset = parts[0];
-    actualPropertyName = parts[1];
-  }
-
-  // Determine the effective target Pset (explicit from propertyName overrides options.targetPset)
-  const effectiveTargetPset = explicitPset || targetPset;
-
-  // Create a new array to return
-  const result = elements.map((element) => {
-    // Clone the element to avoid modifying the original
-    const updatedElement = {
-      ...element,
-      properties: element.properties ? { ...element.properties } : {},
-      psets: element.psets ? JSON.parse(JSON.stringify(element.psets)) : {},
-      qtos: element.qtos ? JSON.parse(JSON.stringify(element.qtos)) : {}
-    };
-
-    // Handle attribute access directly
-    if (source === "attribute") {
-      // Try to get attribute from top-level element or properties
-      let value = (element as any)[propertyName];
-
-      // Fallback to properties if not found on root
-      if (value === undefined && element.properties) {
-        value = element.properties[propertyName];
-      }
-
-      if (action === "get") {
-        updatedElement.propertyInfo = {
-          name: propertyName,
-          exists: value !== undefined,
-          value: value,
-          psetName: "Attributes"
-        };
-      } else if (action === "set") {
-        // Set attribute on the object
-        (updatedElement as any)[propertyName] = propertyValue;
-
-        // Also update properties for consistency if it was there
-        if (updatedElement.properties) {
-          updatedElement.properties[propertyName] = propertyValue;
-        }
-
-        updatedElement.propertyInfo = {
-          name: propertyName,
-          exists: true,
-          value: propertyValue,
-          psetName: "Attributes"
-        };
-      }
-
-      return updatedElement;
-    }
-
-    // Function to check if property exists and get its location and value
-    const findProperty = (
-      element: IfcElement,
-      propName: string,
-      psetName: string
-    ): {
-      exists: boolean;
-      value: any;
-      location: string;
-      psetName: string;
-    } => {
-      // Initialize result
-      const result = {
-        exists: false,
-        value: null,
-        location: "",
-        psetName: psetName !== "any" ? psetName : "",
-      };
-
-      // Special case for IsExternal property which might have different capitalizations
-      const isExternalVariants = [
-        "IsExternal",
-        "isExternal",
-        "ISEXTERNAL",
-        "isexternal",
-      ];
-      const isCheckingIsExternal = isExternalVariants.includes(propName);
-
-      // 1. First check in the specified property set if provided
-      if (psetName !== "any" && element.psets && element.psets[psetName]) {
-        // Direct check
-        if (propName in element.psets[psetName]) {
-          result.exists = true;
-          result.value = element.psets[psetName][propName];
-          result.location = "psets";
-          return result;
-        }
-
-        // For IsExternal, check all variants
-        if (isCheckingIsExternal) {
-          for (const variant of isExternalVariants) {
-            if (variant in element.psets[psetName]) {
-              result.exists = true;
-              result.value = element.psets[psetName][variant];
-              result.location = "psets";
-              result.psetName = psetName;
-              return result;
-            }
-          }
-        }
-      }
-
-      // 2. Check in direct properties at root level - often duplicate data
-      if (element.properties) {
-        // Direct check
-        if (propName in element.properties) {
-          result.exists = true;
-          result.value = element.properties[propName];
-          result.location = "properties";
-          return result;
-        }
-
-        // For IsExternal, check all variants
-        if (isCheckingIsExternal) {
-          for (const variant of isExternalVariants) {
-            if (variant in element.properties) {
-              result.exists = true;
-              result.value = element.properties[variant];
-              result.location = "properties";
-              return result;
-            }
-          }
-        }
-      }
-
-      // 3. If target is "any", check all property sets
-      if (psetName === "any" && element.psets) {
-        for (const [setName, props] of Object.entries(element.psets)) {
-          // Direct check in this pset
-          if (propName in props) {
-            result.exists = true;
-            result.value = props[propName];
-            result.location = "psets";
-            result.psetName = setName;
-            return result;
-          }
-
-          // For IsExternal, check all variants
-          if (isCheckingIsExternal) {
-            for (const variant of isExternalVariants) {
-              if (variant in props) {
-                result.exists = true;
-                result.value = props[variant];
-                result.location = "psets";
-                result.psetName = setName;
-                return result;
-              }
-            }
-          }
-        }
-      }
-
-      // 4. Check quantity sets too if targetPset is "any"
-      if (psetName === "any" && element.qtos) {
-        for (const [qtoName, quantities] of Object.entries(element.qtos)) {
-          if (propName in quantities) {
-            result.exists = true;
-            result.value = quantities[propName];
-            result.location = "qtos";
-            result.psetName = qtoName;
-            return result;
-          }
-        }
-      }
-
-      return result;
-    };
-
-    // Find the property
-    const propertyResult = findProperty(
-      element,
-      actualPropertyName,
-      effectiveTargetPset
-    );
-
-    // Handle the property based on the action
-    switch (action.toLowerCase()) {
-      case "get":
-        // Store property information in the element
-        updatedElement.propertyInfo = {
-          name: actualPropertyName,
-          exists: propertyResult.exists,
-          value: propertyResult.value,
-          psetName: propertyResult.psetName,
-        };
-        break;
-
-      case "set":
-      case "add":
-        // Determine the value to use for this specific element
-        let valueToSet = propertyValue;
-
-        if (isMapping) {
-          // Look up the element-specific value by GlobalId
-          const globalId = element.properties?.GlobalId;
-          if (globalId && elementValueMap[globalId] !== undefined) {
-            valueToSet = elementValueMap[globalId];
-            elementsModified++;
-          } else {
-            // Skip this element if no mapping exists for it
-            // Don't log this as it's expected for elements not in the mapping
-            break;
-          }
-        }
-
-        // Set or add the property
-        if (!updatedElement.properties) {
-          updatedElement.properties = {};
-        }
-        // Always update the direct properties for convenient access
-        updatedElement.properties[actualPropertyName] = valueToSet;
-
-        // Determine where to store the property
-        if (effectiveTargetPset !== "any") {
-          // Make sure psets exists
-          if (!updatedElement.psets) {
-            updatedElement.psets = {};
-          }
-
-          // Make sure the target pset exists
-          if (!updatedElement.psets[effectiveTargetPset]) {
-            updatedElement.psets[effectiveTargetPset] = {};
-          }
-
-          // Add the property to the target pset
-          updatedElement.psets[effectiveTargetPset][actualPropertyName] =
-            valueToSet;
-        }
-
-        // Store property info for UI feedback
-        updatedElement.propertyInfo = {
-          name: actualPropertyName,
-          exists: true,
-          value: valueToSet,
-          psetName:
-            effectiveTargetPset !== "any" ? effectiveTargetPset : "properties",
-        };
-        break;
-
-      case "remove":
-        // Remove the property
-        let removed = false;
-
-        // Remove from direct properties
-        if (updatedElement.properties && actualPropertyName in updatedElement.properties) {
-          delete updatedElement.properties[actualPropertyName];
-          removed = true;
-        }
-
-        // If a specific pset is targeted, only remove from there
-        if (effectiveTargetPset !== "any") {
-          if (
-            updatedElement.psets?.[effectiveTargetPset]?.[actualPropertyName] !==
-            undefined
-          ) {
-            delete updatedElement.psets[effectiveTargetPset][actualPropertyName];
-            removed = true;
-          }
-        } else {
-          // Otherwise remove from all psets
-          if (updatedElement.psets) {
-            for (const psetName in updatedElement.psets) {
-              if (actualPropertyName in updatedElement.psets[psetName]) {
-                delete updatedElement.psets[psetName][actualPropertyName];
-                removed = true;
-              }
-            }
-          }
-        }
-
-        // Also clean up qtos
-        if (effectiveTargetPset === "any" && updatedElement.qtos) {
-          for (const qtoName in updatedElement.qtos) {
-            if (actualPropertyName in updatedElement.qtos[qtoName]) {
-              delete updatedElement.qtos[qtoName][actualPropertyName];
-              removed = true;
-            }
-          }
-        }
-
-        // Store property info for UI feedback
-        updatedElement.propertyInfo = {
-          name: actualPropertyName,
-          exists: false,
-          value: null,
-          psetName: propertyResult.psetName,
-        };
-        break;
-
-      default:
-
-    }
-
-    return updatedElement;
-  });
-
-  // Log summary if using mapping
-  if (isMapping && elementsModified > 0) {
-  }
-
-  return result;
+  model?: IfcModel;
 }
 
 // Classification functions
@@ -1820,7 +1529,7 @@ export function performAnalysis(
     return { error: "No elements to analyze" };
   }
 
-  // NOTE: In a real implementation, we would use IfcOpenShell plus additional libraries
+  // NOTE: We would use IfcOpenShell plus additional libraries
   // for specific analysis types (clash detection, spatial analysis, etc.)
 
   switch (analysisType) {
@@ -1834,7 +1543,7 @@ export function performAnalysis(
       const tolerance = Number(options.tolerance) || 10;
       const clashes = [];
 
-      // In a real implementation, we would check for geometric intersections
+      // We would check for geometric intersections
       // For now, simulate clash detection with random data
       for (let i = 0; i < Math.min(20, elements.length); i++) {
         const randomRefIndex = Math.floor(
@@ -1865,7 +1574,7 @@ export function performAnalysis(
 
     case "adjacency":
       // Adjacency analysis would check for elements that are adjacent to each other
-      // In a real implementation, we would use computational geometry
+      // We would use computational geometry
 
       const adjacencyResults = elements.map((element) => {
         // In reality, you'd check which elements are actually adjacent
@@ -1899,7 +1608,7 @@ export function performAnalysis(
       // Spatial analysis checks space utilization, occupancy, etc.
       const metric = options.metric || "area";
 
-      // Calculate areas (in a real app, would extract from IFC)
+      // Calculate areas (could extract from IFC)
       let totalArea = 0;
       let totalVolume = 0;
 

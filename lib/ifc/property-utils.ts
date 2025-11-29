@@ -1,4 +1,5 @@
-import type { IfcElement } from "@/lib/ifc-utils";
+import type { IfcElement, IfcModel } from "@/lib/ifc-utils";
+import { querySqliteDatabase, getLastLoadedModel } from "@/lib/ifc-utils";
 
 /**
  * Get a property value from an element using IfcOpenShell conventions
@@ -6,13 +7,15 @@ import type { IfcElement } from "@/lib/ifc-utils";
  * @param element The IFC element
  * @param propertyName The name of the property to retrieve
  * @param psetName Optional property set name to look in
+ * @param model Optional model reference for SQLite fallback
  * @returns The property value or undefined if not found
  */
-function getPropertyValue(
+async function getPropertyValue(
   element: IfcElement,
   propertyName: string,
-  psetName?: string
-): any {
+  psetName?: string,
+  model?: IfcModel
+): Promise<any> {
   // If pset specified, look only there
   if (psetName && element.psets?.[psetName]) {
     return element.psets[psetName][propertyName];
@@ -24,7 +27,7 @@ function getPropertyValue(
   }
 
   // Then check all property sets (simulates ifcopenshell.util.element.get_property)
-  if (element.psets) {
+  if (element.psets && Object.keys(element.psets).length > 0) {
     for (const psetName in element.psets) {
       const pset = element.psets[psetName];
       if (pset && pset[propertyName] !== undefined) {
@@ -40,6 +43,35 @@ function getPropertyValue(
       if (qto && qto[propertyName] !== undefined) {
         return qto[propertyName];
       }
+    }
+  }
+
+  // Fallback to SQLite if psets are empty (fast load scenario)
+  if (!element.psets || Object.keys(element.psets).length === 0) {
+    try {
+      const currentModel = model || getLastLoadedModel();
+      if (currentModel && element.expressId) {
+        // Query the psets table for this element's properties
+        let sql: string;
+        if (psetName) {
+          sql = `SELECT value FROM psets WHERE ifc_id = ${element.expressId} AND pset_name = '${psetName}' AND name = '${propertyName}' LIMIT 1`;
+        } else {
+          sql = `SELECT value FROM psets WHERE ifc_id = ${element.expressId} AND name = '${propertyName}' LIMIT 1`;
+        }
+
+        console.log(`🔍 Querying SQLite for property '${propertyName}' on element ${element.expressId}:`, sql);
+        const result = await querySqliteDatabase(currentModel, sql);
+        console.log(`📊 SQLite result:`, result);
+
+        if (result && result.length > 0) {
+          console.log(`✅ Found property value:`, result[0].value);
+          return result[0].value;
+        } else {
+          console.warn(`❌ No property value found for '${propertyName}' on element ${element.expressId}`);
+        }
+      }
+    } catch (e) {
+      console.warn(`Failed to query property ${propertyName} from SQLite:`, e);
     }
   }
 
@@ -228,13 +260,26 @@ export function getAllProperties(element: IfcElement): Record<string, any> {
 }
 
 // Property management functions - Using IfcOpenShell-like approach
-export function manageProperties(
+export async function manageProperties(
   elements: IfcElement[],
-  action = "get",
-  propertyName = "",
-  propertyValue = "",
-  targetPset = "CustomProperties"
-): IfcElement[] {
+  options: {
+    action?: string;
+    propertyName?: string;
+    propertyValue?: any;
+    targetPset?: string;
+    source?: string;
+    model?: IfcModel;
+  } = {}
+): Promise<IfcElement[]> {
+  const {
+    action = "get",
+    propertyName = "",
+    propertyValue = "",
+    targetPset = "CustomProperties",
+    source = "property",
+    model
+  } = options;
+
   console.log(
     "Managing properties:",
     action,
@@ -244,17 +289,20 @@ export function manageProperties(
   );
 
   // Handle empty or "any" values for targetPset
-  if (targetPset === "any") {
-    targetPset = "";
+  let effectiveTargetPset = targetPset;
+  if (effectiveTargetPset === "any") {
+    effectiveTargetPset = "";
   }
 
   const result = [...elements];
 
   switch (action.toLowerCase()) {
     case "get":
+      console.log("📝 In manageProperties 'get' case, processing", result.length, "elements");
       // Return original elements, with propertyInfo added for the specified property
-      return result.map((element) => {
-        const value = getPropertyValue(element, propertyName);
+      return Promise.all(result.map(async (element, index) => {
+        console.log(`🔍 Processing element ${index + 1}/${result.length}, expressId: ${element.expressId}`);
+        const value = await getPropertyValue(element, propertyName, effectiveTargetPset, model);
         const psetName = findPropertySet(element, propertyName);
 
         return {
@@ -266,7 +314,7 @@ export function manageProperties(
             psetName: psetName,
           },
         };
-      });
+      }));
 
     case "set":
       // Set property, always using targetPset
@@ -275,7 +323,7 @@ export function manageProperties(
           element,
           propertyName,
           propertyValue,
-          targetPset || "CustomProperties"
+          effectiveTargetPset || "CustomProperties"
         )
       );
 
@@ -286,14 +334,14 @@ export function manageProperties(
           element,
           propertyName,
           propertyValue,
-          targetPset || "CustomProperties"
+          effectiveTargetPset || "CustomProperties"
         )
       );
 
     case "remove":
       // Remove the property from all elements
       return result.map((element) =>
-        removePropertyValue(element, propertyName, targetPset)
+        removePropertyValue(element, propertyName, effectiveTargetPset)
       );
 
     default:

@@ -43,6 +43,7 @@ interface SaveWorkflowDialogProps {
   onSaveLocally: (workflow: Workflow) => void;
   flowData: any;
   existingWorkflow?: Workflow | null;
+  captureScreenshot?: () => Promise<string>;
 }
 
 export function SaveWorkflowDialog({
@@ -52,6 +53,7 @@ export function SaveWorkflowDialog({
   onSaveLocally,
   flowData,
   existingWorkflow,
+  captureScreenshot,
 }: SaveWorkflowDialogProps) {
   const [name, setName] = useState(existingWorkflow?.name || "");
   const [description, setDescription] = useState(
@@ -127,7 +129,18 @@ export function SaveWorkflowDialog({
 
     const id = existingWorkflow?.id || crypto.randomUUID();
     const createdAt = existingWorkflow?.createdAt || new Date().toISOString();
-    const thumbnail = await workflowStorage.generateThumbnail(flowData);
+    
+    // Use captureScreenshot if provided, otherwise fall back to Canvas-based generation
+    let thumbnail = '';
+    if (captureScreenshot) {
+      thumbnail = await captureScreenshot();
+      // If capture failed, fall back to Canvas method
+      if (!thumbnail) {
+        thumbnail = await workflowStorage.generateThumbnail(flowData);
+      }
+    } else {
+      thumbnail = await workflowStorage.generateThumbnail(flowData);
+    }
 
     const workflow = {
       id,

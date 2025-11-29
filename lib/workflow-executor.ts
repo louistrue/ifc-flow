@@ -3,7 +3,6 @@ import {
   filterElements,
   transformElements,
   extractQuantities,
-  manageProperties,
   manageClassifications,
   spatialQuery,
   queryRelationships,
@@ -17,6 +16,7 @@ import {
   assignMaterial,
   createMaterial,
 } from "@/lib/ifc-utils";
+import { manageProperties } from "@/lib/ifc/property-utils";
 import { performAnalysis } from "@/lib/ifc/analysis-utils";
 import { withActiveViewer, hasActiveModel } from "@/lib/ifc/viewer-manager";
 import * as THREE from "three";
@@ -640,14 +640,30 @@ export class WorkflowExecutor {
           }
         }
 
+        // Get the model reference for SQLite queries
+        const modelForQuery = inputValues.input && !Array.isArray(inputValues.input) && inputValues.input.id
+          ? inputValues.input
+          : undefined;
+
+        console.log("🔧 About to call manageProperties with:", {
+          action: action.toLowerCase(),
+          propertyName,
+          targetPset: effectiveTargetPset,
+          elementCount: nodeElements.length,
+          hasModel: !!modelForQuery
+        });
+
         // Manage properties using the utility function with options object
-        const updatedElements = manageProperties(nodeElements, {
+        const updatedElements = await manageProperties(nodeElements, {
           action: action.toLowerCase(),
           propertyName,
           propertyValue: valueToUse,
           targetPset: effectiveTargetPset,
           source,
+          model: modelForQuery,
         });
+
+        console.log("✅ manageProperties completed, updated elements:", updatedElements.length);
 
         // Return the result with the updated elements
         result = { elements: updatedElements };

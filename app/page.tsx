@@ -1198,6 +1198,7 @@ function FlowWithProvider() {
           onDelete={handleDelete}
           onToggleSidebar={handleSidebarToggle}
           sidebarOpen={sidebarOpen}
+          reactFlowWrapper={reactFlowWrapper}
         />
         <div className={`flex-1 h-full relative`} ref={reactFlowWrapper}>
           {isFileDragging && (

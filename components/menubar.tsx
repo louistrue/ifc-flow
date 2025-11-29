@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback, type RefObject } from "react";
 import { useTheme } from "next-themes";
 import {
   Menubar,
@@ -26,7 +26,7 @@ import { WorkflowLibrary } from "@/components/workflow-library";
 import { useToast } from "@/hooks/use-toast";
 import { useIsMobile } from "@/hooks/use-mobile";
 import type { Workflow } from "@/lib/workflow-storage";
-import { cleanWorkflowData } from "@/lib/workflow-storage";
+import { cleanWorkflowData, captureCanvasScreenshot } from "@/lib/workflow-storage";
 import {
   formatKeyCombination,
   useKeyboardShortcuts,
@@ -60,6 +60,7 @@ interface AppMenubarProps {
   onDelete: () => void;
   onToggleSidebar: () => void;
   sidebarOpen?: boolean;
+  reactFlowWrapper?: RefObject<HTMLDivElement>;
 }
 
 export function AppMenubar({
@@ -87,6 +88,7 @@ export function AppMenubar({
   onDelete,
   onToggleSidebar,
   sidebarOpen = false,
+  reactFlowWrapper,
 }: AppMenubarProps) {
   const [openFileDialogOpen, setOpenFileDialogOpen] = useState(false);
   const [saveWorkflowDialogOpen, setSaveWorkflowDialogOpen] = useState(false);
@@ -147,6 +149,40 @@ export function AppMenubar({
       description: `${workflow.name} has been saved to your device`,
     });
   };
+
+  // Create screenshot capture callback
+  const handleCaptureScreenshot = useCallback(async (): Promise<string> => {
+    if (!reactFlowWrapper?.current) {
+      console.warn('ReactFlow wrapper not available for screenshot');
+      return '';
+    }
+
+    // Fit view to show all nodes before capturing with generous padding
+    const fitView = () => {
+      if (reactFlowInstance) {
+        // Use larger padding (0.25 = 25%) to ensure all nodes are fully visible with margin
+        // This ensures nodes aren't cut off at the edges
+        reactFlowInstance.fitView({ 
+          padding: 0.25, 
+          duration: 0,
+          includeHiddenNodes: false,
+          maxZoom: 1.5,
+          minZoom: 0.1
+        });
+      }
+    };
+
+    try {
+      const screenshot = await captureCanvasScreenshot(
+        reactFlowWrapper.current,
+        fitView
+      );
+      return screenshot;
+    } catch (error) {
+      console.error('Failed to capture screenshot:', error);
+      return '';
+    }
+  }, [reactFlowWrapper, reactFlowInstance]);
 
   const handleLoadWorkflow = (workflow: Workflow) => {
     onLoadWorkflow(workflow);
@@ -505,6 +541,7 @@ export function AppMenubar({
         onSaveLocally={handleSaveLocally}
         flowData={cleanWorkflowData(getFlowObject())}
         existingWorkflow={currentWorkflow}
+        captureScreenshot={handleCaptureScreenshot}
       />
 
       <WorkflowLibrary
