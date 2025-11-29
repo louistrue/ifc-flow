@@ -192,6 +192,15 @@ function dispatchWarmStatus(modelId: string, status: WarmStatus, extra?: any) {
   } catch { }
 }
 
+// Preload worker in background (fire-and-forget)
+export function preloadWorker(): void {
+  if (typeof window !== 'undefined') {
+    initializeWorker().catch(() => {
+      // Silently fail - worker will initialize on first use anyway
+    });
+  }
+}
+
 // Initialize the worker
 export async function initializeWorker(): Promise<void> {
   if (isWorkerInitialized) {
@@ -420,7 +429,7 @@ export async function loadIfcFile(
       // Send the message to the worker
       ifcWorker!.postMessage(
         {
-          action: "loadIfcFast",
+          action: "loadIfc",
           messageId,
           data: {
             arrayBuffer,

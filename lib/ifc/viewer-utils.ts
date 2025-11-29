@@ -62,26 +62,45 @@ export class IfcViewer {
     );
     this.camera.lookAt(0, 0, 0); // Look at origin initially
 
-    // Set up renderer
-    this.renderer = new THREE.WebGLRenderer({ antialias: true });
+    // Set up renderer with better quality settings
+    this.renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      alpha: false,
+      powerPreference: "high-performance"
+    });
     this.renderer.setSize(container.clientWidth, container.clientHeight);
-    this.renderer.setPixelRatio(window.devicePixelRatio);
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // Cap at 2 for performance
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.0;
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.renderer.setClearColor(new THREE.Color(bgColor));
     container.appendChild(this.renderer.domElement);
 
     // Set up controls
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = true;
+    this.controls.dampingFactor = 0.05;
 
-    // Add lighting
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.7); // Slightly brighter ambient
-    this.scene.add(ambientLight);
+    // Add better lighting setup for realistic rendering
+    // Hemisphere light for natural ambient illumination (sky/ground)
+    const hemisphereLight = new THREE.HemisphereLight(0xffffff, 0x8d8d8d, 0.6);
+    hemisphereLight.position.set(0, 50, 0);
+    this.scene.add(hemisphereLight);
 
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8); // Slightly less intense directional
-    directionalLight.position.set(10, 20, 10);
-    this.scene.add(directionalLight);
-    const directionalLight2 = new THREE.DirectionalLight(0xffffff, 0.5); // Add another light from a different angle
-    directionalLight2.position.set(-10, -5, -15);
-    this.scene.add(directionalLight2);
+    // Main key light - simulates sun
+    const keyLight = new THREE.DirectionalLight(0xffffff, 1.2);
+    keyLight.position.set(15, 30, 20);
+    this.scene.add(keyLight);
+
+    // Fill light - softer, from opposite side
+    const fillLight = new THREE.DirectionalLight(0xffffff, 0.4);
+    fillLight.position.set(-15, 10, -10);
+    this.scene.add(fillLight);
+
+    // Rim/back light - adds depth and separation
+    const rimLight = new THREE.DirectionalLight(0xffffff, 0.3);
+    rimLight.position.set(0, -10, -20);
+    this.scene.add(rimLight);
 
 
     // Add grid and axes if needed
@@ -108,6 +127,11 @@ export class IfcViewer {
 
     // Handle window resize
     window.addEventListener("resize", this.handleResize);
+  }
+
+  setBackgroundColor(color: string) {
+    this.scene.background = new THREE.Color(color);
+    this.renderer.setClearColor(new THREE.Color(color));
   }
 
   // Initialize IfcAPI for web-ifc
@@ -327,12 +351,16 @@ export class IfcViewer {
       const matId = `${color.x}-${color.y}-${color.z}-${color.w}`;
       let material = this.materials[matId];
       if (!material) {
-        material = new THREE.MeshLambertMaterial({
+        // Use MeshStandardMaterial for better PBR rendering
+        material = new THREE.MeshStandardMaterial({
           color: new THREE.Color(color.x, color.y, color.z),
           opacity: color.w,
           transparent: color.w < 1.0,
           side: THREE.DoubleSide,
           depthWrite: color.w === 1.0,
+          roughness: 0.7, // Slightly rough for realistic look
+          metalness: 0.1, // Low metalness for building materials
+          flatShading: false, // Smooth shading
         });
         this.materials[matId] = material;
       }
@@ -413,7 +441,8 @@ export class IfcViewer {
     const fov = this.camera.fov * (Math.PI / 180);
     let cameraDistance = Math.abs(maxDim / (2 * Math.tan(fov / 2)));
     const sizeLength = size.length();
-    cameraDistance = Math.max(cameraDistance * 1.6, sizeLength * 0.6, 1);
+    // Tighter fit - model fills more of the viewport
+    cameraDistance = Math.max(cameraDistance * 1.1, sizeLength * 0.45, 1);
 
     if (!Number.isFinite(cameraDistance)) {
       console.warn("Calculated infinite camera distance. Resetting camera.");
@@ -449,9 +478,13 @@ export class IfcViewer {
     const width = this.container.clientWidth;
     const height = this.container.clientHeight;
 
+    // Prevent issues with zero dimensions
+    if (width <= 0 || height <= 0) return;
+
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
-    this.renderer.setSize(width, height);
+    this.renderer.setSize(width, height, true); // updateStyle=true ensures CSS is updated
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   };
 
   // Animation loop

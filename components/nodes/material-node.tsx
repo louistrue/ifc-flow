@@ -24,7 +24,7 @@ interface MaterialNodeProps {
 
 export const MaterialNode = memo(
     ({ data, isConnectable }: MaterialNodeProps) => {
-        const { properties, label = "Material Node", isLoading, error } = data;
+        const { properties, label = "Materials", isLoading, error } = data;
 
         const action = properties?.action || "get";
         const materialName = properties?.materialName || "";

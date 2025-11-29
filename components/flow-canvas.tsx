@@ -101,12 +101,18 @@ export function FlowCanvas({
           };
         }
 
-        // Create a new node
+        // Create a new node with proper label
+        // Map node types to their display labels
+        const nodeLabelMap: Record<string, string> = {
+          materialNode: "Materials",
+        };
+        const nodeLabel = nodeLabelMap[nodeType] || nodeType.replace("Node", "");
+
         const newNode = {
           id: `${nodeType}-${Date.now()}`,
           type: nodeType,
           position,
-          data: { label: `${nodeType.replace("Node", "")}`, properties: defaultProperties },
+          data: { label: nodeLabel, properties: defaultProperties },
         };
 
         // Add the new node
@@ -120,61 +126,86 @@ export function FlowCanvas({
 
         // Check if it's an IFC file
         if (file.name.toLowerCase().endsWith(".ifc")) {
-          try {
-            // Create a new IFC node
-            const newNodeId = `ifcNode-${Date.now()}`;
+          // Create a new IFC node
+          const newNodeId = `ifcNode-${Date.now()}`;
 
-            // Position the node at the drop location
-            const position = {
-              x: cursorPosition.x,
-              y: cursorPosition.y,
-            };
+          // Position the node at the drop location
+          const position = {
+            x: cursorPosition.x,
+            y: cursorPosition.y,
+          };
 
-            // Add the node first with a loading state
-            reactFlowInstance.addNodes({
-              id: newNodeId,
-              type: "ifcNode",
-              position,
-              data: {
-                label: file.name,
-                properties: { file: file.name },
-                isLoading: true,
+          // Add the node first with a loading state
+          reactFlowInstance.addNodes({
+            id: newNodeId,
+            type: "ifcNode",
+            position,
+            data: {
+              label: file.name,
+              properties: { file: file.name },
+              isLoading: true,
+              error: null,
+            },
+          });
+
+          // Use dynamic import for file uploader
+          import("@/lib/ifc/file-uploader").then(({ handleFileUpload }) => {
+            handleFileUpload(
+              file,
+              (model) => {
+                // Success: update node with full model data
+                reactFlowInstance.setNodes((nds) =>
+                  nds.map((node) => {
+                    if (node.id === newNodeId) {
+                      return {
+                        ...node,
+                        data: {
+                          ...node.data,
+                          model: model, // Contains schema, project, elementCounts, totalElements
+                          isLoading: false,
+                          error: null,
+                        },
+                      };
+                    }
+                    return node;
+                  })
+                );
+
+                toast({
+                  title: "IFC file loaded",
+                  description: `Successfully loaded ${file.name}`,
+                });
               },
-            });
+              (error) => {
+                // Error: update node with error message
+                reactFlowInstance.setNodes((nds) =>
+                  nds.map((node) => {
+                    if (node.id === newNodeId) {
+                      return {
+                        ...node,
+                        data: {
+                          ...node.data,
+                          isLoading: false,
+                          error: error.message || "Failed to load IFC",
+                        },
+                      };
+                    }
+                    return node;
+                  })
+                );
 
-            // Load the IFC file
-            const model = await loadIfcFile(file);
-
-            // Update the node with the loaded model
-            reactFlowInstance.setNodes((nds) =>
-              nds.map((node) => {
-                if (node.id === newNodeId) {
-                  return {
-                    ...node,
-                    data: {
-                      ...node.data,
-                      model,
-                      isLoading: false,
-                    },
-                  };
-                }
-                return node;
-              })
+                toast({
+                  title: "Error loading IFC file",
+                  description: error.message,
+                  variant: "destructive",
+                });
+              },
+              (percentage, message) => {
+                // Progress updates
+                console.log(`Loading ${file.name}: ${percentage}% - ${message}`);
+              }
             );
-
-            toast({
-              title: "IFC file loaded",
-              description: `Successfully loaded ${file.name}`,
-            });
-          } catch (error: unknown) {
-            console.error("Error loading IFC file:", error);
-            toast({
-              title: "Error loading IFC file",
-              description:
-                error instanceof Error ? error.message : String(error),
-              variant: "destructive",
-            });
-          }
+          });
         } else {
           toast({
             title: "Invalid file type",

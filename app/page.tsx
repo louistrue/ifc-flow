@@ -42,7 +42,7 @@ import { ParameterNode } from "@/components/nodes/parameter-node";
 import { PythonNode } from "@/components/nodes/python-node";
 import { Toaster } from "@/components/toaster";
 import { WorkflowExecutor } from "@/lib/workflow-executor";
-import { loadIfcFile, getIfcFile, downloadExportedFile } from "@/lib/ifc-utils";
+import { loadIfcFile, getIfcFile, downloadExportedFile, preloadWorker } from "@/lib/ifc-utils";
 import { useToast } from "@/hooks/use-toast";
 import { FileUp } from "lucide-react";
 import type { Workflow } from "@/lib/workflow-storage";
@@ -147,6 +147,9 @@ function FlowWithProvider() {
     setShowGridState(gridSetting);
     setShowMinimapState(minimapSetting);
     setIsSettingsLoaded(true);
+    
+    // Pre-warm Pyodide worker in background for faster first file load
+    preloadWorker();
   }, []); // Only run once on mount
 
 
@@ -744,27 +747,79 @@ function FlowWithProvider() {
         // Save current state to history before opening new file
         saveToHistory(nodes, edges);
 
-        const result = await loadIfcFile(file);
-
+        // Create a new IFC node with loading state
+        const newNodeId = generateId();
         const position = { x: 100, y: 100 };
+        
         const newNode: Node = {
-          id: generateId(),
+          id: newNodeId,
           type: "ifcNode",
           position,
           data: {
-            fileName: file.name,
-            fileSize: file.size,
-            fileHandle: result,
-            modelState: null,
+            label: file.name,
+            properties: { file: file.name },
+            isLoading: true,
+            error: null,
           },
-          // CSS handles node styling now
         };
 
         setNodes((nds) => [...nds, newNode]);
 
-        toast({
-          title: "IFC File Loaded",
-          description: `Successfully loaded ${file.name}`,
+        // Use dynamic import for file uploader
+        import("@/lib/ifc/file-uploader").then(({ handleFileUpload }) => {
+          handleFileUpload(
+            file,
+            (model) => {
+              // Success: update node with full model data
+              setNodes((nodes) =>
+                nodes.map((node) =>
+                  node.id === newNodeId
+                    ? {
+                        ...node,
+                        data: {
+                          ...node.data,
+                          model: model, // Contains schema, project, elementCounts, totalElements
+                          isLoading: false,
+                          error: null,
+                        },
+                      }
+                    : node
+                )
+              );
+              
+              toast({
+                title: "IFC File Loaded",
+                description: `Successfully loaded ${file.name}`,
+              });
+            },
+            (error) => {
+              // Error: update node with error message
+              setNodes((nodes) =>
+                nodes.map((node) =>
+                  node.id === newNodeId
+                    ? {
+                        ...node,
+                        data: {
+                          ...node.data,
+                          isLoading: false,
+                          error: error.message || "Failed to load IFC",
+                        },
+                      }
+                    : node
+                )
+              );
+              
+              toast({
+                title: "Error",
+                description: `Failed to load IFC file: ${error.message}`,
+                variant: "destructive",
+              });
+            },
+            (percentage, message) => {
+              // Progress updates
+              console.log(`Loading ${file.name}: ${percentage}% - ${message}`);
+            }
+          );
         });
       } catch (error) {
         toast({
