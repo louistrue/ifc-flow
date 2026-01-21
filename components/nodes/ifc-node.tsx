@@ -2,11 +2,14 @@
 
 import { memo, useState, useCallback, useRef } from "react";
 import { Handle, Position, useReactFlow, type NodeProps } from "reactflow";
-import { FileUp, Info, Building } from "lucide-react";
+import { FileUp, Info, Building, Cloud } from "lucide-react";
 import { NodeLoadingIndicator } from "./node-loading-indicator";
 import { IfcNodeData as BaseIfcNodeData } from "./node-types";
 import { getElementTypeColor, formatElementType } from "../../lib/ifc/element-utils";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+
+// Custom event for opening model source dialog
+export const OPEN_MODEL_SOURCE_EVENT = "openModelSourceDialog";
 
 interface ExtendedIfcNodeData extends BaseIfcNodeData {
   isLoading?: boolean;
@@ -141,6 +144,15 @@ export const IfcNode = memo(({ id, data, isConnectable, selected }: NodeProps<Ex
     },
     [id, setNodes]
   );
+
+  // Function to open the model source dialog via custom event
+  const openModelSourceDialog = useCallback((event: React.MouseEvent) => {
+    event.stopPropagation();
+    event.preventDefault();
+    window.dispatchEvent(
+      new CustomEvent(OPEN_MODEL_SOURCE_EVENT, { detail: { nodeId: id } })
+    );
+  }, [id]);
 
   const onDoubleClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     // Stop event propagation to prevent the default node selection behavior
@@ -403,23 +415,39 @@ export const IfcNode = memo(({ id, data, isConnectable, selected }: NodeProps<Ex
         </div>
       )}
       {!data.isLoading && !data.error && !data.properties?.file && !data.isEmptyNode && (
-        <div className="p-3 text-xs text-gray-500 dark:text-gray-400">
-          {isDraggingOver ? "Drop IFC file here" : "Drag & drop or double-click"}
+        <div className="p-3 space-y-2">
+          <div className="text-xs text-gray-500 dark:text-gray-400">
+            {isDraggingOver ? "Drop IFC file here" : "Drag & drop or double-click"}
+          </div>
+          <button
+            className="w-full flex items-center justify-center gap-1.5 text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 font-medium py-1.5 px-2 rounded border border-blue-200 dark:border-blue-700 hover:border-blue-400 dark:hover:border-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-all duration-150"
+            onClick={openModelSourceDialog}
+          >
+            <Cloud className="h-3.5 w-3.5" />
+            Load from Cloud
+          </button>
         </div>
       )}
       {!data.isLoading && !data.error && data.isEmptyNode && (
-        <div className="p-3">
+        <div className="p-3 space-y-2">
           <div className="text-xs text-orange-600 dark:text-orange-400 font-medium">
             File needs reload
           </div>
           {data.fileName && (
-            <div className="text-xs text-gray-500 dark:text-gray-400 mt-1 truncate" title={data.fileName}>
+            <div className="text-xs text-gray-500 dark:text-gray-400 truncate" title={data.fileName}>
               {data.fileName}
             </div>
           )}
-          <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+          <div className="text-xs text-gray-500 dark:text-gray-400">
             Drag & drop or double-click
           </div>
+          <button
+            className="w-full flex items-center justify-center gap-1.5 text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 font-medium py-1.5 px-2 rounded border border-blue-200 dark:border-blue-700 hover:border-blue-400 dark:hover:border-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-all duration-150"
+            onClick={openModelSourceDialog}
+          >
+            <Cloud className="h-3.5 w-3.5" />
+            Load from Cloud
+          </button>
         </div>
       )}
       <Handle
