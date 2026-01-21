@@ -23,7 +23,9 @@ import ReactFlow, {
 import "reactflow/dist/style.css";
 import { Sidebar } from "@/components/sidebar";
 import { PropertiesDialog } from "@/components/dialogs/properties-dialog";
-import { IfcNode } from "@/components/nodes/ifc-node";
+import { ModelSourceDialog } from "@/components/dialogs/model-source-dialog";
+import { IfcNode, OPEN_MODEL_SOURCE_EVENT } from "@/components/nodes/ifc-node";
+import type { CloudFile } from "@/lib/cloud-providers/types";
 import { GeometryNode } from "@/components/nodes/geometry-node";
 import { FilterNode } from "@/components/nodes/filter-node";
 import { TransformNode } from "@/components/nodes/transform-node";
@@ -147,12 +149,30 @@ function FlowWithProvider() {
     setShowGridState(gridSetting);
     setShowMinimapState(minimapSetting);
     setIsSettingsLoaded(true);
-    
+
     // Pre-warm Pyodide worker in background for faster first file load
     preloadWorker();
   }, []); // Only run once on mount
 
+  // Listen for model source dialog events from IFC nodes
+  useEffect(() => {
+    const handleOpenModelSource = (event: CustomEvent<{ nodeId: string }>) => {
+      setModelSourceTargetNodeId(event.detail.nodeId);
+      setModelSourceDialogOpen(true);
+    };
 
+    window.addEventListener(
+      OPEN_MODEL_SOURCE_EVENT,
+      handleOpenModelSource as EventListener
+    );
+
+    return () => {
+      window.removeEventListener(
+        OPEN_MODEL_SOURCE_EVENT,
+        handleOpenModelSource as EventListener
+      );
+    };
+  }, []);
 
   // Current workflow state
   const [currentWorkflow, setCurrentWorkflow] = useState<Workflow | null>(null);
@@ -192,6 +212,10 @@ function FlowWithProvider() {
   // Mobile placement mode state
   const [selectedNodeType, setSelectedNodeType] = useState<string | null>(null);
   const [placementMode, setPlacementMode] = useState(false);
+
+  // Model source dialog state
+  const [modelSourceDialogOpen, setModelSourceDialogOpen] = useState(false);
+  const [modelSourceTargetNodeId, setModelSourceTargetNodeId] = useState<string | null>(null);
 
   // Footer Pill Component (inside FlowWithProvider to access currentWorkflow)
   function FooterPill() {
@@ -832,6 +856,186 @@ function FlowWithProvider() {
     [nodes, edges, saveToHistory, setNodes, toast]
   );
 
+  // Handle file selection from model source dialog for existing node
+  const handleModelSourceFileSelected = useCallback(
+    async (file: File) => {
+      if (!modelSourceTargetNodeId) return;
+
+      const nodeId = modelSourceTargetNodeId;
+
+      // Update the target node with loading state
+      setNodes((nodes) =>
+        nodes.map((node) => {
+          if (node.id === nodeId) {
+            return {
+              ...node,
+              data: {
+                ...node.data,
+                label: file.name,
+                properties: { file: file.name },
+                isLoading: true,
+                model: null,
+                error: null,
+                isEmptyNode: false,
+              },
+            };
+          }
+          return node;
+        })
+      );
+
+      // Load the file
+      import("@/lib/ifc/file-uploader").then(({ handleFileUpload }) => {
+        handleFileUpload(
+          file,
+          (model) => {
+            setNodes((nodes) =>
+              nodes.map((node) =>
+                node.id === nodeId
+                  ? {
+                      ...node,
+                      data: {
+                        ...node.data,
+                        model: model,
+                        isLoading: false,
+                        error: null,
+                      },
+                    }
+                  : node
+              )
+            );
+            toast({
+              title: "IFC File Loaded",
+              description: `Successfully loaded ${file.name}`,
+            });
+          },
+          (error) => {
+            setNodes((nodes) =>
+              nodes.map((node) =>
+                node.id === nodeId
+                  ? {
+                      ...node,
+                      data: {
+                        ...node.data,
+                        isLoading: false,
+                        error: error.message || "Failed to load IFC",
+                      },
+                    }
+                  : node
+              )
+            );
+            toast({
+              title: "Error",
+              description: `Failed to load IFC file: ${error.message}`,
+              variant: "destructive",
+            });
+          },
+          (percentage, message) => {
+            console.log(`Loading ${file.name}: ${percentage}% - ${message}`);
+          }
+        );
+      });
+
+      setModelSourceDialogOpen(false);
+      setModelSourceTargetNodeId(null);
+    },
+    [modelSourceTargetNodeId, setNodes, toast]
+  );
+
+  // Handle cloud file selection from model source dialog
+  const handleModelSourceCloudFileSelected = useCallback(
+    async (cloudFile: CloudFile, data: ArrayBuffer) => {
+      if (!modelSourceTargetNodeId) return;
+
+      const nodeId = modelSourceTargetNodeId;
+
+      // Update the target node with loading state
+      setNodes((nodes) =>
+        nodes.map((node) => {
+          if (node.id === nodeId) {
+            return {
+              ...node,
+              data: {
+                ...node.data,
+                label: cloudFile.name,
+                properties: {
+                  file: cloudFile.name,
+                  cloudProvider: cloudFile.provider,
+                },
+                isLoading: true,
+                model: null,
+                error: null,
+                isEmptyNode: false,
+              },
+            };
+          }
+          return node;
+        })
+      );
+
+      // Convert ArrayBuffer to File for processing
+      const file = new File([data], cloudFile.name, {
+        type: "application/octet-stream",
+      });
+
+      // Load the file
+      import("@/lib/ifc/file-uploader").then(({ handleFileUpload }) => {
+        handleFileUpload(
+          file,
+          (model) => {
+            setNodes((nodes) =>
+              nodes.map((node) =>
+                node.id === nodeId
+                  ? {
+                      ...node,
+                      data: {
+                        ...node.data,
+                        model: model,
+                        isLoading: false,
+                        error: null,
+                      },
+                    }
+                  : node
+              )
+            );
+            toast({
+              title: "IFC File Loaded",
+              description: `Successfully loaded ${cloudFile.name} from ${cloudFile.provider}`,
+            });
+          },
+          (error) => {
+            setNodes((nodes) =>
+              nodes.map((node) =>
+                node.id === nodeId
+                  ? {
+                      ...node,
+                      data: {
+                        ...node.data,
+                        isLoading: false,
+                        error: error.message || "Failed to load IFC",
+                      },
+                    }
+                  : node
+              )
+            );
+            toast({
+              title: "Error",
+              description: `Failed to load IFC file: ${error.message}`,
+              variant: "destructive",
+            });
+          },
+          (percentage, message) => {
+            console.log(`Loading ${cloudFile.name}: ${percentage}% - ${message}`);
+          }
+        );
+      });
+
+      setModelSourceDialogOpen(false);
+      setModelSourceTargetNodeId(null);
+    },
+    [modelSourceTargetNodeId, setNodes, toast]
+  );
+
   const handleSaveWorkflow = useCallback(
     (name: string, flowData: any) => {
       // Implementation for saving workflow
@@ -1371,6 +1575,17 @@ function FlowWithProvider() {
           }
         }}
         setNodes={setNodes as React.Dispatch<React.SetStateAction<any[]>>}
+      />
+      <ModelSourceDialog
+        open={modelSourceDialogOpen}
+        onOpenChange={(open) => {
+          setModelSourceDialogOpen(open);
+          if (!open) {
+            setModelSourceTargetNodeId(null);
+          }
+        }}
+        onFileSelected={handleModelSourceFileSelected}
+        onCloudFileSelected={handleModelSourceCloudFileSelected}
       />
       <Toaster />
     </div>
