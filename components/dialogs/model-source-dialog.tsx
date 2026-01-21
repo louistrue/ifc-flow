@@ -20,7 +20,8 @@ import {
   FolderOpen,
   AlertCircle,
   Loader2,
-  Settings,
+  ExternalLink,
+  Check,
 } from "lucide-react"
 import { useCloudProviderSettings } from "@/lib/cloud-providers/settings"
 import { openDropboxChooser } from "@/lib/cloud-providers/dropbox"
@@ -33,7 +34,6 @@ interface ModelSourceDialogProps {
   onOpenChange: (open: boolean) => void
   onFileSelected: (file: File) => void
   onCloudFileSelected: (cloudFile: CloudFile, data: ArrayBuffer) => void
-  onOpenSettings?: () => void
 }
 
 export function ModelSourceDialog({
@@ -41,7 +41,6 @@ export function ModelSourceDialog({
   onOpenChange,
   onFileSelected,
   onCloudFileSelected,
-  onOpenSettings,
 }: ModelSourceDialogProps) {
   const [activeTab, setActiveTab] = useState("local")
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
@@ -49,7 +48,26 @@ export function ModelSourceDialog({
   const [loadingMessage, setLoadingMessage] = useState("")
   const [error, setError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
-  const { settings, hasValidConfig } = useCloudProviderSettings()
+  const {
+    settings,
+    updateDropboxSettings,
+    updateDaluxSettings,
+    updateBuildagilSettings,
+    hasValidConfig,
+  } = useCloudProviderSettings()
+
+  // Local form state for cloud providers
+  const [dropboxAppKey, setDropboxAppKey] = useState(settings.dropbox?.appKey || "")
+  const [daluxClientId, setDaluxClientId] = useState(settings.dalux?.clientId || "")
+  const [daluxClientSecret, setDaluxClientSecret] = useState(settings.dalux?.clientSecret || "")
+  const [buildagilServerUrl, setBuildagilServerUrl] = useState(settings.buildagil?.serverUrl || "")
+  const [buildagilClientId, setBuildagilClientId] = useState(settings.buildagil?.clientId || "")
+  const [buildagilClientSecret, setBuildagilClientSecret] = useState(settings.buildagil?.clientSecret || "")
+
+  // Track if credentials are saved
+  const [dropboxSaved, setDropboxSaved] = useState(hasValidConfig('dropbox'))
+  const [daluxSaved, setDaluxSaved] = useState(hasValidConfig('dalux'))
+  const [buildagilSaved, setBuildagilSaved] = useState(hasValidConfig('buildagil'))
 
   const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
     setError(null)
@@ -99,9 +117,33 @@ export function ModelSourceDialog({
     },
   })
 
+  // Save handlers
+  const handleSaveDropbox = () => {
+    updateDropboxSettings({ appKey: dropboxAppKey.trim() })
+    setDropboxSaved(true)
+  }
+
+  const handleSaveDalux = () => {
+    updateDaluxSettings({
+      clientId: daluxClientId.trim(),
+      clientSecret: daluxClientSecret.trim(),
+      apiUrl: "https://api.dalux.com/build/v1",
+    })
+    setDaluxSaved(true)
+  }
+
+  const handleSaveBuildagil = () => {
+    updateBuildagilSettings({
+      serverUrl: buildagilServerUrl.trim(),
+      clientId: buildagilClientId.trim(),
+      clientSecret: buildagilClientSecret.trim(),
+    })
+    setBuildagilSaved(true)
+  }
+
   const handleDropboxClick = () => {
     if (!settings.dropbox?.appKey) {
-      setError('Dropbox is not configured. Please add your App Key in settings.')
+      setError('Please save your Dropbox App Key first')
       return
     }
     setError(null)
@@ -115,26 +157,6 @@ export function ModelSourceDialog({
     handleReset()
     onOpenChange(false)
   }
-
-  const renderProviderNotConfigured = (provider: string, configUrl?: string) => (
-    <div className="flex flex-col items-center justify-center py-8 space-y-4">
-      <AlertCircle className="h-12 w-12 text-muted-foreground" />
-      <div className="text-center space-y-2">
-        <p className="text-sm text-muted-foreground">
-          {provider} is not configured yet.
-        </p>
-        <p className="text-xs text-muted-foreground">
-          Add your API credentials in Settings to use this provider.
-        </p>
-      </div>
-      {onOpenSettings && (
-        <Button variant="outline" size="sm" onClick={onOpenSettings}>
-          <Settings className="h-4 w-4 mr-2" />
-          Open Settings
-        </Button>
-      )}
-    </div>
-  )
 
   return (
     <Dialog
@@ -189,6 +211,7 @@ export function ModelSourceDialog({
           )}
 
           <div className="flex-1 overflow-auto mt-4">
+            {/* Local File Tab */}
             <TabsContent value="local" className="mt-0 h-full">
               <div className="space-y-4">
                 <div className="space-y-2">
@@ -222,77 +245,246 @@ export function ModelSourceDialog({
               </div>
             </TabsContent>
 
+            {/* Dropbox Tab */}
             <TabsContent value="dropbox" className="mt-0 h-full">
               <div className="space-y-4">
-                <p className="text-sm text-muted-foreground">
-                  Browse your Dropbox to select an IFC file.
-                </p>
-
-                {hasValidConfig('dropbox') ? (
-                  <div className="flex flex-col items-center justify-center py-8 space-y-4">
-                    <Cloud className="h-16 w-16 text-blue-500" />
+                {!dropboxSaved || !hasValidConfig('dropbox') ? (
+                  // Configuration form
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-2 text-blue-600">
+                      <Cloud className="h-5 w-5" />
+                      <span className="font-medium">Connect to Dropbox</span>
+                    </div>
                     <p className="text-sm text-muted-foreground">
-                      Click the button below to open Dropbox file picker
+                      Enter your Dropbox App Key to browse and load IFC files.
                     </p>
-                    <Button onClick={handleDropboxClick} size="lg">
-                      <Cloud className="h-4 w-4 mr-2" />
-                      Choose from Dropbox
-                    </Button>
+                    <div className="space-y-2">
+                      <Label htmlFor="dropbox-key">App Key</Label>
+                      <Input
+                        id="dropbox-key"
+                        type="text"
+                        placeholder="Enter your Dropbox App Key"
+                        value={dropboxAppKey}
+                        onChange={(e) => setDropboxAppKey(e.target.value)}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Get your App Key from the{" "}
+                        <a
+                          href="https://www.dropbox.com/developers/apps"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-primary hover:underline inline-flex items-center gap-0.5"
+                        >
+                          Dropbox Developer Console
+                          <ExternalLink className="h-3 w-3" />
+                        </a>
+                      </p>
+                    </div>
+                    <div className="flex justify-end gap-2">
+                      <Button variant="outline" onClick={() => onOpenChange(false)}>
+                        Cancel
+                      </Button>
+                      <Button onClick={handleSaveDropbox} disabled={!dropboxAppKey.trim()}>
+                        <Check className="h-4 w-4 mr-2" />
+                        Save & Continue
+                      </Button>
+                    </div>
                   </div>
                 ) : (
-                  renderProviderNotConfigured('Dropbox')
+                  // Dropbox picker
+                  <div className="space-y-4">
+                    <div className="flex flex-col items-center justify-center py-8 space-y-4">
+                      <Cloud className="h-16 w-16 text-blue-500" />
+                      <p className="text-sm text-muted-foreground text-center">
+                        Click the button below to open Dropbox and select an IFC file
+                      </p>
+                      <Button onClick={handleDropboxClick} size="lg">
+                        <Cloud className="h-4 w-4 mr-2" />
+                        Choose from Dropbox
+                      </Button>
+                      <button
+                        className="text-xs text-muted-foreground hover:text-foreground"
+                        onClick={() => setDropboxSaved(false)}
+                      >
+                        Change App Key
+                      </button>
+                    </div>
+                    <div className="flex justify-end">
+                      <Button variant="outline" onClick={() => onOpenChange(false)}>
+                        Cancel
+                      </Button>
+                    </div>
+                  </div>
                 )}
-
-                <div className="flex justify-end">
-                  <Button variant="outline" onClick={() => onOpenChange(false)}>
-                    Cancel
-                  </Button>
-                </div>
               </div>
             </TabsContent>
 
+            {/* Dalux Tab */}
             <TabsContent value="dalux" className="mt-0 h-full">
-              {hasValidConfig('dalux') ? (
-                <DaluxBrowser
-                  config={settings.dalux!}
-                  onFileSelected={handleCloudFileSelected}
-                  onError={(err) => setError(err.message)}
-                  onCancel={() => onOpenChange(false)}
-                />
-              ) : (
+              {!daluxSaved || !hasValidConfig('dalux') ? (
+                // Configuration form
                 <div className="space-y-4">
+                  <div className="flex items-center gap-2 text-orange-600">
+                    <Building2 className="h-5 w-5" />
+                    <span className="font-medium">Connect to Dalux Build</span>
+                  </div>
                   <p className="text-sm text-muted-foreground">
-                    Connect to Dalux Build to access your BIM models.
+                    Enter your Dalux API credentials to browse and load IFC models.
                   </p>
-                  {renderProviderNotConfigured('Dalux')}
-                  <div className="flex justify-end">
+                  <div className="space-y-3">
+                    <div className="space-y-2">
+                      <Label htmlFor="dalux-client-id">Client ID</Label>
+                      <Input
+                        id="dalux-client-id"
+                        type="text"
+                        placeholder="Enter your Dalux Client ID"
+                        value={daluxClientId}
+                        onChange={(e) => setDaluxClientId(e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="dalux-client-secret">Client Secret</Label>
+                      <Input
+                        id="dalux-client-secret"
+                        type="password"
+                        placeholder="Enter your Dalux Client Secret"
+                        value={daluxClientSecret}
+                        onChange={(e) => setDaluxClientSecret(e.target.value)}
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Request API credentials from{" "}
+                      <a
+                        href="https://support.dalux.com/hc/en-us/articles/9544314902556-Dalux-API"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-primary hover:underline inline-flex items-center gap-0.5"
+                      >
+                        Dalux Support
+                        <ExternalLink className="h-3 w-3" />
+                      </a>
+                    </p>
+                  </div>
+                  <div className="flex justify-end gap-2">
                     <Button variant="outline" onClick={() => onOpenChange(false)}>
                       Cancel
                     </Button>
+                    <Button
+                      onClick={handleSaveDalux}
+                      disabled={!daluxClientId.trim() || !daluxClientSecret.trim()}
+                    >
+                      <Check className="h-4 w-4 mr-2" />
+                      Save & Continue
+                    </Button>
                   </div>
+                </div>
+              ) : (
+                // Dalux browser
+                <div className="space-y-2">
+                  <div className="flex justify-end">
+                    <button
+                      className="text-xs text-muted-foreground hover:text-foreground"
+                      onClick={() => setDaluxSaved(false)}
+                    >
+                      Change credentials
+                    </button>
+                  </div>
+                  <DaluxBrowser
+                    config={settings.dalux!}
+                    onFileSelected={handleCloudFileSelected}
+                    onError={(err) => setError(err.message)}
+                    onCancel={() => onOpenChange(false)}
+                  />
                 </div>
               )}
             </TabsContent>
 
+            {/* Buildagil Tab */}
             <TabsContent value="buildagil" className="mt-0 h-full">
-              {hasValidConfig('buildagil') ? (
-                <BuildagilBrowser
-                  config={settings.buildagil!}
-                  onFileSelected={handleCloudFileSelected}
-                  onError={(err) => setError(err.message)}
-                  onCancel={() => onOpenChange(false)}
-                />
-              ) : (
+              {!buildagilSaved || !hasValidConfig('buildagil') ? (
+                // Configuration form
                 <div className="space-y-4">
+                  <div className="flex items-center gap-2 text-green-600">
+                    <FolderOpen className="h-5 w-5" />
+                    <span className="font-medium">Connect to Buildagil (OpenCDE)</span>
+                  </div>
                   <p className="text-sm text-muted-foreground">
-                    Connect to Buildagil (OpenCDE) to access your documents.
+                    Enter your Buildagil server details and API credentials.
                   </p>
-                  {renderProviderNotConfigured('Buildagil')}
-                  <div className="flex justify-end">
+                  <div className="space-y-3">
+                    <div className="space-y-2">
+                      <Label htmlFor="buildagil-server">Server URL</Label>
+                      <Input
+                        id="buildagil-server"
+                        type="url"
+                        placeholder="https://your-server.buildagil.com"
+                        value={buildagilServerUrl}
+                        onChange={(e) => setBuildagilServerUrl(e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="buildagil-client-id">Client ID</Label>
+                      <Input
+                        id="buildagil-client-id"
+                        type="text"
+                        placeholder="Enter your Client ID"
+                        value={buildagilClientId}
+                        onChange={(e) => setBuildagilClientId(e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="buildagil-client-secret">Client Secret</Label>
+                      <Input
+                        id="buildagil-client-secret"
+                        type="password"
+                        placeholder="Enter your Client Secret"
+                        value={buildagilClientSecret}
+                        onChange={(e) => setBuildagilClientSecret(e.target.value)}
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Uses the{" "}
+                      <a
+                        href="https://github.com/buildingSMART/OpenCDE-API"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-primary hover:underline inline-flex items-center gap-0.5"
+                      >
+                        OpenCDE API standard
+                        <ExternalLink className="h-3 w-3" />
+                      </a>
+                    </p>
+                  </div>
+                  <div className="flex justify-end gap-2">
                     <Button variant="outline" onClick={() => onOpenChange(false)}>
                       Cancel
                     </Button>
+                    <Button
+                      onClick={handleSaveBuildagil}
+                      disabled={!buildagilServerUrl.trim() || !buildagilClientId.trim() || !buildagilClientSecret.trim()}
+                    >
+                      <Check className="h-4 w-4 mr-2" />
+                      Save & Continue
+                    </Button>
                   </div>
+                </div>
+              ) : (
+                // Buildagil browser
+                <div className="space-y-2">
+                  <div className="flex justify-end">
+                    <button
+                      className="text-xs text-muted-foreground hover:text-foreground"
+                      onClick={() => setBuildagilSaved(false)}
+                    >
+                      Change credentials
+                    </button>
+                  </div>
+                  <BuildagilBrowser
+                    config={settings.buildagil!}
+                    onFileSelected={handleCloudFileSelected}
+                    onError={(err) => setError(err.message)}
+                    onCancel={() => onOpenChange(false)}
+                  />
                 </div>
               )}
             </TabsContent>
